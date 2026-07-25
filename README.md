@@ -21,11 +21,18 @@
 
 ## 快速使用
 
+不需要克隆 Git 仓库。先下载安装器：
+
 ```bash
-git clone https://github.com/transinfosh/frappe_deploy.git
-cd frappe_deploy
-sudo bash deploy.sh
+curl -fsSL \
+  https://raw.githubusercontent.com/transinfosh/frappe_deploy/main/install.sh \
+  -o /tmp/install-frappe-deploy.sh
+sudo bash /tmp/install-frappe-deploy.sh
+sudo frappe-deploy
 ```
+
+安装器会检查下载结果的 Bash 语法，然后把部署脚本安装到
+`/usr/local/sbin/frappe-deploy`。建议在执行前先查看下载的安装器内容。
 
 默认镜像为：
 
@@ -50,11 +57,33 @@ Compose 的 `.env` 文件，密码应使用字母、数字以及
 部署前可先预览：
 
 ```bash
-bash deploy.sh --dry-run
+frappe-deploy --dry-run
 ```
 
 `--dry-run` 会把生成结果留在 `/tmp/frappe-deploy-dry-run.*` 中供检查，不会改动
 目标部署目录、安装软件或启动容器。
+
+## 更新部署工具
+
+服务器不需要执行 `git pull`。重新下载安装器即可把
+`/usr/local/sbin/frappe-deploy` 更新到最新的 `main`：
+
+```bash
+curl -fsSL \
+  https://raw.githubusercontent.com/transinfosh/frappe_deploy/main/install.sh \
+  -o /tmp/install-frappe-deploy.sh
+sudo bash /tmp/install-frappe-deploy.sh
+```
+
+更新部署工具不会自动升级正在运行的应用。更新完成后再执行：
+
+```bash
+sudo frappe-deploy
+```
+
+脚本会读取 `/opt/frappe-deploy` 中的现有状态；输入新的应用镜像标签才会执行镜像
+升级。如果需要固定部署工具版本，可以把 `FRAPPE_DEPLOY_REF` 设置为仓库中实际存在
+的 Tag 或 commit。也可以通过 `FRAPPE_DEPLOY_INSTALL_PATH` 修改安装位置。
 
 ## 数据库模式
 
