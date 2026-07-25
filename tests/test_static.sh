@@ -82,3 +82,12 @@ if validate_private_subnet "8.8.8.0/24"; then
 	echo "未拒绝公网 Docker 子网" >&2
 	exit 1
 fi
+
+database_password_is_valid "postgres"
+if database_password_is_valid ""; then
+	echo "错误地接受了空数据库密码" >&2
+	exit 1
+fi
+prompt_database_password RETRIED_PASSWORD "测试数据库密码" "" \
+	<<< $'\npostgres' >/dev/null 2>&1
+[[ "$RETRIED_PASSWORD" == "postgres" ]]

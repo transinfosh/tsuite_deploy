@@ -126,6 +126,27 @@ prompt_secret() {
 	printf -v "$variable_name" '%s' "$value"
 }
 
+database_password_is_valid() {
+	local value="$1"
+	[[ -n "$value" && "$value" =~ ^[a-zA-Z0-9._~!@%^+=-]+$ ]]
+}
+
+prompt_database_password() {
+	local variable_name="$1"
+	local message="$2"
+	local default_value="${3:-}"
+	local candidate
+
+	while true; do
+		prompt_secret candidate "$message" "$default_value"
+		if database_password_is_valid "$candidate"; then
+			printf -v "$variable_name" '%s' "$candidate"
+			return
+		fi
+		warn "密码不能为空；可使用字母、数字以及 . _ ~ ! @ % ^ + = -，请重新输入"
+	done
+}
+
 confirm() {
 	local message="$1"
 	local default_answer="${2:-no}"
@@ -237,8 +258,6 @@ validate_inputs() {
 	fi
 	[[ "$DB_MODE" == "container" || "$DB_MODE" == "local" ]] || die "数据库模式无效"
 	[[ "$DB_ADMIN_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || die "数据库管理员用户名格式无效"
-	[[ "$DB_PASSWORD" =~ ^[a-zA-Z0-9._~!@%^+=-]{12,128}$ ]] ||
-		die "数据库密码需为 12-128 位，且不能包含空格、引号、反斜杠或美元符号"
 	validate_private_subnet "$DOCKER_SUBNET" || die "Docker 子网格式无效，必须是规范的私有 IPv4 子网"
 
 	local app
@@ -339,14 +358,17 @@ collect_deployment_settings() {
 
 	generated_db_password="$(random_secret)"
 	generated_admin_password="$(random_secret)"
-	if [[ -n "${EXISTING_DB_PASSWORD:-}" ]]; then
+	if database_password_is_valid "${EXISTING_DB_PASSWORD:-}"; then
 		DB_PASSWORD="$EXISTING_DB_PASSWORD"
 		if confirm "是否修改 PostgreSQL 管理密码？" "no"; then
-			prompt_secret DB_PASSWORD "新的 PostgreSQL 管理密码"
+			prompt_database_password DB_PASSWORD "新的 PostgreSQL 管理密码"
 			DB_PASSWORD_CHANGED=true
 		fi
 	else
-		prompt_secret DB_PASSWORD "PostgreSQL 管理密码" "$generated_db_password"
+		if [[ -n "${EXISTING_DB_PASSWORD:-}" ]]; then
+			warn "已有 PostgreSQL 管理密码包含不兼容字符，需要重新输入"
+		fi
+		prompt_database_password DB_PASSWORD "PostgreSQL 管理密码" "$generated_db_password"
 	fi
 	if "$EXISTING_DEPLOYMENT"; then
 		ADMIN_PASSWORD="$generated_admin_password"
