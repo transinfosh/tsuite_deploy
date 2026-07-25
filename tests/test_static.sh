@@ -23,11 +23,15 @@ export DB_PASSWORD="1234567890abcdef"
 export HTTP_PORT="8080"
 export DB_MODE="container"
 export DB_PORT="5432"
+export DB_ADMIN_USER="postgres"
 export BIND_ADDRESS="127.0.0.1"
 export DOCKER_SUBNET="172.30.0.0/24"
 export PROXY_ENABLED=false
 export SITE_NAME="project.localhost"
 export FRAPPE_DOCKER_COMMIT="test"
+# 由动态载入的 write_state 使用。
+# shellcheck disable=SC2034
+APP_LIST=(project_management)
 
 write_env_file
 write_generated_compose
@@ -48,4 +52,33 @@ assert document["networks"]["default"]["ipam"]["config"][0]["subnet"] == "172.30
 PY
 
 grep -q '^CUSTOM_IMAGE=ghcr.io/transinfosh/project_management$' "$fixture_dir/.env"
+grep -q '^PULL_POLICY=missing$' "$fixture_dir/.env"
 grep -q '^STATE_DB_MODE=container$' "$fixture_dir/deployment.state"
+grep -q '^STATE_IMAGE=ghcr.io/transinfosh/project_management:test$' "$fixture_dir/deployment.state"
+grep -q '^STATE_FRAPPE_DOCKER_COMMIT=test$' "$fixture_dir/deployment.state"
+
+EXISTING_DEPLOYMENT=false
+PREVIOUS_IMAGE=""
+PREVIOUS_FRAPPE_DOCKER_COMMIT=""
+EXISTING_DB_PASSWORD=""
+load_existing_deployment >/dev/null
+"$EXISTING_DEPLOYMENT"
+[[ "$PREVIOUS_IMAGE" == "ghcr.io/transinfosh/project_management:test" ]]
+[[ "$PREVIOUS_FRAPPE_DOCKER_COMMIT" == "test" ]]
+[[ "$EXISTING_DB_PASSWORD" == "1234567890abcdef" ]]
+
+export DRY_RUN=false
+create_upgrade_snapshot
+[[ -f "$ROLLBACK_DIR/.env" ]]
+[[ -f "$ROLLBACK_DIR/deployment.state" ]]
+[[ "$(cat "$ROLLBACK_DIR/frappe_docker.commit")" == "test" ]]
+
+validate_private_subnet "172.30.0.0/24"
+if validate_private_subnet "172.30.0.1/24"; then
+	echo "未拒绝非网络地址的 Docker 子网" >&2
+	exit 1
+fi
+if validate_private_subnet "8.8.8.0/24"; then
+	echo "未拒绝公网 Docker 子网" >&2
+	exit 1
+fi

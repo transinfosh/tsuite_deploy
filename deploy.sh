@@ -23,6 +23,11 @@ DRY_RUN=false
 ASSUME_YES=false
 SITE_CREATED=false
 TARGET_DEPLOY_DIR=""
+EXISTING_DEPLOYMENT=false
+PREVIOUS_IMAGE=""
+PREVIOUS_FRAPPE_DOCKER_COMMIT=""
+ROLLBACK_DIR=""
+DB_PASSWORD_CHANGED=false
 
 log() {
 	printf '\n\033[1;34m==>\033[0m %s\n' "$*"
@@ -32,9 +37,37 @@ warn() {
 	printf '\033[1;33m警告:\033[0m %s\n' "$*" >&2
 }
 
+print_failure_hint() {
+	if [[ -n "$ROLLBACK_DIR" ]]; then
+		warn "升级未完成，旧配置快照保存在 $ROLLBACK_DIR"
+		printf '恢复旧配置后重新运行部署脚本：\n' >&2
+		printf '  cp -a %q/.env %q/.env\n' "$ROLLBACK_DIR" "$DEPLOY_DIR" >&2
+		printf '  cp -a %q/compose.generated.yaml %q/compose.generated.yaml\n' \
+			"$ROLLBACK_DIR" "$DEPLOY_DIR" >&2
+		printf '  cp -a %q/deployment.state %q/deployment.state\n' "$ROLLBACK_DIR" "$DEPLOY_DIR" >&2
+		if [[ -f "$ROLLBACK_DIR/compose.proxy.yaml" ]]; then
+			printf '  cp -a %q/compose.proxy.yaml %q/compose.proxy.yaml\n' \
+				"$ROLLBACK_DIR" "$DEPLOY_DIR" >&2
+		else
+			printf '  rm -f %q/compose.proxy.yaml\n' "$DEPLOY_DIR" >&2
+		fi
+		printf "  git -C %q/frappe_docker checkout --detach \"\$(cat %q/frappe_docker.commit)\"\n" \
+			"$DEPLOY_DIR" "$ROLLBACK_DIR" >&2
+		printf '数据库备份不会自动恢复，请确认迁移影响后再决定是否恢复数据库。\n' >&2
+	fi
+}
+
 die() {
 	printf '\033[1;31m错误:\033[0m %s\n' "$*" >&2
+	print_failure_hint
 	exit 1
+}
+
+on_error() {
+	local exit_code=$?
+	trap - ERR
+	print_failure_hint
+	exit "$exit_code"
 }
 
 run() {
@@ -84,7 +117,7 @@ prompt_secret() {
 	local value
 
 	if [[ -n "$default_value" ]]; then
-		read -r -s -p "$message（留空使用自动生成值）: " value
+		read -r -s -p "$message（留空使用默认值）: " value
 		value="${value:-$default_value}"
 	else
 		read -r -s -p "$message: " value
@@ -112,7 +145,61 @@ confirm() {
 }
 
 random_secret() {
-	openssl rand -hex 18
+	od -An -N18 -tx1 /dev/urandom | tr -d ' \n'
+}
+
+validate_private_subnet() {
+	local subnet="$1"
+	local address="${subnet%/*}"
+	local prefix="${subnet##*/}"
+	local first second third fourth
+	[[ "$subnet" == */* && "$prefix" =~ ^[0-9]+$ ]] || return 1
+	prefix=$((10#$prefix))
+	((prefix >= 8 && prefix <= 30)) || return 1
+	IFS=. read -r first second third fourth <<<"$address"
+	local octet
+	for octet in "$first" "$second" "$third" "$fourth"; do
+		[[ "$octet" =~ ^[0-9]+$ ]] && ((10#$octet <= 255)) || return 1
+	done
+	first=$((10#$first))
+	second=$((10#$second))
+	third=$((10#$third))
+	fourth=$((10#$fourth))
+
+	local address_number=$(((first << 24) | (second << 16) | (third << 8) | fourth))
+	local host_mask=$(((1 << (32 - prefix)) - 1))
+	(( (address_number & host_mask) == 0 )) || return 1
+	((first == 10)) ||
+		((first == 172 && second >= 16 && second <= 31)) ||
+		((first == 192 && second == 168))
+}
+
+read_config_value() {
+	local file="$1"
+	local key="$2"
+	[[ -f "$file" ]] || return 0
+	awk -F= -v key="$key" '$1 == key {print substr($0, index($0, "=") + 1); exit}' "$file"
+}
+
+load_existing_deployment() {
+	local state_file="$DEPLOY_DIR/deployment.state"
+	local env_file="$DEPLOY_DIR/.env"
+	[[ -f "$state_file" && -f "$env_file" ]] || return 0
+
+	EXISTING_DEPLOYMENT=true
+	PREVIOUS_IMAGE="$(read_config_value "$state_file" STATE_IMAGE)"
+	PREVIOUS_FRAPPE_DOCKER_COMMIT="$(read_config_value "$state_file" STATE_FRAPPE_DOCKER_COMMIT)"
+	EXISTING_SITE_NAME="$(read_config_value "$state_file" STATE_SITE_NAME)"
+	EXISTING_DB_MODE="$(read_config_value "$state_file" STATE_DB_MODE)"
+	EXISTING_DB_PORT="$(read_config_value "$state_file" STATE_DB_PORT)"
+	EXISTING_DB_ADMIN_USER="$(read_config_value "$state_file" STATE_DB_ADMIN_USER)"
+	EXISTING_BIND_ADDRESS="$(read_config_value "$state_file" STATE_BIND_ADDRESS)"
+	EXISTING_HTTP_PORT="$(read_config_value "$state_file" STATE_HTTP_PORT)"
+	EXISTING_DOCKER_SUBNET="$(read_config_value "$state_file" STATE_DOCKER_SUBNET)"
+	EXISTING_APPS="$(read_config_value "$state_file" STATE_APPS)"
+	EXISTING_DB_PASSWORD="$(read_config_value "$env_file" DB_PASSWORD)"
+
+	log "检测到已有部署，将保留原密码和基础设施版本作为默认值"
 }
 
 require_ubuntu() {
@@ -137,6 +224,10 @@ validate_inputs() {
 	[[ "$DEPLOY_DIR" == /* ]] || die "部署目录必须是绝对路径"
 	[[ "$IMAGE" =~ ^[a-zA-Z0-9._:/-]+(:[a-zA-Z0-9._-]+)?$ ]] || die "镜像名称格式无效"
 	[[ "$IMAGE" != *@* ]] || die "暂不支持 digest 格式，请使用镜像标签"
+	[[ "$FRAPPE_DOCKER_REPO" =~ ^(https://|ssh://|git@)[^[:space:]]+$ ]] ||
+		die "frappe_docker 仓库地址格式无效"
+	[[ "$FRAPPE_DOCKER_REF" =~ ^[a-zA-Z0-9][a-zA-Z0-9._/-]*$ ]] ||
+		die "frappe_docker 分支、标签或提交格式无效"
 	[[ "$SITE_NAME" =~ ^[a-zA-Z0-9.-]+$ ]] || die "站点名称只能包含字母、数字、点和连字符"
 	if [[ ! "$HTTP_PORT" =~ ^[0-9]+$ ]] || ((HTTP_PORT < 1 || HTTP_PORT > 65535)); then
 		die "HTTP 端口无效"
@@ -148,14 +239,7 @@ validate_inputs() {
 	[[ "$DB_ADMIN_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || die "数据库管理员用户名格式无效"
 	[[ "$DB_PASSWORD" =~ ^[a-zA-Z0-9._~!@%^+=-]{12,128}$ ]] ||
 		die "数据库密码需为 12-128 位，且不能包含空格、引号、反斜杠或美元符号"
-	python3 - "$DOCKER_SUBNET" <<'PY' || die "Docker 子网格式无效"
-import ipaddress
-import sys
-
-network = ipaddress.ip_network(sys.argv[1], strict=True)
-if not network.is_private:
-    raise SystemExit(1)
-PY
+	validate_private_subnet "$DOCKER_SUBNET" || die "Docker 子网格式无效，必须是规范的私有 IPv4 子网"
 
 	local app
 	for app in "${APP_LIST[@]}"; do
@@ -214,21 +298,28 @@ collect_deployment_settings() {
 	local db_choice_default="1"
 	local generated_db_password
 	local generated_admin_password
+	local image_default
+	local frappe_docker_ref_default
 
 	prompt DEPLOY_DIR "部署目录" "$DEFAULT_DEPLOY_DIR"
-	prompt IMAGE "应用镜像" "$DEFAULT_IMAGE"
-	prompt APPS_INPUT "需要安装的应用，多个应用用逗号分隔" "$DEFAULT_APPS"
-	prompt SITE_NAME "Frappe 站点名称（通常使用域名）" "$DEFAULT_SITE_NAME"
-	prompt BIND_ADDRESS "HTTP 监听地址；使用 0.0.0.0 可直接对外开放" "$DEFAULT_BIND_ADDRESS"
-	prompt HTTP_PORT "HTTP 端口" "$DEFAULT_HTTP_PORT"
+	load_existing_deployment
+	image_default="${PREVIOUS_IMAGE:-$DEFAULT_IMAGE}"
+	frappe_docker_ref_default="${PREVIOUS_FRAPPE_DOCKER_COMMIT:-$DEFAULT_FRAPPE_DOCKER_REF}"
+
+	prompt IMAGE "应用镜像（修改标签即可升级）" "$image_default"
+	prompt APPS_INPUT "需要安装的应用，多个应用用逗号分隔" "${EXISTING_APPS:-$DEFAULT_APPS}"
+	prompt SITE_NAME "Frappe 站点名称（通常使用域名）" "${EXISTING_SITE_NAME:-$DEFAULT_SITE_NAME}"
+	prompt BIND_ADDRESS "HTTP 监听地址；使用 0.0.0.0 可直接对外开放" \
+		"${EXISTING_BIND_ADDRESS:-$DEFAULT_BIND_ADDRESS}"
+	prompt HTTP_PORT "HTTP 端口" "${EXISTING_HTTP_PORT:-$DEFAULT_HTTP_PORT}"
 	prompt FRAPPE_DOCKER_REPO "frappe_docker 仓库地址" "$DEFAULT_FRAPPE_DOCKER_REPO"
-	prompt FRAPPE_DOCKER_REF "frappe_docker 分支、标签或提交" "$DEFAULT_FRAPPE_DOCKER_REF"
-	prompt DOCKER_SUBNET "部署专用 Docker 子网" "$DEFAULT_DOCKER_SUBNET"
+	prompt FRAPPE_DOCKER_REF "frappe_docker 分支、标签或提交" "$frappe_docker_ref_default"
+	prompt DOCKER_SUBNET "部署专用 Docker 子网" "${EXISTING_DOCKER_SUBNET:-$DEFAULT_DOCKER_SUBNET}"
 
 	printf '\nPostgreSQL 部署方式：\n'
 	printf '  1) PostgreSQL 容器（推荐，迁移和备份更简单）\n'
 	printf '  2) 安装在 Ubuntu 本机\n'
-	if [[ "$DEFAULT_DB_MODE" == "local" ]]; then
+	if [[ "${EXISTING_DB_MODE:-$DEFAULT_DB_MODE}" == "local" ]]; then
 		db_choice_default="2"
 	fi
 	read -r -p "请选择 [$db_choice_default]: " db_choice
@@ -238,17 +329,30 @@ collect_deployment_settings() {
 		*) die "数据库选项无效" ;;
 	esac
 
-	prompt DB_PORT "PostgreSQL 端口" "$DEFAULT_DB_PORT"
+	prompt DB_PORT "PostgreSQL 端口" "${EXISTING_DB_PORT:-$DEFAULT_DB_PORT}"
 	if [[ "$DB_MODE" == "local" ]]; then
-		prompt DB_ADMIN_USER "用于创建站点数据库的 PostgreSQL 管理用户" "$DEFAULT_DB_ADMIN_USER"
+		prompt DB_ADMIN_USER "用于创建站点数据库的 PostgreSQL 管理用户" \
+			"${EXISTING_DB_ADMIN_USER:-$DEFAULT_DB_ADMIN_USER}"
 	else
 		DB_ADMIN_USER="postgres"
 	fi
 
 	generated_db_password="$(random_secret)"
 	generated_admin_password="$(random_secret)"
-	prompt_secret DB_PASSWORD "PostgreSQL 管理密码" "$generated_db_password"
-	prompt_secret ADMIN_PASSWORD "Frappe Administrator 初始密码" "$generated_admin_password"
+	if [[ -n "${EXISTING_DB_PASSWORD:-}" ]]; then
+		DB_PASSWORD="$EXISTING_DB_PASSWORD"
+		if confirm "是否修改 PostgreSQL 管理密码？" "no"; then
+			prompt_secret DB_PASSWORD "新的 PostgreSQL 管理密码"
+			DB_PASSWORD_CHANGED=true
+		fi
+	else
+		prompt_secret DB_PASSWORD "PostgreSQL 管理密码" "$generated_db_password"
+	fi
+	if "$EXISTING_DEPLOYMENT"; then
+		ADMIN_PASSWORD="$generated_admin_password"
+	else
+		prompt_secret ADMIN_PASSWORD "Frappe Administrator 初始密码" "$generated_admin_password"
+	fi
 
 	parse_apps
 	split_image
@@ -272,6 +376,14 @@ show_summary() {
 	printf '  Docker 子网: %s\n' "$DOCKER_SUBNET"
 	printf '  代理: %s\n' "$PROXY_ENABLED"
 	printf '  frappe_docker: %s @ %s\n' "$FRAPPE_DOCKER_REPO" "$FRAPPE_DOCKER_REF"
+	if "$EXISTING_DEPLOYMENT"; then
+		printf '  当前镜像: %s\n' "${PREVIOUS_IMAGE:-未知}"
+		if [[ "$PREVIOUS_IMAGE" != "$IMAGE_REPOSITORY:$IMAGE_TAG" ]]; then
+			printf '  操作类型: 镜像升级\n'
+		else
+			printf '  操作类型: 使用同一镜像重新部署\n'
+		fi
+	fi
 
 	if [[ "$BIND_ADDRESS" == "0.0.0.0" ]]; then
 		warn "Docker 发布端口可能绕过 UFW；请使用云防火墙或 DOCKER-USER 链限制访问"
@@ -329,6 +441,8 @@ apply_docker_proxy() {
 		return
 	fi
 	install -d -m 0755 "$dropin_dir"
+	local desired_dropin
+	desired_dropin="$(mktemp /tmp/frappe-deploy-docker-proxy.XXXXXX)"
 	{
 		printf '[Service]\n'
 		[[ -z "$HTTP_PROXY_VALUE" ]] ||
@@ -336,8 +450,14 @@ apply_docker_proxy() {
 		[[ -z "$HTTPS_PROXY_VALUE" ]] ||
 			printf 'Environment="HTTPS_PROXY=%s"\n' "$(systemd_escape "$HTTPS_PROXY_VALUE")"
 		printf 'Environment="NO_PROXY=%s"\n' "$(systemd_escape "$NO_PROXY_VALUE")"
-	} >"$dropin"
-	chmod 600 "$dropin"
+	} >"$desired_dropin"
+	if [[ -f "$dropin" ]] && cmp -s "$desired_dropin" "$dropin"; then
+		rm -f "$desired_dropin"
+		log "Docker 代理配置未变化，无需重启 Docker"
+		return
+	fi
+	install -m 0600 "$desired_dropin" "$dropin"
+	rm -f "$desired_dropin"
 	systemctl daemon-reload
 	systemctl restart docker
 }
@@ -415,23 +535,42 @@ compose_args_from_state() {
 }
 
 backup_existing_site() {
-	local state_file="$DEPLOY_DIR/deployment.state"
-	[[ -f "$state_file" && -f "$DEPLOY_DIR/frappe_docker/compose.yaml" ]] || return 0
+	"$DRY_RUN" && return 0
+	"$EXISTING_DEPLOYMENT" || return 0
+	[[ -f "$DEPLOY_DIR/frappe_docker/compose.yaml" ]] || return 0
 
-	# 文件由本脚本生成且仅 root 可写。
-	# shellcheck disable=SC1090
-	. "$state_file"
+	STATE_DB_MODE="${EXISTING_DB_MODE:-container}"
 	compose_args_from_state "$DEPLOY_DIR"
 	if docker compose "${COMPOSE_ARGS[@]}" ps --status running backend --quiet 2>/dev/null |
 		grep -q .; then
 		if ! docker compose "${COMPOSE_ARGS[@]}" exec -T backend \
-			test -f "/home/frappe/frappe-bench/sites/${STATE_SITE_NAME:-$SITE_NAME}/site_config.json"; then
+			test -f "/home/frappe/frappe-bench/sites/${EXISTING_SITE_NAME:-$SITE_NAME}/site_config.json"; then
 			return
 		fi
-		log "升级前备份站点 ${STATE_SITE_NAME:-$SITE_NAME}"
+		log "升级前备份站点 ${EXISTING_SITE_NAME:-$SITE_NAME}"
 		run docker compose "${COMPOSE_ARGS[@]}" exec -T backend \
-			bench --site "${STATE_SITE_NAME:-$SITE_NAME}" backup --with-files
+			bench --site "${EXISTING_SITE_NAME:-$SITE_NAME}" backup --with-files
+	else
+		log "后端当前未运行，使用一次性容器备份站点 ${EXISTING_SITE_NAME:-$SITE_NAME}"
+		run docker compose "${COMPOSE_ARGS[@]}" run --rm backend \
+			bench --site "${EXISTING_SITE_NAME:-$SITE_NAME}" backup --with-files
 	fi
+}
+
+create_upgrade_snapshot() {
+	"$DRY_RUN" && return 0
+	"$EXISTING_DEPLOYMENT" || return 0
+
+	ROLLBACK_DIR="$DEPLOY_DIR/rollback/$(date -u +%Y%m%dT%H%M%SZ)"
+	install -d -m 0700 "$ROLLBACK_DIR"
+	local file
+	for file in .env compose.generated.yaml compose.proxy.yaml deployment.state; do
+		if [[ -f "$DEPLOY_DIR/$file" ]]; then
+			cp -a "$DEPLOY_DIR/$file" "$ROLLBACK_DIR/$file"
+		fi
+	done
+	printf '%s\n' "$PREVIOUS_FRAPPE_DOCKER_COMMIT" >"$ROLLBACK_DIR/frappe_docker.commit"
+	chmod 600 "$ROLLBACK_DIR/frappe_docker.commit"
 }
 
 download_frappe_docker() {
@@ -505,7 +644,7 @@ write_env_file() {
 	{
 		printf 'CUSTOM_IMAGE=%s\n' "$IMAGE_REPOSITORY"
 		printf 'CUSTOM_TAG=%s\n' "$IMAGE_TAG"
-		printf 'PULL_POLICY=always\n'
+		printf 'PULL_POLICY=missing\n'
 		printf 'RESTART_POLICY=unless-stopped\n'
 		printf 'DB_PASSWORD=%s\n' "$DB_PASSWORD"
 		printf 'HTTP_PUBLISH_PORT=%s\n' "$HTTP_PORT"
@@ -586,11 +725,19 @@ write_proxy_compose() {
 
 write_state() {
 	local state_file="$DEPLOY_DIR/deployment.state"
+	local apps_csv
+	apps_csv="$(IFS=,; printf '%s' "${APP_LIST[*]}")"
 	{
-		printf 'STATE_DB_MODE=%q\n' "$DB_MODE"
-		printf 'STATE_SITE_NAME=%q\n' "$SITE_NAME"
-		printf 'STATE_IMAGE=%q\n' "$IMAGE_REPOSITORY:$IMAGE_TAG"
-		printf 'STATE_FRAPPE_DOCKER_COMMIT=%q\n' "${FRAPPE_DOCKER_COMMIT:-dry-run}"
+		printf 'STATE_DB_MODE=%s\n' "$DB_MODE"
+		printf 'STATE_DB_PORT=%s\n' "$DB_PORT"
+		printf 'STATE_DB_ADMIN_USER=%s\n' "$DB_ADMIN_USER"
+		printf 'STATE_SITE_NAME=%s\n' "$SITE_NAME"
+		printf 'STATE_IMAGE=%s\n' "$IMAGE_REPOSITORY:$IMAGE_TAG"
+		printf 'STATE_APPS=%s\n' "$apps_csv"
+		printf 'STATE_BIND_ADDRESS=%s\n' "$BIND_ADDRESS"
+		printf 'STATE_HTTP_PORT=%s\n' "$HTTP_PORT"
+		printf 'STATE_DOCKER_SUBNET=%s\n' "$DOCKER_SUBNET"
+		printf 'STATE_FRAPPE_DOCKER_COMMIT=%s\n' "${FRAPPE_DOCKER_COMMIT:-dry-run}"
 	} >"$state_file"
 	chmod 600 "$state_file"
 }
@@ -639,11 +786,20 @@ site_exists() {
 		test -f "/home/frappe/frappe-bench/sites/$SITE_NAME/site_config.json"
 }
 
+update_container_postgres_password() {
+	[[ "$DB_MODE" == "container" && "$DB_PASSWORD_CHANGED" == true ]] || return 0
+	log "更新 PostgreSQL 容器管理密码"
+	docker compose "${COMPOSE_ARGS[@]}" exec -T db \
+		psql -U postgres -v ON_ERROR_STOP=1 \
+		-c "ALTER ROLE postgres PASSWORD '$DB_PASSWORD';"
+}
+
 install_or_upgrade_site() {
 	log "启动 Frappe 服务"
 	run docker compose "${COMPOSE_ARGS[@]}" up -d
 	"$DRY_RUN" && return
 	wait_for_backend
+	update_container_postgres_password
 
 	if ! site_exists; then
 		log "创建站点 $SITE_NAME"
@@ -695,7 +851,8 @@ verify_deployment() {
 			sleep 2
 		fi
 	done
-	warn "容器已启动，但 HTTP 健康检查未通过，请运行部署目录中的状态命令排查"
+	warn "容器已启动，但 HTTP 健康检查未通过"
+	return 1
 }
 
 print_result() {
@@ -720,6 +877,7 @@ print_result() {
 }
 
 main() {
+	trap on_error ERR
 	while (($#)); do
 		case "$1" in
 			--dry-run) DRY_RUN=true ;;
@@ -744,18 +902,19 @@ main() {
 	apply_apt_proxy
 	install_base_packages
 	install_docker
-	apply_docker_proxy
 	backup_existing_site
+	create_upgrade_snapshot
+	apply_docker_proxy
+	login_and_pull_image
 	download_frappe_docker
-	install_local_postgres
 	write_env_file
 	write_generated_compose
 	write_proxy_compose
-	write_state
 	prepare_compose
-	login_and_pull_image
+	install_local_postgres
 	install_or_upgrade_site
 	verify_deployment
+	write_state
 	print_result
 }
 
