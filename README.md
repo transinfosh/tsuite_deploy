@@ -21,18 +21,14 @@
 
 ## 快速使用
 
-不需要克隆 Git 仓库。先下载安装器：
+不需要克隆 Git 仓库，一条命令即可安装并启动部署：
 
 ```bash
-curl -fsSL \
-  https://raw.githubusercontent.com/transinfosh/frappe_deploy/main/install.sh \
-  -o /tmp/install-frappe-deploy.sh
-sudo bash /tmp/install-frappe-deploy.sh
-sudo frappe-deploy
+curl -fsSL https://raw.githubusercontent.com/transinfosh/frappe_deploy/main/install.sh | sudo bash && sudo frappe-deploy
 ```
 
 安装器会检查下载结果的 Bash 语法，然后把部署脚本安装到
-`/usr/local/sbin/frappe-deploy`。建议在执行前先查看下载的安装器内容。
+`/usr/local/sbin/frappe-deploy`。
 
 默认镜像为：
 
@@ -69,10 +65,7 @@ frappe-deploy --dry-run
 `/usr/local/sbin/frappe-deploy` 更新到最新的 `main`：
 
 ```bash
-curl -fsSL \
-  https://raw.githubusercontent.com/transinfosh/frappe_deploy/main/install.sh \
-  -o /tmp/install-frappe-deploy.sh
-sudo bash /tmp/install-frappe-deploy.sh
+curl -fsSL https://raw.githubusercontent.com/transinfosh/frappe_deploy/main/install.sh | sudo bash
 ```
 
 更新部署工具不会自动升级正在运行的应用。更新完成后再执行：
