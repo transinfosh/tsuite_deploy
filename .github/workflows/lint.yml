@@ -1,0 +1,29 @@
+name: Lint
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install shell tools
+        run: sudo apt-get update && sudo apt-get install -y python3-yaml shellcheck
+
+      - name: Check shell syntax
+        run: bash -n deploy.sh
+
+      - name: Run ShellCheck
+        run: shellcheck deploy.sh tests/test_static.sh
+
+      - name: Run static tests
+        run: tests/test_static.sh

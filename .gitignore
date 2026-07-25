@@ -1,0 +1,6 @@
+.env
+.env.dry-run
+compose.generated.yaml
+compose.proxy.yaml
+deployment.state
+frappe_docker/
