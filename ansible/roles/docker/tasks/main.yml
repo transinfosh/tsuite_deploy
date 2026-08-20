@@ -13,7 +13,7 @@
 - name: 校验 Docker 代理参数
   ansible.builtin.assert:
     that:
-      - deployment_http_proxy is match('^https?://[^/]+')
+      - deployment_http_proxy | length == 0 or deployment_http_proxy is match('^https?://[^/]+')
       - deployment_no_proxy | length > 0
 
 - name: 创建 Docker Systemd 配置目录

@@ -64,6 +64,16 @@ cloudflared_service = (
 assert "--token-file /etc/tai-cloudflared.token" in cloudflared_service
 assert "--token ${TUNNEL_TOKEN}" not in cloudflared_service
 
+direct_ingress = (
+    pathlib.Path(sys.argv[1]) / "roles/ingress/tasks/direct.yml"
+).read_text(encoding="utf-8")
+direct_caddyfile = (
+    pathlib.Path(sys.argv[1]) / "roles/ingress/templates/direct.Caddyfile.j2"
+).read_text(encoding="utf-8")
+assert "name: caddy" in direct_ingress
+assert "validate: caddy validate" in direct_ingress
+assert "reverse_proxy {{ ingress_local_url }}" in direct_caddyfile
+
 runtime_playbook = (playbook_dir / "runtime.yml").read_text(encoding="utf-8")
 assert "@tai-runtime-postgres:5432/" in runtime_playbook
 assert "@host.docker.internal:{{ runtime_database_port }}/" not in runtime_playbook

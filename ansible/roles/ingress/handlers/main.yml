@@ -14,3 +14,9 @@
     name: tai-frpc
     state: restarted
   when: ingress_provider == 'frp' and not ansible_check_mode
+
+- name: 重启直连 Caddy
+  ansible.builtin.systemd_service:
+    name: caddy
+    state: restarted
+  when: ingress_provider == 'direct' and not ansible_check_mode

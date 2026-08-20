@@ -1,0 +1,8 @@
+{
+	email {{ direct_caddy_email }}
+}
+
+{{ ingress_hostname }} {
+	encode zstd gzip
+	reverse_proxy {{ ingress_local_url }}
+}

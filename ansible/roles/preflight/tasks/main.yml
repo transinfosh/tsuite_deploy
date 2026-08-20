@@ -43,7 +43,13 @@
 - name: 校验入口类型
   ansible.builtin.assert:
     that:
-      - ingress_provider in ['cloudflare', 'frp']
+      - ingress_provider in ['cloudflare', 'frp', 'direct']
+
+- name: 校验直连 HTTPS 配置
+  ansible.builtin.assert:
+    that:
+      - direct_caddy_email is match('^[^@\s]+@[^@\s]+\.[^@\s]+$')
+  when: ingress_provider == 'direct'
 
 - name: 校验镜像交付模式
   ansible.builtin.assert:
@@ -59,7 +65,7 @@
 - name: 校验部署代理
   ansible.builtin.assert:
     that:
-      - deployment_http_proxy is match('^https?://[^/]+')
+      - deployment_http_proxy | length == 0 or deployment_http_proxy is match('^https?://[^/]+')
       - deployment_no_proxy | length > 0
 
 - name: 校验在线 Embedding 配置

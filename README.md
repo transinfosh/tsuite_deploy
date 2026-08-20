@@ -204,6 +204,22 @@ ansible-playbook -i inventories/internal-demo/hosts.yml playbooks/database.yml
 工作流使用 `type=gha,mode=max` 保存 BuildKit layer cache。服务器仍使用 inventory 中现有的
 Docker daemon 代理拉取 GHCR 镜像；部署时只执行 `docker pull`、迁移和容器重建。
 
+### 独立公网 Customer 节点
+
+`ansible/inventories/ruisu-customer/` 用于域名直接解析到服务器的独立 Customer 节点。该 inventory
+使用本机 Caddy 自动申请 HTTPS 证书，不经过内部 FRP；部署前需放行 TCP 80/443。当前节点无法访问
+内部 Benchmark SQL Server，因此 `enable_benchmark` 保持关闭。
+
+该节点暂时复用内部演示 Vault 中的 GHCR 和控制面凭据，执行命令时显式加载：
+
+```bash
+cd ansible
+ansible-playbook -i inventories/ruisu-customer/hosts.yml playbooks/preflight.yml \
+  -e @inventories/internal-demo/vault.yml --vault-password-file ../.vault-pass
+ansible-playbook -i inventories/ruisu-customer/hosts.yml playbooks/customer.yml \
+  -e @inventories/internal-demo/vault.yml --vault-password-file ../.vault-pass
+```
+
 组织需要完成一次性配置：
 
 1. 允许上述私有仓库调用 `frappe_deploy` 的 reusable workflow；
