@@ -175,14 +175,15 @@ Frappe、数据库、Redis、tbi-engine、tai-service 和 Phoenix 都以 Docker/
 
 ### 预装宿主机 PostgreSQL 18
 
-需要为后续数据库外置迁移预装 PostgreSQL 时，可单独在 `control_nodes` 执行：
+需要为后续数据库外置迁移预装 PostgreSQL 时，先把独立数据库服务器加入 inventory 的
+`database_nodes`，再单独执行：
 
 ```bash
 cd ansible
 ansible-playbook -i inventories/internal-demo/hosts.yml playbooks/database.yml
 ```
 
-该 playbook 从 PostgreSQL 官方 PGDG 仓库安装 PostgreSQL 18、客户端和 pgvector，默认仅监听
+该 playbook 只会在 `database_nodes` 上从 PostgreSQL 官方 PGDG 仓库安装 PostgreSQL 18、客户端和 pgvector，默认仅监听
 `127.0.0.1:5432`。它不会创建业务数据库、修改现有容器数据库或切换应用连接；开放私网监听、
 创建独立账号及数据迁移应在备份和回滚方案确认后单独执行。
 

@@ -45,7 +45,7 @@ assert "验证客户 Frappe 到 tBI Engine 的容器网络" in verify_playbook
 assert "http://tbi-engine:{{ tbi_engine_port }}/readyz" in verify_playbook
 
 database_playbook = yaml.safe_load((playbook_dir / "database.yml").read_text(encoding="utf-8"))
-assert database_playbook[0]["hosts"] == "control_nodes"
+assert database_playbook[0]["hosts"] == "database_nodes"
 assert database_playbook[0]["roles"] == [{"role": "postgresql_host"}]
 
 postgresql_host_tasks = (

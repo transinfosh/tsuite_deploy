@@ -16,6 +16,10 @@ all:
       hosts:
         tai-control-01:
           ansible_host: 192.0.2.13
+    database_nodes:
+      hosts:
+        tai-database-01:
+          ansible_host: 192.0.2.15
     relay_nodes:
       hosts:
         tai-relay-01:
