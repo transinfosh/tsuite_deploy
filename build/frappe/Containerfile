@@ -15,6 +15,7 @@ RUN set -eux; \
     git config --global user.name "TAI Release Builder"; \
     for app in frappe ${LOCAL_APPS}; do \
         cd "/opt/tai-source/apps/${app}"; \
+        rm -rf .git; \
         git init -q -b local; \
         git add -A; \
         git commit -q -m "TAI release source"; \
@@ -22,6 +23,7 @@ RUN set -eux; \
     for package in /opt/tai-source/packages/*; do \
         [ -d "${package}" ] || continue; \
         cd "${package}"; \
+        rm -rf .git; \
         git init -q -b local; \
         git add -A; \
         git commit -q -m "TAI release source"; \
