@@ -1,6 +1,7 @@
 services:
   db:
     image: {{ frappe_postgres_image | to_json }}
+    restart: unless-stopped
   redis-cache:
     image: {{ frappe_redis_image | to_json }}
   redis-queue:
