@@ -183,6 +183,12 @@ assert legacy_source_cleanup["when"] == [
     "image_delivery_mode == 'registry'",
     "not frappe_docker_git_metadata.stat.exists",
 ]
+registry_source_sync = frappe_stack_document[sync_registry_source]
+assert registry_source_sync["environment"] == {
+    "http_proxy": "{{ deployment_http_proxy | default('') }}",
+    "https_proxy": "{{ deployment_http_proxy | default('') }}",
+    "no_proxy": "{{ deployment_no_proxy | default('') }}",
+}
 
 frappe_stack_handlers = (
     pathlib.Path(sys.argv[1])

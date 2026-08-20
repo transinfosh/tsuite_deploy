@@ -49,6 +49,10 @@
     version: "{{ frappe_docker_ref }}"
     update: true
     force: true
+  environment:
+    http_proxy: "{{ deployment_http_proxy | default('') }}"
+    https_proxy: "{{ deployment_http_proxy | default('') }}"
+    no_proxy: "{{ deployment_no_proxy | default('') }}"
   when: image_delivery_mode == 'registry'
 
 - name: 保存 Frappe Secret 文件
