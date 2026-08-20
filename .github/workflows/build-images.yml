@@ -19,7 +19,7 @@ on:
       tai_chat_ref:
         description: Immutable tai-chat ref used by Frappe images
         required: false
-        default: dfe1853e4501122d050ebba1c0a6739853cd8700
+        default: v0.2.31
         type: string
       transinfo_ui_ref:
         description: Immutable transinfo-ui ref used by Frappe images
@@ -53,7 +53,7 @@ on:
       tai_chat_ref:
         description: Immutable tai-chat ref used by Frappe images
         required: false
-        default: dfe1853e4501122d050ebba1c0a6739853cd8700
+        default: v0.2.31
         type: string
       transinfo_ui_ref:
         description: Immutable transinfo-ui ref used by Frappe images
