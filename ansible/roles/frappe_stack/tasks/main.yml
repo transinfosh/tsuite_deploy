@@ -28,6 +28,20 @@
   changed_when: false
   when: image_delivery_mode == 'local_bundle'
 
+- name: 检查 frappe_docker Git 元数据
+  ansible.builtin.stat:
+    path: "{{ frappe_stack_root }}/frappe_docker/.git"
+  register: frappe_docker_git_metadata
+  when: image_delivery_mode == 'registry'
+
+- name: 清理本地快照模式遗留的 frappe_docker
+  ansible.builtin.file:
+    path: "{{ frappe_stack_root }}/frappe_docker"
+    state: absent
+  when:
+    - image_delivery_mode == 'registry'
+    - not frappe_docker_git_metadata.stat.exists
+
 - name: 从 Git 仓库同步 frappe_docker
   ansible.builtin.git:
     repo: "{{ frappe_docker_repo }}"

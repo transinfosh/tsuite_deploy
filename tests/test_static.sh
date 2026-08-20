@@ -171,6 +171,19 @@ frappe_stack_tasks = (
 assert "'Recreated' in (frappe_compose_up.stdout ~ frappe_compose_up.stderr)" in frappe_stack_tasks
 assert "notify: 刷新 Frappe frontend 上游解析" in frappe_stack_tasks
 
+frappe_stack_document = yaml.safe_load(frappe_stack_tasks)
+frappe_stack_task_names = [task["name"] for task in frappe_stack_document]
+inspect_legacy_source = frappe_stack_task_names.index("检查 frappe_docker Git 元数据")
+remove_legacy_source = frappe_stack_task_names.index("清理本地快照模式遗留的 frappe_docker")
+sync_registry_source = frappe_stack_task_names.index("从 Git 仓库同步 frappe_docker")
+assert inspect_legacy_source < remove_legacy_source < sync_registry_source
+legacy_source_cleanup = frappe_stack_document[remove_legacy_source]
+assert legacy_source_cleanup["ansible.builtin.file"]["state"] == "absent"
+assert legacy_source_cleanup["when"] == [
+    "image_delivery_mode == 'registry'",
+    "not frappe_docker_git_metadata.stat.exists",
+]
+
 frappe_stack_handlers = (
     pathlib.Path(sys.argv[1])
     / "roles/frappe_stack/handlers/main.yml"
