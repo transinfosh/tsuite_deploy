@@ -1,0 +1,54 @@
+services:
+  service:
+    image: {{ (python_container_image if python_container_image else 'tai/' ~ python_container_name ~ ':' ~ deployment_snapshot_id[:12]) | to_json }}
+    pull_policy: {{ ('always' if python_container_image else 'never') | to_json }}
+{% if not python_container_image %}
+    build:
+      context: {{ python_container_source | to_json }}
+      dockerfile: .tai-deploy.Dockerfile
+{% endif %}
+    restart: unless-stopped
+    env_file:
+      - .env
+    command: {{ python_container_command | to_json }}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+{% for host in python_container_extra_hosts %}
+      - {{ host | to_json }}
+{% endfor %}
+{% if python_container_networks %}
+    networks:
+{% for network in python_container_networks %}
+      {{ network }}:
+{% if python_container_network_aliases %}
+        aliases:
+{% for alias in python_container_network_aliases %}
+          - {{ alias | to_json }}
+{% endfor %}
+{% else %}
+        {}
+{% endif %}
+{% endfor %}
+{% endif %}
+    ports:
+      - "127.0.0.1:{{ python_container_port }}:{{ python_container_port }}"
+{% if python_container_secrets or python_container_mounts or python_container_data_dirs %}
+    volumes:
+{% for name in python_container_secrets %}
+      - {{ (secrets_root ~ '/' ~ name ~ ':/run/secrets/' ~ name ~ ':ro') | to_json }}
+{% endfor %}
+{% for mount in python_container_mounts %}
+      - {{ mount | to_json }}
+{% endfor %}
+{% for path in python_container_data_dirs %}
+      - {{ (path ~ ':' ~ path) | to_json }}
+{% endfor %}
+{% endif %}
+{% if python_container_networks %}
+
+networks:
+{% for network in python_container_networks %}
+  {{ network }}:
+    external: true
+{% endfor %}
+{% endif %}

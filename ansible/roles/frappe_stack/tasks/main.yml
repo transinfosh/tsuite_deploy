@@ -1,0 +1,211 @@
+---
+- name: 校验 Frappe Stack 参数
+  ansible.builtin.assert:
+    that:
+      - frappe_stack_name | length > 0
+      - frappe_site_name | length > 0
+      - frappe_image | length > 0
+      - frappe_db_password | length > 0
+      - frappe_admin_password | length > 0
+  no_log: true
+
+- name: 创建 Frappe Stack 目录
+  ansible.builtin.file:
+    path: "{{ frappe_stack_root }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: 从统一源码快照同步 frappe_docker
+  ansible.builtin.command:
+    argv:
+      - rsync
+      - -a
+      - --delete
+      - "{{ source_root }}/frappe_docker/"
+      - "{{ frappe_stack_root }}/frappe_docker/"
+  changed_when: false
+  when: image_delivery_mode == 'local_bundle'
+
+- name: 从 Git 仓库同步 frappe_docker
+  ansible.builtin.git:
+    repo: "{{ frappe_docker_repo }}"
+    dest: "{{ frappe_stack_root }}/frappe_docker"
+    version: "{{ frappe_docker_ref }}"
+    update: true
+    force: true
+  when: image_delivery_mode == 'registry'
+
+- name: 保存 Frappe Secret 文件
+  ansible.builtin.copy:
+    content: "{{ item.value }}\n"
+    dest: "{{ secrets_root }}/{{ item.key }}"
+    owner: root
+    group: root
+    mode: "0444"
+  loop: "{{ frappe_secret_files | dict2items }}"
+  no_log: true
+  notify: 重启 Frappe Stack
+
+- name: 写入 Frappe Compose 环境
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ frappe_stack_root }}/.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: 重启 Frappe Stack
+
+- name: 写入 Frappe Compose 覆盖
+  ansible.builtin.template:
+    src: compose.generated.yml.j2
+    dest: "{{ frappe_stack_root }}/compose.generated.yml"
+    owner: root
+    group: root
+    mode: "0640"
+  notify: 重启 Frappe Stack
+
+- name: 校验 Frappe Compose
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --env-file
+      - "{{ frappe_stack_root }}/.env"
+      - -p
+      - "frappe-{{ frappe_stack_name }}"
+      - -f
+      - "{{ frappe_stack_root }}/frappe_docker/compose.yaml"
+      - -f
+      - "{{ frappe_stack_root }}/frappe_docker/overrides/compose.redis.yaml"
+      - -f
+      - "{{ frappe_stack_root }}/frappe_docker/overrides/compose.postgres.yaml"
+      - -f
+      - "{{ frappe_stack_root }}/compose.generated.yml"
+      - config
+      - --quiet
+  changed_when: false
+
+- name: 启动 Frappe Stack
+  ansible.builtin.command: >-
+    docker compose --env-file {{ frappe_stack_root }}/.env
+    -p frappe-{{ frappe_stack_name }}
+    -f {{ frappe_stack_root }}/frappe_docker/compose.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.redis.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.postgres.yaml
+    -f {{ frappe_stack_root }}/compose.generated.yml up -d
+  register: frappe_compose_up
+  changed_when: >-
+    'Created' in (frappe_compose_up.stdout ~ frappe_compose_up.stderr)
+    or 'Recreated' in (frappe_compose_up.stdout ~ frappe_compose_up.stderr)
+    or 'Started' in (frappe_compose_up.stdout ~ frappe_compose_up.stderr)
+  notify: 刷新 Frappe frontend 上游解析
+
+- name: 等待 Frappe backend 可用
+  ansible.builtin.command: >-
+    docker compose --env-file {{ frappe_stack_root }}/.env
+    -p frappe-{{ frappe_stack_name }}
+    -f {{ frappe_stack_root }}/frappe_docker/compose.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.redis.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.postgres.yaml
+    -f {{ frappe_stack_root }}/compose.generated.yml
+    exec -T backend bench --version
+  register: frappe_backend_ready
+  retries: 40
+  delay: 3
+  until: frappe_backend_ready.rc == 0
+  changed_when: false
+
+- name: 检查站点是否存在
+  ansible.builtin.command: >-
+    docker compose --env-file {{ frappe_stack_root }}/.env
+    -p frappe-{{ frappe_stack_name }}
+    -f {{ frappe_stack_root }}/frappe_docker/compose.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.redis.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.postgres.yaml
+    -f {{ frappe_stack_root }}/compose.generated.yml
+    exec -T backend test -f /home/frappe/frappe-bench/sites/{{ frappe_site_name }}/site_config.json
+  register: frappe_site_exists
+  changed_when: false
+  failed_when: false
+
+- name: 创建 Frappe 站点
+  ansible.builtin.command: >-
+    docker compose --env-file {{ frappe_stack_root }}/.env
+    -p frappe-{{ frappe_stack_name }}
+    -f {{ frappe_stack_root }}/frappe_docker/compose.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.redis.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.postgres.yaml
+    -f {{ frappe_stack_root }}/compose.generated.yml
+    exec -T backend bench new-site {{ frappe_site_name }}
+    --db-type postgres --db-host db --db-port 5432
+    --db-root-username postgres --db-root-password {{ frappe_db_password | quote }}
+    --admin-password {{ frappe_admin_password | quote }}
+  when: frappe_site_exists.rc != 0
+  no_log: true
+  changed_when: true
+
+- name: 安装业务应用前迁移 Frappe 核心站点
+  ansible.builtin.command: >-
+    docker compose --env-file {{ frappe_stack_root }}/.env
+    -p frappe-{{ frappe_stack_name }}
+    -f {{ frappe_stack_root }}/frappe_docker/compose.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.redis.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.postgres.yaml
+    -f {{ frappe_stack_root }}/compose.generated.yml
+    exec -T backend bench --site {{ frappe_site_name }} migrate
+  register: frappe_core_migrate
+  changed_when: "'Migrating' in frappe_core_migrate.stdout"
+
+- name: 读取已安装应用
+  ansible.builtin.command: >-
+    docker compose --env-file {{ frappe_stack_root }}/.env
+    -p frappe-{{ frappe_stack_name }}
+    -f {{ frappe_stack_root }}/frappe_docker/compose.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.redis.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.postgres.yaml
+    -f {{ frappe_stack_root }}/compose.generated.yml
+    exec -T backend bench --site {{ frappe_site_name }} list-apps
+  register: frappe_installed_apps
+  changed_when: false
+
+- name: 安装 Frappe 应用
+  ansible.builtin.command: >-
+    docker compose --env-file {{ frappe_stack_root }}/.env
+    -p frappe-{{ frappe_stack_name }}
+    -f {{ frappe_stack_root }}/frappe_docker/compose.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.redis.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.postgres.yaml
+    -f {{ frappe_stack_root }}/compose.generated.yml
+    exec -T backend bench --site {{ frappe_site_name }} install-app {{ item }}
+  loop: "{{ frappe_apps }}"
+  when: item not in frappe_installed_apps.stdout
+  changed_when: true
+
+- name: 写入站点配置
+  ansible.builtin.command: >-
+    docker compose --env-file {{ frappe_stack_root }}/.env
+    -p frappe-{{ frappe_stack_name }}
+    -f {{ frappe_stack_root }}/frappe_docker/compose.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.redis.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.postgres.yaml
+    -f {{ frappe_stack_root }}/compose.generated.yml
+    exec -T backend bench --site {{ frappe_site_name }} set-config
+    {{ item.key }} {{ item.value | to_json | quote }} --parse
+  loop: "{{ frappe_site_config | dict2items }}"
+  changed_when: false
+  no_log: true
+
+- name: 迁移 Frappe 站点
+  ansible.builtin.command: >-
+    docker compose --env-file {{ frappe_stack_root }}/.env
+    -p frappe-{{ frappe_stack_name }}
+    -f {{ frappe_stack_root }}/frappe_docker/compose.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.redis.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.postgres.yaml
+    -f {{ frappe_stack_root }}/compose.generated.yml
+    exec -T backend bench --site {{ frappe_site_name }} migrate
+  register: frappe_migrate
+  changed_when: "'Migrating' in frappe_migrate.stdout"

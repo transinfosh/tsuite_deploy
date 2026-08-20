@@ -1,0 +1,27 @@
+---
+# 这是版本接口，不是当前正式 Release。当前内部演示允许可变引用。
+lock_state: unlocked-internal-demo
+resolved_at: null
+frappe_docker:
+  ref: main
+  resolved_sha: null
+images:
+  customer_frappe:
+    reference: ghcr.io/transinfosh/tai-customer:internal-demo
+    digest: null
+  control_frappe:
+    reference: ghcr.io/transinfosh/tai-control:internal-demo
+    digest: null
+  tai_service:
+    reference: ghcr.io/transinfosh/tai-service:internal-demo
+    digest: null
+  tbi_engine:
+    reference: ghcr.io/transinfosh/tbi-engine:internal-demo
+    digest: null
+  tai_auth:
+    reference: ghcr.io/transinfosh/tai-auth:internal-demo
+    digest: null
+source_bundle:
+  sha256: null
+
+# 正式发布时应补齐：镜像 digest、源码 commit、OS/数据库/Redis/cloudflared 版本及构建时间。

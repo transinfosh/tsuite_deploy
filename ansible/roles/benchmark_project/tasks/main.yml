@@ -1,0 +1,78 @@
+---
+- name: 校验 Benchmark 项目参数
+  ansible.builtin.assert:
+    that:
+      - benchmark_project_name | length > 0
+      - benchmark_connection_name | length > 0
+      - benchmark_mssql_host | length > 0
+      - benchmark_mssql_password_file | length > 0
+
+- name: 写入 Benchmark 项目初始化脚本
+  ansible.builtin.template:
+    src: bootstrap_project.py.j2
+    dest: /opt/tai-deploy/bootstrap-benchmark-project.py
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: 复制 Benchmark MDL 到客户 Frappe backend
+  ansible.builtin.command:
+    argv:
+      - docker
+      - cp
+      - "{{ source_root }}/apps/tbi/evaluation/tai_benchmark/mdl.json"
+      - "frappe-customer-backend-1:{{ benchmark_mdl_container_path }}"
+  changed_when: false
+  when: image_delivery_mode == 'local_bundle'
+
+- name: 从预构建镜像准备 Benchmark MDL
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - frappe-customer-backend-1
+      - cp
+      - /home/frappe/frappe-bench/apps/tbi/evaluation/tai_benchmark/mdl.json
+      - "{{ benchmark_mdl_container_path }}"
+  changed_when: false
+  when: image_delivery_mode == 'registry'
+
+- name: 复制 Benchmark 项目初始化脚本到客户 Frappe backend
+  ansible.builtin.command:
+    argv:
+      - docker
+      - cp
+      - /opt/tai-deploy/bootstrap-benchmark-project.py
+      - frappe-customer-backend-1:/tmp/bootstrap-benchmark-project.py
+  changed_when: false
+
+- name: 校验容器内 Benchmark 项目初始化脚本可读
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - frappe-customer-backend-1
+      - test
+      - -r
+      - /tmp/bootstrap-benchmark-project.py
+  changed_when: false
+
+- name: 初始化并发布 Benchmark 项目
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - frappe-customer-backend-1
+      - bench
+      - --site
+      - "{{ customer_site_name }}"
+      - execute
+      - "(__import__('runpy').run_path('/tmp/bootstrap-benchmark-project.py'), None)[1]"
+  register: benchmark_project_bootstrap
+  changed_when: "'TAI_BENCHMARK_BOOTSTRAP=' in benchmark_project_bootstrap.stdout"
+
+- name: 校验 Benchmark 项目发布结果
+  ansible.builtin.assert:
+    that:
+      - "'\"status\": \"committed\"' in benchmark_project_bootstrap.stdout"
+    fail_msg: Benchmark 项目没有成功发布为 committed Deployment。

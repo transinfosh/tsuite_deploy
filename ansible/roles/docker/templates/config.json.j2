@@ -1,0 +1,9 @@
+{
+  "proxies": {
+    "default": {
+      "httpProxy": {{ deployment_http_proxy | to_json }},
+      "httpsProxy": {{ deployment_http_proxy | to_json }},
+      "noProxy": {{ deployment_no_proxy | replace('\n', '') | replace(' ', '') | to_json }}
+    }
+  }
+}

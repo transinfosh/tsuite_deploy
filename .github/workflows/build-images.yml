@@ -1,0 +1,267 @@
+name: Build one GHCR image
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: Image target to build
+        required: true
+        type: string
+      release_tag:
+        description: Immutable GHCR image tag
+        required: true
+        type: string
+      source_ref:
+        description: Source ref; defaults to release_tag
+        required: false
+        default: ""
+        type: string
+      tai_chat_ref:
+        description: Immutable tai-chat ref used by Frappe images
+        required: false
+        default: v0.2.30
+        type: string
+      transinfo_ui_ref:
+        description: Immutable transinfo-ui ref used by Frappe images
+        required: false
+        default: v0.1.3
+        type: string
+    secrets:
+      APP_SOURCE_TOKEN:
+        description: Token with read access to the private source repositories
+        required: true
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Image target to build
+        required: true
+        type: choice
+        options:
+          - tai-customer
+          - tai-control
+          - tai-service
+          - tbi-engine
+          - tai-auth
+      release_tag:
+        description: Immutable GHCR image tag
+        required: true
+        type: string
+      source_ref:
+        description: Source ref; defaults to release_tag
+        required: false
+        type: string
+      tai_chat_ref:
+        description: Immutable tai-chat ref used by Frappe images
+        required: false
+        default: v0.2.30
+        type: string
+      transinfo_ui_ref:
+        description: Immutable transinfo-ui ref used by Frappe images
+        required: false
+        default: v0.1.3
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: tai-image-${{ inputs.target }}-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAMESPACE: transinfosh
+  SOURCE_REF: ${{ inputs.source_ref || inputs.release_tag }}
+  SOURCE_TOKEN: ${{ secrets.APP_SOURCE_TOKEN }}
+
+jobs:
+  build:
+    runs-on: ${{ vars.TAI_BUILD_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - name: Validate release inputs
+        env:
+          TARGET: ${{ inputs.target }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -eu
+          case "$TARGET" in
+            tai-customer | tai-control | tai-service | tbi-engine | tai-auth) ;;
+            *) echo "不支持的镜像目标: $TARGET" >&2; exit 1 ;;
+          esac
+          case "$RELEASE_TAG" in
+            *[!a-zA-Z0-9._-]* | '')
+              echo "release_tag 只能包含字母、数字、点、下划线和连字符" >&2
+              exit 1
+              ;;
+          esac
+          test -n "$SOURCE_TOKEN" || {
+            echo "缺少可读取跨仓库私有源码的 APP_SOURCE_TOKEN" >&2
+            exit 1
+          }
+
+      - name: Checkout deployment build definitions
+        uses: actions/checkout@v6
+        with:
+          repository: transinfosh/frappe_deploy
+          ref: develop
+          token: ${{ env.SOURCE_TOKEN }}
+          path: .ci-deploy
+
+      - name: Checkout Frappe
+        if: inputs.target == 'tai-customer' || inputs.target == 'tai-control'
+        uses: actions/checkout@v6
+        with:
+          repository: transinfosh/frappe
+          ref: version-16
+          token: ${{ env.SOURCE_TOKEN }}
+          path: .ci-context/apps/frappe
+
+      - name: Checkout frappe_ext
+        if: inputs.target == 'tai-customer' || inputs.target == 'tai-control'
+        uses: actions/checkout@v6
+        with:
+          repository: transinfosh/frappe_ext
+          ref: ${{ env.SOURCE_REF }}
+          token: ${{ env.SOURCE_TOKEN }}
+          path: .ci-context/apps/frappe_ext
+
+      - name: Checkout tBI
+        if: inputs.target == 'tai-customer' || inputs.target == 'tai-control'
+        uses: actions/checkout@v6
+        with:
+          repository: transinfosh/tbi
+          ref: ${{ env.SOURCE_REF }}
+          token: ${{ env.SOURCE_TOKEN }}
+          path: .ci-context/apps/tbi
+
+      - name: Checkout tAI
+        if: inputs.target == 'tai-customer' || inputs.target == 'tai-control'
+        uses: actions/checkout@v6
+        with:
+          repository: transinfosh/tai
+          ref: ${{ env.SOURCE_REF }}
+          token: ${{ env.SOURCE_TOKEN }}
+          path: .ci-context/apps/tai
+
+      - name: Checkout tAI Control
+        if: inputs.target == 'tai-control'
+        uses: actions/checkout@v6
+        with:
+          repository: transinfosh/tai_control
+          ref: ${{ env.SOURCE_REF }}
+          token: ${{ env.SOURCE_TOKEN }}
+          path: .ci-context/apps/tai_control
+
+      - name: Checkout tai-chat
+        if: inputs.target == 'tai-customer' || inputs.target == 'tai-control'
+        uses: actions/checkout@v6
+        with:
+          repository: transinfosh/tai-chat
+          ref: ${{ inputs.tai_chat_ref }}
+          token: ${{ env.SOURCE_TOKEN }}
+          path: .ci-context/packages/tai-chat
+
+      - name: Checkout transinfo-ui
+        if: inputs.target == 'tai-customer' || inputs.target == 'tai-control'
+        uses: actions/checkout@v6
+        with:
+          repository: transinfosh/transinfo-ui
+          ref: ${{ inputs.transinfo_ui_ref }}
+          token: ${{ env.SOURCE_TOKEN }}
+          path: .ci-context/packages/transinfo-ui
+
+      - name: Checkout Frappe Docker resources
+        if: inputs.target == 'tai-customer' || inputs.target == 'tai-control'
+        uses: actions/checkout@v6
+        with:
+          repository: transinfosh/frappe_docker
+          ref: main
+          token: ${{ env.SOURCE_TOKEN }}
+          path: .ci-frappe-docker
+
+      - name: Prepare Frappe build context
+        if: inputs.target == 'tai-customer' || inputs.target == 'tai-control'
+        run: cp -a .ci-frappe-docker/resources .ci-context/resources
+
+      - name: Checkout Python service
+        if: inputs.target == 'tai-service' || inputs.target == 'tbi-engine' || inputs.target == 'tai-auth'
+        uses: actions/checkout@v6
+        with:
+          repository: transinfosh/${{ inputs.target }}
+          ref: ${{ env.SOURCE_REF }}
+          token: ${{ env.SOURCE_TOKEN }}
+          path: .ci-service
+
+      - name: Checkout tBI Benchmark assets
+        if: inputs.target == 'tai-service'
+        uses: actions/checkout@v6
+        with:
+          repository: transinfosh/tbi
+          ref: ${{ env.SOURCE_REF }}
+          token: ${{ env.SOURCE_TOKEN }}
+          path: .ci-tbi
+
+      - name: Add Benchmark Knowledge to tai-service image context
+        if: inputs.target == 'tai-service'
+        run: |
+          mkdir -p .ci-service/deploy/benchmark-knowledge
+          cp -a .ci-tbi/evaluation/tai_benchmark/knowledge/. .ci-service/deploy/benchmark-knowledge/
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Resolve build settings
+        id: settings
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -eu
+          case "$TARGET" in
+            tai-customer)
+              echo "context=.ci-context" >> "$GITHUB_OUTPUT"
+              echo "file=.ci-deploy/build/frappe/Containerfile" >> "$GITHUB_OUTPUT"
+              echo "build_args=LOCAL_APPS=frappe_ext tbi tai" >> "$GITHUB_OUTPUT"
+              ;;
+            tai-control)
+              echo "context=.ci-context" >> "$GITHUB_OUTPUT"
+              echo "file=.ci-deploy/build/frappe/Containerfile" >> "$GITHUB_OUTPUT"
+              echo "build_args=LOCAL_APPS=frappe_ext tbi tai tai_control" >> "$GITHUB_OUTPUT"
+              ;;
+            tai-service)
+              echo "context=.ci-service" >> "$GITHUB_OUTPUT"
+              echo "file=.ci-deploy/build/python/Containerfile" >> "$GITHUB_OUTPUT"
+              echo "build_args=UV_SYNC_ARGS=--extra runtime --extra observability" >> "$GITHUB_OUTPUT"
+              ;;
+            tbi-engine)
+              echo "context=.ci-service" >> "$GITHUB_OUTPUT"
+              echo "file=.ci-deploy/build/python/Containerfile" >> "$GITHUB_OUTPUT"
+              echo "build_args=INSTALL_MSSQL_DRIVER=true" >> "$GITHUB_OUTPUT"
+              ;;
+            tai-auth)
+              echo "context=.ci-service" >> "$GITHUB_OUTPUT"
+              echo "file=.ci-deploy/build/python/Containerfile" >> "$GITHUB_OUTPUT"
+              echo "build_args=" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - name: Build and push image
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ steps.settings.outputs.context }}
+          file: ${{ steps.settings.outputs.file }}
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ inputs.target }}:${{ inputs.release_tag }}
+          build-args: ${{ steps.settings.outputs.build_args }}
+          labels: |
+            org.opencontainers.image.revision=${{ env.SOURCE_REF }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha,scope=${{ inputs.target }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.target }}

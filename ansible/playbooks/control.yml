@@ -1,0 +1,75 @@
+---
+- name: 部署控制面
+  hosts: control_nodes
+  gather_facts: true
+  vars_files:
+    - "{{ inventory_dir }}/vault.yml"
+    - "{{ inventory_dir }}/control_private.yml"
+  roles:
+    - role: common
+    - role: docker
+    - role: source_snapshot
+      when: image_delivery_mode == 'local_bundle'
+    - role: frappe_local_image
+      when: image_delivery_mode == 'local_bundle'
+      vars:
+        frappe_stack_name: control
+        frappe_local_image_name: tai-control
+        frappe_local_apps:
+          # 会话审计复用 tAI 的只读聊天界面；这些应用仅参与前端资源构建，
+          # 控制站点仍只安装 tai_control。
+          - frappe_ext
+          - tbi
+          - tai
+          - tai_control
+    - role: frappe_stack
+      vars:
+        frappe_stack_name: control
+        frappe_site_name: "{{ control_site_name }}"
+        frappe_image: >-
+          {{ frappe_local_image_reference
+             if image_delivery_mode == 'local_bundle'
+             else control_frappe_image }}
+        frappe_pull_policy: "{{ 'never' if image_delivery_mode == 'local_bundle' else 'always' }}"
+        frappe_apps:
+          - tai_control
+        frappe_db_password: "{{ vault_control_db_password }}"
+        frappe_admin_password: "{{ vault_control_admin_password }}"
+        frappe_postgres_image: pgvector/pgvector:pg16
+        frappe_http_port: 8080
+        frappe_bind_addresses:
+          - 127.0.0.1
+          - "{{ ansible_host }}"
+        frappe_docker_subnet: 172.31.30.0/24
+        frappe_secret_files:
+          tai_control_usage: "{{ vault_tai_control_usage_secret }}"
+          tai_control_client_id: "{{ vault_tai_control_client_id }}"
+          tai_control_client_secret: "{{ vault_tai_control_client_secret }}"
+    - role: tai_control_config
+    - role: python_container
+      vars:
+        python_container_name: tai-auth
+        python_container_source: "{{ source_root }}/services/tai-auth"
+        python_container_image: "{{ tai_auth_image if image_delivery_mode == 'registry' else '' }}"
+        python_container_command: >-
+          python -m uvicorn tai_auth.server:app
+          --host 0.0.0.0 --port {{ tai_auth_port }} --workers 1
+        python_container_port: "{{ tai_auth_port }}"
+        python_container_networks:
+          - frappe-control_default
+        python_container_environment:
+          TAI_AUTH_CONTROL_INTERNAL_BASE_URL: "http://frontend:8080"
+          TAI_AUTH_CONTROL_HOST: "{{ control_site_name }}"
+    - role: phoenix
+      when: enable_phoenix | bool
+    - role: ingress
+      vars:
+        ingress_hostname: "{{ auth_public_hostname }}"
+        ingress_local_url: "http://127.0.0.1:{{ tai_auth_port }}"
+        ingress_routes:
+          - hostname: "{{ auth_public_hostname }}"
+            local_port: "{{ tai_auth_port }}"
+        ingress_stcp_routes:
+          - name: "{{ frp_control_stcp_proxy_name }}"
+            local_port: 8080
+            secret_key: "{{ vault_control_stcp_secret }}"

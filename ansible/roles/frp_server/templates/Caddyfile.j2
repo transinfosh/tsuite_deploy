@@ -1,0 +1,9 @@
+{
+	email {{ frp_caddy_email }}
+}
+
+{{ frp_public_hostnames | join(', ') }} {
+	reverse_proxy 127.0.0.1:{{ frp_vhost_http_port }} {
+		header_up Host {host}
+	}
+}

@@ -1,0 +1,117 @@
+---
+deployment_environment: internal-demo
+release_lock_state: unlocked-internal-demo
+allow_unlocked_revisions: true
+
+# 当前阶段可以使用可变标签；切换 production inventory 前必须改为 digest 或不可变标签。
+image_delivery_mode: registry
+deployment_registry: ghcr.io
+deployment_registry_username: "{{ vault_ghcr_username | default('') }}"
+deployment_registry_token: "{{ vault_ghcr_token | default('') }}"
+deployment_image_tag: internal-demo
+customer_frappe_image: "ghcr.io/transinfosh/tai-customer:{{ deployment_image_tag }}"
+control_frappe_image: "ghcr.io/transinfosh/tai-control:{{ deployment_image_tag }}"
+tai_service_image: "ghcr.io/transinfosh/tai-service:{{ deployment_image_tag }}"
+tbi_engine_image: "ghcr.io/transinfosh/tbi-engine:{{ deployment_image_tag }}"
+tai_auth_image: "ghcr.io/transinfosh/tai-auth:{{ deployment_image_tag }}"
+frappe_docker_repo: https://github.com/transinfosh/frappe_docker.git
+frappe_docker_ref: main
+
+customer_site_name: tai.trinfo.net
+runtime_public_hostname: api.trinfo.net
+control_site_name: control.trinfo.net
+auth_public_hostname: auth.trinfo.net
+
+# cloudflare 或 frp。业务域名保持不变时，切换入口不需要修改应用配置。
+ingress_provider: frp
+cloudflared_download_url: https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+
+# 内部演示环境通过局域网代理加速公共镜像与构建依赖下载。
+deployment_http_proxy: http://192.168.2.252:7897
+deployment_no_proxy: >-
+  localhost,127.0.0.1,::1,host.docker.internal,
+  192.168.2.0/24,10.0.0.0/8,172.16.0.0/12,
+  db,redis-cache,redis-queue,websocket,frontend,frappe-control-frontend-1,tbi-engine,{{ control_site_name }},
+  tai-runtime-postgres,mirrors.aliyun.com
+
+python_container_apt_mirror: https://mirrors.aliyun.com
+
+# FRP 在 ingress_provider=frp 时使用。relay_nodes 上部署 frps 与 Caddy，
+# customer/runtime/control 节点上部署 frpc。
+frp_version: "0.68.0"
+frp_server_archive_path: "{{ playbook_dir }}/../artifacts/frp_{{ frp_version }}_linux_amd64.tar.gz"
+frp_server_addr: "150.158.13.139"
+frp_server_port: 7000
+frp_vhost_http_port: 8080
+frp_caddy_email: "adam.wu@trinfo.net"
+frp_control_stcp_proxy_name: tai-control-private
+frp_public_hostnames:
+  - "{{ customer_site_name }}"
+  - "{{ runtime_public_hostname }}"
+  - "{{ auth_public_hostname }}"
+
+source_mode: local_bundle
+source_bundle_path: "{{ playbook_dir }}/../artifacts/tai-source-current.tar.gz"
+source_bundle_checksum_path: "{{ source_bundle_path }}.sha256"
+source_root: /opt/tai-source/current
+secrets_root: /etc/tai-deploy/secrets
+
+runtime_database_name: tai_runtime
+runtime_database_port: 5433
+runtime_database_user: tai_runtime_app
+runtime_database_owner: tai_runtime_owner
+
+tai_service_port: 8765
+tai_auth_port: 8780
+tbi_engine_port: 8770
+tai_service_workers: 2
+tbi_engine_workers: 2
+
+embedding_provider_key: bailian-beijing
+embedding_base_url: https://ws-amm0zbv2ox3l8lef.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+embedding_model: text-embedding-v4
+embedding_dimensions: 1024
+embedding_timeout_seconds: 180
+embedding_backfill_batch_size: 4
+tai_service_allow_insecure_http: true
+control_internal_base_url: "http://{{ control_site_name }}:8080"
+phoenix_internal_base_url: "http://{{ hostvars[groups['control_nodes'][0]].ansible_host }}:{{ phoenix_port }}"
+bootstrap_tenant_key: internal-demo
+bootstrap_tenant_title: 内部演示客户
+bootstrap_credential_label: tai-demo-customer-01
+
+# 内部演示环境连接现有 SQL Server，并发布版本化 SAP Business One Benchmark 资产。
+enable_benchmark: true
+benchmark_mssql_host: 192.168.2.27
+benchmark_mssql_port: 1433
+benchmark_mssql_database: tai_benchmark_set
+benchmark_mssql_username: tai_benchmark_app
+benchmark_project_name: TAI_BENCHMARK
+benchmark_connection_name: TAI_BENCHMARK_MSSQL
+benchmark_project_members:
+  - adam.wu@trinfo.net
+benchmark_mssql_password_file: /run/secrets/benchmark_mssql_password
+benchmark_mdl_container_path: /tmp/tai-benchmark-mdl.json
+benchmark_knowledge_container_path: >-
+  {{ '/app/deploy/benchmark-knowledge'
+     if image_delivery_mode == 'registry'
+     else '/tmp/tai-benchmark-knowledge' }}
+
+enable_phoenix: true
+phoenix_port: 6006
+phoenix_image: arizephoenix/phoenix:latest
+phoenix_postgres_image: postgres:16
+phoenix_bind_addresses:
+  - 127.0.0.1
+  - "{{ hostvars[groups['control_nodes'][0]].ansible_host }}"
+
+common_timezone: Asia/Shanghai
+common_apt_packages:
+  - ca-certificates
+  - curl
+  - git
+  - jq
+  - openssl
+  - rsync
+  - tar
+  - unzip

@@ -1,0 +1,111 @@
+---
+- name: 确定 FRP 架构
+  ansible.builtin.set_fact:
+    frp_arch: "{{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }}"
+
+- name: 校验 FRP 架构受支持
+  ansible.builtin.assert:
+    that:
+      - ansible_architecture in ['x86_64', 'aarch64']
+    fail_msg: "不支持的 FRP 架构：{{ ansible_architecture }}"
+
+- name: 安装 Caddy
+  ansible.builtin.apt:
+    name: caddy
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    lock_timeout: 300
+
+- name: 创建 FRP 系统用户
+  ansible.builtin.user:
+    name: frp
+    system: true
+    shell: /usr/sbin/nologin
+    home: /var/lib/frp
+    create_home: true
+
+- name: 分发 FRP Server 安装包
+  ansible.builtin.copy:
+    src: "{{ frp_server_archive_path }}"
+    dest: "/tmp/frp-{{ frp_version }}.tar.gz"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: 解压 FRP Server
+  ansible.builtin.unarchive:
+    src: "/tmp/frp-{{ frp_version }}.tar.gz"
+    dest: /opt
+    remote_src: true
+    creates: "/opt/frp_{{ frp_version }}_linux_{{ frp_arch }}/frps"
+
+- name: 安装 FRP Server
+  ansible.builtin.copy:
+    src: "/opt/frp_{{ frp_version }}_linux_{{ frp_arch }}/frps"
+    dest: /usr/local/bin/frps
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  notify: 重启 FRP Server
+
+- name: 创建 FRP 配置目录
+  ansible.builtin.file:
+    path: /etc/frp
+    state: directory
+    owner: root
+    group: frp
+    mode: "0750"
+
+- name: 写入 FRP Server 配置
+  ansible.builtin.template:
+    src: frps.toml.j2
+    dest: /etc/frp/frps.toml
+    owner: root
+    group: frp
+    mode: "0640"
+  no_log: true
+  notify: 重启 FRP Server
+
+- name: 校验 FRP Server 配置
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/frps
+      - verify
+      - -c
+      - /etc/frp/frps.toml
+  changed_when: false
+  no_log: true
+
+- name: 写入 FRP Server Systemd 服务
+  ansible.builtin.template:
+    src: frps.service.j2
+    dest: /etc/systemd/system/tai-frps.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: 重启 FRP Server
+
+- name: 启用 FRP Server
+  ansible.builtin.systemd_service:
+    name: tai-frps
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: 写入 Caddy 配置
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: /etc/caddy/Caddyfile
+    owner: root
+    group: root
+    mode: "0644"
+    validate: caddy validate --config %s --adapter caddyfile
+  notify: 重载 Caddy
+
+- name: 启用 Caddy
+  ansible.builtin.systemd_service:
+    name: caddy
+    enabled: true
+    state: started

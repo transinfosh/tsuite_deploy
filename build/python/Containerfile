@@ -1,0 +1,32 @@
+ARG PYTHON_IMAGE=python:3.11-slim-bookworm
+FROM ${PYTHON_IMAGE}
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_PROJECT_ENVIRONMENT=/app/.venv \
+    PATH=/app/.venv/bin:$PATH
+
+ARG INSTALL_MSSQL_DRIVER=false
+RUN apt-get update && apt-get install --no-install-recommends -y \
+    ca-certificates curl build-essential libpq5 libgomp1 unixodbc \
+    && if [ "${INSTALL_MSSQL_DRIVER}" = "true" ]; then \
+        curl -sSL -o /tmp/packages-microsoft-prod.deb \
+            https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb \
+        && dpkg -i /tmp/packages-microsoft-prod.deb \
+        && rm /tmp/packages-microsoft-prod.deb \
+        && apt-get update \
+        && ACCEPT_EULA=Y apt-get install --no-install-recommends -y \
+            msodbcsql18 libgssapi-krb5-2; \
+    fi \
+    && pip install --no-cache-dir uv \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY . /app
+
+ARG UV_SYNC_ARGS=""
+RUN uv sync --frozen --no-dev ${UV_SYNC_ARGS}
+
+RUN useradd --system --uid 10001 --home-dir /app --shell /usr/sbin/nologin tai \
+    && chown -R tai:tai /app
+USER tai

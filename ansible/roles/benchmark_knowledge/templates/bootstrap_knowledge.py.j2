@@ -1,0 +1,91 @@
+import json
+from pathlib import Path
+
+import yaml
+
+from tai_service.knowledge import (
+    publish_runtime_knowledge_release,
+    retrieve_runtime_knowledge_context,
+    save_runtime_knowledge_document,
+    save_runtime_knowledge_sql_pair,
+)
+from tai_service.server import get_scoped_runtime_store
+
+
+def parse_front_matter(value):
+    if not value.startswith("---\n"):
+        return {}, value
+    marker = value.find("\n---\n", 4)
+    if marker < 0:
+        raise ValueError("knowledge_front_matter_not_closed")
+    metadata = yaml.safe_load(value[4:marker]) or {}
+    if not isinstance(metadata, dict):
+        raise ValueError("knowledge_front_matter_invalid")
+    return metadata, value[marker + 5 :].lstrip("\n")
+
+
+site = {{ customer_site_name | to_json }}
+project_id = {{ benchmark_project_name | to_json }}
+knowledge_path = Path({{ benchmark_knowledge_container_path | to_json }})
+document_count = 0
+
+# The bootstrap runs in a short-lived process rather than an Uvicorn worker.
+# Initialize the scoped store so the database-backed model policy loader is registered.
+get_scoped_runtime_store()
+
+for kind in ("rules", "glossary", "metrics", "caveats"):
+    for path in sorted((knowledge_path / kind).glob("*.md")):
+        metadata, content = parse_front_matter(path.read_text(encoding="utf-8"))
+        save_runtime_knowledge_document(
+            site,
+            project_id,
+            kind,
+            path.stem,
+            content,
+            metadata=metadata,
+        )
+        document_count += 1
+
+for path in sorted((knowledge_path / "sql").glob("*.md")):
+    metadata, _content = parse_front_matter(path.read_text(encoding="utf-8"))
+    save_runtime_knowledge_sql_pair(
+        site,
+        project_id,
+        nl=metadata["nl"],
+        sql=metadata["sql"],
+        source=metadata.get("source") or "project",
+        datasource=metadata.get("datasource"),
+        tags=metadata.get("tags"),
+        models=metadata.get("models"),
+        slug=path.stem,
+    )
+    document_count += 1
+
+release = publish_runtime_knowledge_release(
+    site,
+    project_id,
+    published_by="system:internal-demo-bootstrap",
+)
+context = retrieve_runtime_knowledge_context(
+    site,
+    project_id,
+    "销售发票未收金额、取消状态和币种",
+    datasource="mssql",
+    knowledge_release_id=release["release_id"],
+)
+if "pgvector" not in context.get("strategy", ""):
+    raise RuntimeError("benchmark_knowledge_pgvector_not_ready")
+
+print(
+    "TAI_BENCHMARK_KNOWLEDGE="
+    + json.dumps(
+        {
+            "documents": document_count,
+            "release_id": release.get("release_id"),
+            "knowledge_hash": release.get("knowledge_hash"),
+            "strategy": context.get("strategy"),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+)

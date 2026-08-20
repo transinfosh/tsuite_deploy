@@ -1,0 +1,112 @@
+---
+- name: 读取控制站点数据库配置
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - frappe-control-backend-1
+      - cat
+      - "/home/frappe/frappe-bench/sites/{{ control_site_name }}/site_config.json"
+  register: control_site_config
+  changed_when: false
+  no_log: true
+
+- name: 解析控制站点数据库名
+  ansible.builtin.set_fact:
+    control_site_database_name: "{{ (control_site_config.stdout | from_json).db_name }}"
+  no_log: true
+
+- name: 启用控制站点 pgvector 扩展
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - frappe-control-db-1
+      - psql
+      - -v
+      - ON_ERROR_STOP=1
+      - -U
+      - postgres
+      - -d
+      - "{{ control_site_database_name }}"
+      - -c
+      - CREATE EXTENSION IF NOT EXISTS vector
+  changed_when: false
+  no_log: true
+
+- name: 初始化控制面向量索引
+  ansible.builtin.command: >-
+    docker compose --env-file /opt/tai-deploy/frappe-control/.env
+    -p frappe-control
+    -f /opt/tai-deploy/frappe-control/frappe_docker/compose.yaml
+    -f /opt/tai-deploy/frappe-control/frappe_docker/overrides/compose.redis.yaml
+    -f /opt/tai-deploy/frappe-control/frappe_docker/overrides/compose.postgres.yaml
+    -f /opt/tai-deploy/frappe-control/compose.generated.yml
+    exec -T backend bench --site {{ control_site_name }} execute
+    tai_control.vector_store.ensure_runtime_vector_store
+  changed_when: false
+
+- name: 写入控制面部署设置脚本
+  ansible.builtin.template:
+    src: configure_settings.py.j2
+    dest: /opt/tai-deploy/configure-control-plane-settings.py
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: 复制控制面部署设置脚本到 Frappe backend
+  ansible.builtin.command:
+    argv:
+      - docker
+      - cp
+      - /opt/tai-deploy/configure-control-plane-settings.py
+      - frappe-control-backend-1:/tmp/configure-control-plane-settings.py
+  changed_when: false
+
+- name: 同步控制面公开 Issuer 与 Runtime 地址
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - frappe-control-backend-1
+      - bench
+      - --site
+      - "{{ control_site_name }}"
+      - execute
+      - "(__import__('runpy').run_path('/tmp/configure-control-plane-settings.py'), None)[1]"
+  register: control_plane_settings_result
+  changed_when: "'\"changed\": true' in control_plane_settings_result.stdout"
+
+- name: 同步控制面 Runtime Store HMAC 密钥
+  ansible.builtin.command: >-
+    docker compose --env-file /opt/tai-deploy/frappe-control/.env
+    -p frappe-control
+    -f /opt/tai-deploy/frappe-control/frappe_docker/compose.yaml
+    -f /opt/tai-deploy/frappe-control/frappe_docker/overrides/compose.redis.yaml
+    -f /opt/tai-deploy/frappe-control/frappe_docker/overrides/compose.postgres.yaml
+    -f /opt/tai-deploy/frappe-control/compose.generated.yml
+    exec -T backend bench --site {{ control_site_name }} execute
+    tai_control.install.sync_usage_ingest_secret_from_file
+  changed_when: false
+  no_log: true
+
+- name: 初始化内部演示租户与客户端凭据
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - frappe-control-backend-1
+      - bench
+      - --site
+      - "{{ control_site_name }}"
+      - execute
+      - tai_control.install.ensure_bootstrap_tenant_from_files
+      - --kwargs
+      - >-
+        {{ {
+          'tenant_key': bootstrap_tenant_key,
+          'tenant_title': bootstrap_tenant_title,
+          'credential_label': bootstrap_credential_label
+        } | to_json }}
+  changed_when: false
+  no_log: true

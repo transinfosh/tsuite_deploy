@@ -1,0 +1,32 @@
+services:
+  db:
+    image: {{ phoenix_postgres_image | to_json }}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: phoenix
+      POSTGRES_PASSWORD: ${PHOENIX_DB_PASSWORD}
+      POSTGRES_DB: phoenix
+    volumes:
+      - phoenix-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U phoenix"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  phoenix:
+    image: {{ phoenix_image | to_json }}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PHOENIX_SQL_DATABASE_URL: postgresql://phoenix:${PHOENIX_DB_PASSWORD}@db:5432/phoenix
+      PHOENIX_ENABLE_AUTH: "true"
+      PHOENIX_SECRET: ${PHOENIX_SECRET}
+    ports:
+{% for address in phoenix_bind_addresses %}
+      - "{{ address }}:{{ phoenix_port }}:6006"
+{% endfor %}
+
+volumes:
+  phoenix-postgres-data:

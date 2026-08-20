@@ -5,11 +5,250 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 bash -n "$repo_root/deploy.sh"
 bash -n "$repo_root/install.sh"
+bash -n "$repo_root/tools/create-source-bundle.sh"
 "$repo_root/deploy.sh" --help | grep -q -- "--dry-run"
 
 if command -v shellcheck >/dev/null 2>&1; then
-	shellcheck "$repo_root/deploy.sh" "$repo_root/install.sh"
+	shellcheck "$repo_root/deploy.sh" "$repo_root/install.sh" "$repo_root/tools/create-source-bundle.sh"
 fi
+
+python3 - "$repo_root/ansible" <<'PY'
+import pathlib
+import sys
+
+import yaml
+
+
+class AnsibleLoader(yaml.SafeLoader):
+    pass
+
+
+AnsibleLoader.add_constructor(
+    "!vault", lambda loader, node: loader.construct_scalar(node)
+)
+
+for path in pathlib.Path(sys.argv[1]).rglob("*.yml"):
+    if "templates" in path.parts:
+        continue
+    yaml.load(path.read_text(encoding="utf-8"), Loader=AnsibleLoader)
+
+playbook_dir = pathlib.Path(sys.argv[1]) / "playbooks"
+for name in ("preflight.yml", "relay.yml", "customer.yml", "control.yml", "runtime.yml", "verify.yml"):
+    document = yaml.safe_load((playbook_dir / name).read_text(encoding="utf-8"))
+    for play in document:
+        assert "{{ inventory_dir }}/vault.yml" in play.get("vars_files", []), (
+            f"{name} 中的每个 play 都必须加载当前 inventory 的 vault.yml"
+        )
+
+verify_playbook = (playbook_dir / "verify.yml").read_text(encoding="utf-8")
+assert "验证客户 Frappe 到 tBI Engine 的容器网络" in verify_playbook
+assert "http://tbi-engine:{{ tbi_engine_port }}/readyz" in verify_playbook
+
+cloudflared_service = (
+    pathlib.Path(sys.argv[1])
+    / "roles/ingress/templates/cloudflared.service.j2"
+).read_text(encoding="utf-8")
+assert "--token-file /etc/tai-cloudflared.token" in cloudflared_service
+assert "--token ${TUNNEL_TOKEN}" not in cloudflared_service
+
+runtime_playbook = (playbook_dir / "runtime.yml").read_text(encoding="utf-8")
+assert "@tai-runtime-postgres:5432/" in runtime_playbook
+assert "@host.docker.internal:{{ runtime_database_port }}/" not in runtime_playbook
+assert "role: embedding" not in runtime_playbook
+assert "qwen_api_key:" in runtime_playbook
+
+tai_service_config = (
+    pathlib.Path(sys.argv[1])
+    / "roles/tai_service_config/templates/config.json.j2"
+).read_text(encoding="utf-8")
+assert '"baseUrl": {{ embedding_base_url | to_json }}' in tai_service_config
+assert '"credentialRef": "file:/run/secrets/qwen_api_key"' in tai_service_config
+assert '"timeoutSeconds": {{ embedding_timeout_seconds }}' in tai_service_config
+assert '"modelRoutingPolicy": {' in tai_service_config
+assert '"provider_key": "openai"' in tai_service_config
+assert '"model_key": "deepseek-v4-flash"' in tai_service_config
+assert '"capabilities": ["tool_calling", "structured_output"]' in tai_service_config
+assert '"runtimeStoreUrl": "{{ control_internal_base_url }}/' in tai_service_config
+assert '"issuer": "https://{{ control_site_name }}"' in tai_service_config
+assert '"collectorEndpoint": "{{ phoenix_internal_base_url }}/v1/traces"' in tai_service_config
+assert "python_container_extra_hosts:" in runtime_playbook
+
+control_playbook = (playbook_dir / "control.yml").read_text(encoding="utf-8")
+assert "frappe_bind_addresses:" in control_playbook
+assert '- "{{ ansible_host }}"' in control_playbook
+assert "role: tai_control_config" in control_playbook
+assert "tai_control_usage:" in control_playbook
+
+control_document = yaml.safe_load(control_playbook)
+control_roles = control_document[0]["roles"]
+control_image_role = next(
+    role for role in control_roles if isinstance(role, dict) and role.get("role") == "frappe_local_image"
+)
+control_stack_role = next(
+    role for role in control_roles if isinstance(role, dict) and role.get("role") == "frappe_stack"
+)
+assert {"frappe_ext", "tbi", "tai", "tai_control"}.issubset(
+    set(control_image_role["vars"]["frappe_local_apps"])
+), "控制面会话审计复用 tAI 前端，因此控制镜像必须构建 tAI 及其依赖的静态资源"
+assert control_stack_role["vars"]["frappe_apps"] == ["tai_control"], (
+    "控制站点只安装 tai_control；tAI、tBI 和 frappe_ext 仅用于构建审计前端资源"
+)
+
+control_config_tasks = (
+    pathlib.Path(sys.argv[1])
+    / "roles/tai_control_config/tasks/main.yml"
+).read_text(encoding="utf-8")
+assert "CREATE EXTENSION IF NOT EXISTS vector" in control_config_tasks
+assert "tai_control.vector_store.ensure_runtime_vector_store" in control_config_tasks
+assert "tai_control.install.ensure_bootstrap_tenant_from_files" in control_config_tasks
+assert "tai_control_client_secret:" in control_playbook
+
+control_settings_script = (
+    pathlib.Path(sys.argv[1])
+    / "roles/tai_control_config/templates/configure_settings.py.j2"
+).read_text(encoding="utf-8")
+assert '"issuer": "https://{{ control_site_name }}"' in control_settings_script
+assert '"agent_runtime_url": "https://{{ runtime_public_hostname }}"' in control_settings_script
+
+customer_playbook = (playbook_dir / "customer.yml").read_text(encoding="utf-8")
+assert "tai_control_client_secret_file: /run/secrets/tai_control_client_secret" in customer_playbook
+assert 'tai_control_client_id: "{{ vault_tai_control_client_id }}"' in customer_playbook
+assert "python_container_install_mssql_driver: true" in customer_playbook
+assert 'tbi_engine_base_url: "http://tbi-engine:{{ tbi_engine_port }}"' in customer_playbook
+assert "python_container_network_aliases:" in customer_playbook
+assert "role: benchmark_project" in customer_playbook
+assert "role: benchmark_knowledge" in customer_playbook
+assert "role: benchmark_agent" in customer_playbook
+
+benchmark_project_script = (
+    pathlib.Path(sys.argv[1])
+    / "roles/benchmark_project/templates/bootstrap_project.py.j2"
+).read_text(encoding="utf-8")
+assert "import_project_mdl" in benchmark_project_script
+assert "publish_project" in benchmark_project_script
+assert 'service_url + "/v1/projects/register"' in benchmark_project_script
+assert "tai_control.api.auth.register_project" not in benchmark_project_script
+assert "initialize_tenant_binding" in benchmark_project_script
+assert "benchmark_project_members" in benchmark_project_script
+assert 'project.append("members", {"user": member})' in benchmark_project_script
+
+benchmark_knowledge_script = (
+    pathlib.Path(sys.argv[1])
+    / "roles/benchmark_knowledge/templates/bootstrap_knowledge.py.j2"
+).read_text(encoding="utf-8")
+assert "publish_runtime_knowledge_release" in benchmark_knowledge_script
+assert "retrieve_runtime_knowledge_context" in benchmark_knowledge_script
+
+benchmark_knowledge_tasks = (
+    pathlib.Path(sys.argv[1])
+    / "roles/benchmark_knowledge/tasks/main.yml"
+).read_text(encoding="utf-8")
+assert "规范化容器内 Benchmark Knowledge 读取权限" in benchmark_knowledge_tasks
+assert "a+rX" in benchmark_knowledge_tasks
+
+benchmark_agent_script = (
+    pathlib.Path(sys.argv[1])
+    / "roles/benchmark_agent/templates/bootstrap_agent.py.j2"
+).read_text(encoding="utf-8")
+assert "publish_agent_draft" in benchmark_agent_script
+assert "activate_agent_release" in benchmark_agent_script
+assert '"agent_key": "data_qa"' in benchmark_agent_script
+assert '"kind": "ask_router"' in benchmark_agent_script
+assert '"name": "semantic_query"' in benchmark_agent_script
+
+frappe_compose = (
+    pathlib.Path(sys.argv[1])
+    / "roles/frappe_stack/templates/compose.generated.yml.j2"
+).read_text(encoding="utf-8")
+assert "for address in frappe_bind_addresses" in frappe_compose
+assert "tai.deploy.secrets-checksum" in frappe_compose
+assert "deployment_no_proxy" in frappe_compose
+
+frappe_stack_tasks = (
+    pathlib.Path(sys.argv[1])
+    / "roles/frappe_stack/tasks/main.yml"
+).read_text(encoding="utf-8")
+assert "'Recreated' in (frappe_compose_up.stdout ~ frappe_compose_up.stderr)" in frappe_stack_tasks
+assert "notify: 刷新 Frappe frontend 上游解析" in frappe_stack_tasks
+
+frappe_stack_handlers = (
+    pathlib.Path(sys.argv[1])
+    / "roles/frappe_stack/handlers/main.yml"
+).read_text(encoding="utf-8")
+assert "name: 刷新 Frappe frontend 上游解析" in frappe_stack_handlers
+assert "restart frontend" in frappe_stack_handlers
+
+frappe_local_image_tasks = (
+    pathlib.Path(sys.argv[1])
+    / "roles/frappe_local_image/tasks/main.yml"
+).read_text(encoding="utf-8")
+assert "frappe_local_image_expected_apps" in frappe_local_image_tasks
+assert "frappe_local_image_current_apps" in frappe_local_image_tasks
+assert "frappe_local_image_requires_build" in frappe_local_image_tasks
+assert 'tai.local-apps={{ frappe_local_image_expected_apps }}' in frappe_local_image_tasks
+
+internal_demo_vars = (
+    pathlib.Path(sys.argv[1])
+    / "inventories/internal-demo/group_vars/all.yml"
+).read_text(encoding="utf-8")
+assert "tbi-engine" in internal_demo_vars
+assert "benchmark_project_members:" in internal_demo_vars
+assert "adam.wu@trinfo.net" in internal_demo_vars
+assert 'frp_vhost_http_port: 8080' in internal_demo_vars
+assert "frp_caddy_email:" in internal_demo_vars
+
+relay_playbook = (playbook_dir / "relay.yml").read_text(encoding="utf-8")
+assert "hosts: relay_nodes" in relay_playbook
+assert "role: frp_server" in relay_playbook
+
+frp_server_tasks = (
+    pathlib.Path(sys.argv[1])
+    / "roles/frp_server/tasks/main.yml"
+).read_text(encoding="utf-8")
+assert "安装 Caddy" in frp_server_tasks
+assert "校验 FRP Server 配置" in frp_server_tasks
+assert 'src: "{{ frp_server_archive_path }}"' in frp_server_tasks
+
+frps_config = (
+    pathlib.Path(sys.argv[1])
+    / "roles/frp_server/templates/frps.toml.j2"
+).read_text(encoding="utf-8")
+assert 'proxyBindAddr = "127.0.0.1"' in frps_config
+assert 'transport.tls.force = true' in frps_config
+assert 'auth.token = "{{ vault_frp_auth_token }}"' in frps_config
+
+caddy_config = (
+    pathlib.Path(sys.argv[1])
+    / "roles/frp_server/templates/Caddyfile.j2"
+).read_text(encoding="utf-8")
+assert "frp_public_hostnames | join(', ')" in caddy_config
+assert "reverse_proxy 127.0.0.1:{{ frp_vhost_http_port }}" in caddy_config
+
+preflight_tasks = (
+    pathlib.Path(sys.argv[1])
+    / "roles/preflight/tasks/main.yml"
+).read_text(encoding="utf-8")
+assert "relay_nodes" in preflight_tasks
+assert "frp_caddy_email" in preflight_tasks
+assert "校验中转机基础容量" in preflight_tasks
+
+verify_playbook = (playbook_dir / "verify.yml").read_text(encoding="utf-8")
+assert "验证公网中转入口" in verify_playbook
+assert "tai-frps" in verify_playbook
+
+python_container_dockerfile = (
+    pathlib.Path(sys.argv[1])
+    / "roles/python_container/templates/Dockerfile.j2"
+).read_text(encoding="utf-8")
+assert "packages-microsoft-prod.deb" in python_container_dockerfile
+assert "msodbcsql18" in python_container_dockerfile
+
+python_container_compose = (
+    pathlib.Path(sys.argv[1])
+    / "roles/python_container/templates/compose.yml.j2"
+).read_text(encoding="utf-8")
+assert "python_container_network_aliases" in python_container_compose
+PY
 
 fixture_dir="$(mktemp -d /tmp/frappe-deploy-test.XXXXXX)"
 trap 'rm -rf -- "$fixture_dir"' EXIT

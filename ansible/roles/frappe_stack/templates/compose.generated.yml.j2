@@ -1,0 +1,78 @@
+services:
+  db:
+    image: {{ frappe_postgres_image | to_json }}
+  configurator:
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+  backend:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      NO_PROXY: {{ deployment_no_proxy | replace('\n', '') | replace(' ', '') | to_json }}
+      no_proxy: {{ deployment_no_proxy | replace('\n', '') | replace(' ', '') | to_json }}
+{% if frappe_secret_files %}
+    labels:
+      tai.deploy.secrets-checksum: {{ (frappe_secret_files | to_json | hash('sha256')) | to_json }}
+    volumes:
+{% for name in frappe_secret_files %}
+      - {{ (secrets_root ~ '/' ~ name ~ ':/run/secrets/' ~ name ~ ':ro') | to_json }}
+{% endfor %}
+{% endif %}
+  frontend:
+    ports:
+{% for address in frappe_bind_addresses %}
+      - {{ (address ~ ':' ~ frappe_http_port ~ ':8080') | to_json }}
+{% endfor %}
+  websocket:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      NO_PROXY: {{ deployment_no_proxy | replace('\n', '') | replace(' ', '') | to_json }}
+      no_proxy: {{ deployment_no_proxy | replace('\n', '') | replace(' ', '') | to_json }}
+  queue-short:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      NO_PROXY: {{ deployment_no_proxy | replace('\n', '') | replace(' ', '') | to_json }}
+      no_proxy: {{ deployment_no_proxy | replace('\n', '') | replace(' ', '') | to_json }}
+{% if frappe_secret_files %}
+    labels:
+      tai.deploy.secrets-checksum: {{ (frappe_secret_files | to_json | hash('sha256')) | to_json }}
+    volumes:
+{% for name in frappe_secret_files %}
+      - {{ (secrets_root ~ '/' ~ name ~ ':/run/secrets/' ~ name ~ ':ro') | to_json }}
+{% endfor %}
+{% endif %}
+  queue-long:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      NO_PROXY: {{ deployment_no_proxy | replace('\n', '') | replace(' ', '') | to_json }}
+      no_proxy: {{ deployment_no_proxy | replace('\n', '') | replace(' ', '') | to_json }}
+{% if frappe_secret_files %}
+    labels:
+      tai.deploy.secrets-checksum: {{ (frappe_secret_files | to_json | hash('sha256')) | to_json }}
+    volumes:
+{% for name in frappe_secret_files %}
+      - {{ (secrets_root ~ '/' ~ name ~ ':/run/secrets/' ~ name ~ ':ro') | to_json }}
+{% endfor %}
+{% endif %}
+  scheduler:
+    environment:
+      NO_PROXY: {{ deployment_no_proxy | replace('\n', '') | replace(' ', '') | to_json }}
+      no_proxy: {{ deployment_no_proxy | replace('\n', '') | replace(' ', '') | to_json }}
+{% if frappe_secret_files %}
+    labels:
+      tai.deploy.secrets-checksum: {{ (frappe_secret_files | to_json | hash('sha256')) | to_json }}
+    volumes:
+{% for name in frappe_secret_files %}
+      - {{ (secrets_root ~ '/' ~ name ~ ':/run/secrets/' ~ name ~ ':ro') | to_json }}
+{% endfor %}
+{% endif %}
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: {{ frappe_docker_subnet | to_json }}

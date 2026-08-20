@@ -1,0 +1,26 @@
+---
+- name: 创建 TAI Service 配置和数据目录
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: /etc/tai-service
+      owner: root
+      group: root
+      mode: "0750"
+    - path: /data/tai-service
+      owner: "10001"
+      group: "10001"
+      mode: "0750"
+
+- name: 写入 TAI Service 配置
+  ansible.builtin.template:
+    src: config.json.j2
+    dest: /etc/tai-service/config.json
+    owner: root
+    group: root
+    mode: "0444"
+  notify: 重启 TAI Service

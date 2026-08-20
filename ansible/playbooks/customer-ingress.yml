@@ -1,0 +1,11 @@
+---
+- name: 部署客户节点公网入口
+  hosts: customer_nodes
+  gather_facts: true
+  vars_files:
+    - "{{ inventory_dir }}/vault.yml"
+  roles:
+    - role: ingress
+      vars:
+        ingress_hostname: "{{ customer_site_name }}"
+        ingress_local_url: http://127.0.0.1:8080

@@ -1,0 +1,74 @@
+ARG FRAPPE_BRANCH=version-16
+ARG FRAPPE_IMAGE_PREFIX=ghcr.io/frappe
+
+FROM ${FRAPPE_IMAGE_PREFIX}/build:${FRAPPE_BRANCH} AS builder
+
+USER root
+COPY --chown=frappe:frappe apps /opt/tai-source/apps
+COPY --chown=frappe:frappe packages /opt/tai-source/packages
+
+USER frappe
+ARG LOCAL_APPS
+
+RUN set -eux; \
+    git config --global user.email "tai-build@localhost"; \
+    git config --global user.name "TAI Snapshot Builder"; \
+    for app in frappe ${LOCAL_APPS}; do \
+        cd "/opt/tai-source/apps/${app}"; \
+        git init -q -b local; \
+        git add -A; \
+        git commit -q -m "TAI deployment snapshot"; \
+    done; \
+    for package in /opt/tai-source/packages/*; do \
+        [ -d "${package}" ] || continue; \
+        cd "${package}"; \
+        git init -q -b local; \
+        git add -A; \
+        git commit -q -m "TAI deployment snapshot"; \
+    done
+
+RUN LOCAL_APPS="${LOCAL_APPS}" python -c 'import json, os; apps = os.environ["LOCAL_APPS"].split(); json.dump([{"url": f"/opt/tai-source/apps/{app}", "branch": "local"} for app in apps], open("/home/frappe/tai-apps.json", "w", encoding="utf-8"))'
+
+RUN mkdir -p /home/frappe/frappe-bench/packages && \
+    cp -a /opt/tai-source/packages/. /home/frappe/frappe-bench/packages/ && \
+    bench init \
+    --apps_path=/home/frappe/tai-apps.json \
+    --frappe-branch=local \
+    --frappe-path=/opt/tai-source/apps/frappe \
+    --ignore-exist \
+    --no-procfile \
+    --no-backups \
+    --skip-redis-config-generation \
+    --skip-assets \
+    /home/frappe/frappe-bench
+
+RUN cd /home/frappe/frappe-bench && \
+    bench build --production && \
+    echo "{}" > sites/common_site_config.json && \
+    find apps packages -mindepth 1 -path "*/.git" -exec rm -rf {} +
+
+FROM ${FRAPPE_IMAGE_PREFIX}/base:${FRAPPE_BRANCH} AS backend
+
+USER root
+RUN apt-get update && \
+    apt-get install --yes --no-install-recommends libodbc2 && \
+    rm -rf /var/lib/apt/lists/*
+
+USER frappe
+COPY --from=builder --chown=frappe:frappe /home/frappe/frappe-bench /home/frappe/frappe-bench
+
+WORKDIR /home/frappe/frappe-bench
+
+RUN cp -r /home/frappe/frappe-bench/sites/assets /home/frappe/frappe-bench/assets && \
+    rm -rf /home/frappe/frappe-bench/sites/assets
+
+VOLUME ["/home/frappe/frappe-bench/sites", "/home/frappe/frappe-bench/logs"]
+
+USER root
+COPY resources/core/main-entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY resources/core/start.sh /usr/local/bin/start.sh
+RUN chmod 755 /usr/local/bin/entrypoint.sh /usr/local/bin/start.sh
+
+USER frappe
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["start.sh"]

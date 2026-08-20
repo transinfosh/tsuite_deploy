@@ -1,0 +1,15 @@
+---
+python_container_root: "/opt/tai-deploy/{{ python_container_name }}"
+python_container_extras: []
+python_container_environment: {}
+python_container_secrets: {}
+python_container_mounts: []
+python_container_data_dirs: []
+python_container_networks: []
+python_container_network_aliases: []
+python_container_extra_hosts: []
+python_container_migrate_command: ""
+python_container_python_image: python:3.11-slim-bookworm
+python_container_apt_mirror: ""
+python_container_install_mssql_driver: false
+python_container_image: ""

@@ -1,0 +1,65 @@
+---
+- name: 创建 Runtime PostgreSQL 目录
+  ansible.builtin.file:
+    path: /opt/tai-deploy/runtime-postgres
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: 写入 Runtime PostgreSQL 环境
+  ansible.builtin.copy:
+    content: "POSTGRES_PASSWORD={{ vault_runtime_db_admin_password }}\n"
+    dest: /opt/tai-deploy/runtime-postgres/.env
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: 写入 Runtime PostgreSQL Compose
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: /opt/tai-deploy/runtime-postgres/compose.yml
+    owner: root
+    group: root
+    mode: "0640"
+
+- name: 启动 Runtime PostgreSQL
+  ansible.builtin.command: >-
+    docker compose --env-file /opt/tai-deploy/runtime-postgres/.env
+    -p tai-runtime-db -f /opt/tai-deploy/runtime-postgres/compose.yml up -d
+  register: runtime_db_up
+  changed_when: "'Started' in runtime_db_up.stdout or 'Created' in runtime_db_up.stderr"
+
+- name: 等待 Runtime PostgreSQL
+  ansible.builtin.command: >-
+    docker compose --env-file /opt/tai-deploy/runtime-postgres/.env
+    -p tai-runtime-db -f /opt/tai-deploy/runtime-postgres/compose.yml
+    exec -T db pg_isready -U postgres
+  register: runtime_db_ready
+  retries: 30
+  delay: 2
+  until: runtime_db_ready.rc == 0
+  changed_when: false
+
+- name: 写入 Runtime PostgreSQL 初始化 SQL
+  ansible.builtin.template:
+    src: initialize.sql.j2
+    dest: /opt/tai-deploy/runtime-postgres/initialize.sql
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: 复制初始化 SQL 到容器
+  ansible.builtin.command: >-
+    docker cp /opt/tai-deploy/runtime-postgres/initialize.sql
+    tai-runtime-postgres:/tmp/initialize.sql
+  changed_when: false
+
+- name: 初始化 Runtime PostgreSQL 角色和数据库
+  ansible.builtin.command: >-
+    docker exec tai-runtime-postgres psql -U postgres -v ON_ERROR_STOP=1
+    -f /tmp/initialize.sql
+  no_log: true
+  changed_when: false

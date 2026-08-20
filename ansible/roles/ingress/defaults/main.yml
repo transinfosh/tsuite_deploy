@@ -1,0 +1,5 @@
+---
+ingress_routes:
+  - hostname: "{{ ingress_hostname }}"
+    local_port: "{{ ingress_local_url.rsplit(':', 1)[1] | int }}"
+ingress_stcp_routes: []

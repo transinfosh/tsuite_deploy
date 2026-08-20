@@ -1,6 +1,13 @@
 .env
 .env.dry-run
+.vault-pass
+.venv-ansible/
 compose.generated.yaml
 compose.proxy.yaml
 deployment.state
 frappe_docker/
+ansible/inventories/*/hosts.yml
+ansible/inventories/*/vault.yml
+ansible/inventories/*/control_private.yml
+ansible/artifacts/*
+!ansible/artifacts/.gitkeep

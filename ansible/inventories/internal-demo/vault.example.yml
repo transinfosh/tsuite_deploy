@@ -1,0 +1,35 @@
+---
+# 复制为 vault.yml，然后执行：ansible-vault encrypt inventories/internal-demo/vault.yml
+vault_customer_db_password: change-me
+vault_customer_admin_password: change-me
+vault_control_db_password: change-me
+vault_control_admin_password: change-me
+vault_runtime_db_admin_password: change-me
+vault_runtime_db_app_password: change-me
+vault_benchmark_mssql_password: change-me
+
+vault_tbi_engine_token: replace-with-at-least-32-random-characters
+vault_tai_service_token: replace-with-at-least-32-random-characters
+vault_tai_control_usage_secret: replace-with-random-secret
+vault_phoenix_secret: replace-with-random-secret
+vault_phoenix_db_password: change-me
+vault_deepseek_api_key: replace-me
+vault_openai_api_key: replace-me
+vault_qwen_api_key: replace-me
+
+# 私有 GHCR 镜像拉取凭据。Token 只需要 read:packages；公开镜像可留空。
+vault_ghcr_username: ""
+vault_ghcr_token: ""
+
+# 每台机器使用独立 Tunnel Token。未使用的主机可以留空，但对应部署会失败。
+vault_cloudflare_tunnel_tokens:
+  tai-customer-01: replace-me
+  tai-runtime-01: replace-me
+  tai-control-01: replace-me
+
+# ingress_provider=frp 时使用。
+vault_frp_auth_token: replace-me
+
+# 首次部署后由控制平面生成，二阶段 bootstrap 再写入客户站点。
+vault_tai_control_client_id: ""
+vault_tai_control_client_secret: ""

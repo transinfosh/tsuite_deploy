@@ -1,0 +1,83 @@
+---
+- name: 查找 TAI Service 容器
+  ansible.builtin.command: >-
+    docker ps --filter label=com.docker.compose.project=tai-tai-service
+    --filter label=com.docker.compose.service=service --format {% raw %}'{{.Names}}'{% endraw %}
+  register: benchmark_tai_service_container
+  changed_when: false
+
+- name: 校验 TAI Service 容器
+  ansible.builtin.assert:
+    that:
+      - benchmark_tai_service_container.stdout_lines | length == 1
+    fail_msg: 无法唯一定位 TAI Service 容器。
+
+- name: 写入 Benchmark Knowledge 初始化脚本
+  ansible.builtin.template:
+    src: bootstrap_knowledge.py.j2
+    dest: /opt/tai-deploy/bootstrap-benchmark-knowledge.py
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: 复制 Benchmark Knowledge 到 TAI Service
+  ansible.builtin.command:
+    argv:
+      - docker
+      - cp
+      - "{{ source_root }}/apps/tbi/evaluation/tai_benchmark/knowledge/."
+      - "{{ benchmark_tai_service_container.stdout }}:{{ benchmark_knowledge_container_path }}"
+  changed_when: false
+  when: image_delivery_mode == 'local_bundle'
+
+- name: 规范化容器内 Benchmark Knowledge 读取权限
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - --user
+      - "0"
+      - "{{ benchmark_tai_service_container.stdout }}"
+      - chmod
+      - -R
+      - a+rX
+      - "{{ benchmark_knowledge_container_path }}"
+  changed_when: false
+  when: image_delivery_mode == 'local_bundle'
+
+- name: 复制 Benchmark Knowledge 初始化脚本到 TAI Service
+  ansible.builtin.command:
+    argv:
+      - docker
+      - cp
+      - /opt/tai-deploy/bootstrap-benchmark-knowledge.py
+      - "{{ benchmark_tai_service_container.stdout }}:/tmp/bootstrap-benchmark-knowledge.py"
+  changed_when: false
+
+- name: 校验容器内 Benchmark Knowledge 初始化脚本可读
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ benchmark_tai_service_container.stdout }}"
+      - test
+      - -r
+      - /tmp/bootstrap-benchmark-knowledge.py
+  changed_when: false
+
+- name: 发布 Benchmark Knowledge
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ benchmark_tai_service_container.stdout }}"
+      - python
+      - /tmp/bootstrap-benchmark-knowledge.py
+  register: benchmark_knowledge_bootstrap
+  changed_when: "'TAI_BENCHMARK_KNOWLEDGE=' in benchmark_knowledge_bootstrap.stdout"
+
+- name: 校验 Benchmark Knowledge 发布结果
+  ansible.builtin.assert:
+    that:
+      - "'postgres_hybrid_pgvector' in benchmark_knowledge_bootstrap.stdout"
+    fail_msg: Benchmark Knowledge 未完成 pgvector 检索验证。

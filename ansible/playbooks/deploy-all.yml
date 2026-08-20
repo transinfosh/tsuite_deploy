@@ -1,0 +1,13 @@
+---
+- name: 执行部署前检查
+  import_playbook: preflight.yml
+- name: 部署公网中转入口
+  import_playbook: relay.yml
+- name: 部署控制面
+  import_playbook: control.yml
+- name: 部署 AI 运行面
+  import_playbook: runtime.yml
+- name: 部署客户数据面
+  import_playbook: customer.yml
+- name: 执行部署后验证
+  import_playbook: verify.yml

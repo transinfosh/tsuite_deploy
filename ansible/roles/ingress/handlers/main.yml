@@ -1,0 +1,16 @@
+---
+- name: 重载入口 Systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: 重启 Cloudflare Tunnel
+  ansible.builtin.systemd_service:
+    name: tai-cloudflared
+    state: restarted
+  when: ingress_provider == 'cloudflare' and not ansible_check_mode
+
+- name: 重启 FRP Client
+  ansible.builtin.systemd_service:
+    name: tai-frpc
+    state: restarted
+  when: ingress_provider == 'frp' and not ansible_check_mode

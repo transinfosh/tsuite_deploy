@@ -1,0 +1,78 @@
+{
+  "dataRoot": "/data/tai-service",
+  "environment": "production",
+  "production": {"allowInsecureHttp": {{ tai_service_allow_insecure_http | bool | lower }}},
+  "runtimeDatabaseUrl": "env:TAI_RUNTIME_DATABASE_URL",
+  "runtime": {
+    "globalRequestConcurrency": 16,
+    "perSiteConcurrency": 8,
+    "perProjectConcurrency": 4
+  },
+  "modelRoutingPolicy": {
+    "kind": "model_routing_policy",
+    "version": 1,
+    "routes": [
+      {
+        "provider_key": "openai",
+        "model_key": "deepseek-v4-flash",
+        "capabilities": ["tool_calling", "structured_output"]
+      }
+    ]
+  },
+  "modelProviders": {
+    "openai": {
+      "label": "DeepSeek",
+      "adapter": "openai",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "credentialRef": "env:DEEPSEEK_API_KEY"
+    },
+    {{ embedding_provider_key | to_json }}: {
+      "label": "阿里云百炼（北京）",
+      "adapter": "alibaba",
+      "baseUrl": {{ embedding_base_url | to_json }},
+      "credentialRef": "file:/run/secrets/qwen_api_key"
+    }
+  },
+  "devConsole": {"enabled": false},
+  "serviceTokenFile": "/run/secrets/tai_service_token",
+  "controlPlane": {
+    "baseUrl": "{{ control_internal_base_url }}",
+    "authMode": "hybrid",
+    "issuer": "https://{{ control_site_name }}",
+    "audience": "tai-service",
+    "jwksUrl": "{{ control_internal_base_url }}/api/method/tai_control.api.auth.get_jwks",
+    "authorizeUrl": "{{ control_internal_base_url }}/api/method/tai_control.api.authorization.authorize_ask",
+    "releaseUrl": "{{ control_internal_base_url }}/api/method/tai_control.api.authorization.release_ask",
+    "usageUrl": "{{ control_internal_base_url }}/api/method/tai_control.api.usage.ingest_usage_event",
+    "harnessStoreUrl": "{{ control_internal_base_url }}/api/method/tai_control.api.harness.execute_step_store",
+    "memoryStoreUrl": "{{ control_internal_base_url }}/api/method/tai_control.api.memory.execute_memory_store",
+    "runtimeStoreUrl": "{{ control_internal_base_url }}/api/method/tai_control.api.runtime_store.execute_runtime_store",
+    "usageIngestSecretFile": "/run/secrets/tai_control_usage",
+    "usageOutboxPath": "/data/tai-service/usage-outbox"
+  },
+  "observability": {
+    "enabled": {{ enable_phoenix | bool | lower }},
+    "collectorEndpoint": "{{ phoenix_internal_base_url }}/v1/traces",
+    "projectName": "tai-service",
+    "batch": true,
+    "includeContent": false
+  },
+  "llm": {
+    "provider": "openai",
+    "model": "deepseek-v4-flash",
+    "baseUrl": "https://api.deepseek.com/v1",
+    "apiKey": "env:DEEPSEEK_API_KEY",
+    "temperature": 0,
+    "maxTokens": 4096,
+    "contextWindowTokens": 64000,
+    "topP": 1
+  },
+  "embedding": {
+    "model": {{ embedding_model | to_json }},
+    "baseUrl": {{ embedding_base_url | to_json }},
+    "apiKey": "file:/run/secrets/qwen_api_key",
+    "dimensions": {{ embedding_dimensions }},
+    "timeoutSeconds": {{ embedding_timeout_seconds }},
+    "backfillBatchSize": {{ embedding_backfill_batch_size }}
+  }
+}

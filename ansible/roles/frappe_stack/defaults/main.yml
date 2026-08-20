@@ -1,0 +1,10 @@
+---
+frappe_stack_root: "/opt/tai-deploy/frappe-{{ frappe_stack_name }}"
+frappe_http_port: 8080
+frappe_bind_addresses:
+  - 127.0.0.1
+frappe_postgres_image: postgres:16
+frappe_pull_policy: always
+frappe_apps: []
+frappe_secret_files: {}
+frappe_site_config: {}

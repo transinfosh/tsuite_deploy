@@ -1,0 +1,8 @@
+---
+- name: 检查三节点部署前置条件
+  hosts: all
+  gather_facts: true
+  vars_files:
+    - "{{ inventory_dir }}/vault.yml"
+  roles:
+    - role: preflight

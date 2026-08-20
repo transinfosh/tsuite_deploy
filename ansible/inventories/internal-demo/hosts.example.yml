@@ -1,0 +1,22 @@
+---
+all:
+  vars:
+    ansible_user: ubuntu
+    ansible_become: true
+  children:
+    customer_nodes:
+      hosts:
+        tai-customer-01:
+          ansible_host: 192.0.2.11
+    runtime_nodes:
+      hosts:
+        tai-runtime-01:
+          ansible_host: 192.0.2.12
+    control_nodes:
+      hosts:
+        tai-control-01:
+          ansible_host: 192.0.2.13
+    relay_nodes:
+      hosts:
+        tai-relay-01:
+          ansible_host: 192.0.2.14

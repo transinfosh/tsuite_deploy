@@ -1,0 +1,19 @@
+---
+- name: 部署 TAI Control FRP 私有隧道
+  hosts: control_nodes
+  gather_facts: true
+  vars_files:
+    - "{{ inventory_dir }}/vault.yml"
+    - "{{ inventory_dir }}/control_private.yml"
+  roles:
+    - role: ingress
+      vars:
+        ingress_hostname: "{{ auth_public_hostname }}"
+        ingress_local_url: "http://127.0.0.1:{{ tai_auth_port }}"
+        ingress_routes:
+          - hostname: "{{ auth_public_hostname }}"
+            local_port: "{{ tai_auth_port }}"
+        ingress_stcp_routes:
+          - name: "{{ frp_control_stcp_proxy_name }}"
+            local_port: 8080
+            secret_key: "{{ vault_control_stcp_secret }}"
