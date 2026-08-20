@@ -173,6 +173,19 @@ Frappe、数据库、Redis、tbi-engine、tai-service 和 Phoenix 都以 Docker/
 `cloudflared` 或 `frpc` 由宿主机 Systemd 守护。业务域名不随入口实现改变，因此后续可以把
 `ingress_provider` 从 `cloudflare` 改为 `frp`，而不修改 tai/tai-service/tai_control 的外部地址。
 
+### 预装宿主机 PostgreSQL 18
+
+需要为后续数据库外置迁移预装 PostgreSQL 时，可单独在 `control_nodes` 执行：
+
+```bash
+cd ansible
+ansible-playbook -i inventories/internal-demo/hosts.yml playbooks/database.yml
+```
+
+该 playbook 从 PostgreSQL 官方 PGDG 仓库安装 PostgreSQL 18、客户端和 pgvector，默认仅监听
+`127.0.0.1:5432`。它不会创建业务数据库、修改现有容器数据库或切换应用连接；开放私网监听、
+创建独立账号及数据迁移应在备份和回滚方案确认后单独执行。
+
 ### GHCR 镜像发布
 
 三节点部署默认不再在目标服务器构建 Node 资产或 Docker 镜像。应用仓库推送 `v*` Tag 后，

@@ -44,6 +44,19 @@ verify_playbook = (playbook_dir / "verify.yml").read_text(encoding="utf-8")
 assert "验证客户 Frappe 到 tBI Engine 的容器网络" in verify_playbook
 assert "http://tbi-engine:{{ tbi_engine_port }}/readyz" in verify_playbook
 
+database_playbook = yaml.safe_load((playbook_dir / "database.yml").read_text(encoding="utf-8"))
+assert database_playbook[0]["hosts"] == "control_nodes"
+assert database_playbook[0]["roles"] == [{"role": "postgresql_host"}]
+
+postgresql_host_tasks = (
+    pathlib.Path(sys.argv[1])
+    / "roles/postgresql_host/tasks/main.yml"
+).read_text(encoding="utf-8")
+assert "postgresql-{{ postgresql_host_version }}" in postgresql_host_tasks
+assert "postgresql-{{ postgresql_host_version }}-pgvector" in postgresql_host_tasks
+assert "listen_addresses = '{{ postgresql_host_listen_addresses }}'" in postgresql_host_tasks
+assert "pg_isready" in postgresql_host_tasks
+
 cloudflared_service = (
     pathlib.Path(sys.argv[1])
     / "roles/ingress/templates/cloudflared.service.j2"

@@ -1,0 +1,4 @@
+---
+postgresql_host_version: "18"
+postgresql_host_port: 5432
+postgresql_host_listen_addresses: 127.0.0.1
