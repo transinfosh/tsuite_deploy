@@ -24,7 +24,7 @@ on:
       transinfo_ui_ref:
         description: Immutable transinfo-ui ref used by Frappe images
         required: false
-        default: v0.1.3
+        default: c4a9effd373bf740645984fef7020b069e274c64
         type: string
     secrets:
       APP_SOURCE_TOKEN:
@@ -58,7 +58,7 @@ on:
       transinfo_ui_ref:
         description: Immutable transinfo-ui ref used by Frappe images
         required: false
-        default: v0.1.3
+        default: c4a9effd373bf740645984fef7020b069e274c64
         type: string
 
 permissions:

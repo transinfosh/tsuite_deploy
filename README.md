@@ -216,8 +216,9 @@ Docker daemon 代理拉取 GHCR 镜像；部署时只执行 `docker pull`、迁�
 `tai` 与 `tai_control` 是聚合镜像。创建发布 Tag 前，必须先在 `frappe_ext`、`tbi`、`tai`
 （控制镜像还包括 `tai_control`）创建同名 Tag；工作流会用这个 Tag 检出所有业务应用，缺少
 任一 Tag 会直接失败。共享包固定使用 `tai-chat@dfe1853e4501122d050ebba1c0a6739853cd8700`
-（包版本 `0.2.30`，仓库暂未创建同名 Git Tag）与 `transinfo-ui@v0.1.3`，升级共享包时先修改
-reusable workflow 的默认输入，再创建新的业务发布 Tag。
+（包版本 `0.2.30`，仓库暂未创建同名 Git Tag）与
+`transinfo-ui@c4a9effd373bf740645984fef7020b069e274c64`（包含 `TuiTabs` 导出），升级共享包时
+先修改 reusable workflow 的默认输入，再创建新的业务发布 Tag。
 
 镜像构建完成后，把 inventory 的 `deployment_image_tag` 改为同一个 Tag，再执行部署：
 
