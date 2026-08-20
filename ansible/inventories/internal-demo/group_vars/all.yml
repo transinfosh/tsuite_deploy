@@ -8,7 +8,7 @@ image_delivery_mode: registry
 deployment_registry: ghcr.io
 deployment_registry_username: "{{ vault_ghcr_username | default('') }}"
 deployment_registry_token: "{{ vault_ghcr_token | default('') }}"
-deployment_image_tag: v0.1.0-internal-demo.1
+deployment_image_tag: v0.1.0-internal-demo.2
 customer_frappe_image: "ghcr.io/transinfosh/tai-customer:{{ deployment_image_tag }}"
 control_frappe_image: "ghcr.io/transinfosh/tai-control:{{ deployment_image_tag }}"
 tai_service_image: "ghcr.io/transinfosh/tai-service:{{ deployment_image_tag }}"
