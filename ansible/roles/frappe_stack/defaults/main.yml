@@ -4,6 +4,7 @@ frappe_http_port: 8080
 frappe_bind_addresses:
   - 127.0.0.1
 frappe_postgres_image: postgres:16
+frappe_redis_image: redis:8.6-alpine
 frappe_pull_policy: always
 frappe_apps: []
 frappe_secret_files: {}

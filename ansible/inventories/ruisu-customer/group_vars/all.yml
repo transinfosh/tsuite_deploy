@@ -15,6 +15,8 @@ tbi_engine_image: "ghcr.io/transinfosh/tbi-engine:{{ deployment_image_tag }}"
 tai_auth_image: "ghcr.io/transinfosh/tai-auth:{{ deployment_image_tag }}"
 frappe_docker_repo: https://github.com/transinfosh/frappe_docker.git
 frappe_docker_ref: main
+customer_postgres_image: docker.m.daocloud.io/library/postgres:16
+customer_redis_image: docker.m.daocloud.io/library/redis:8.6-alpine
 
 customer_site_name: tai.ruisu.cn
 runtime_public_hostname: api.trinfo.net

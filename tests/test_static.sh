@@ -201,6 +201,7 @@ frappe_compose = (
     / "roles/frappe_stack/templates/compose.generated.yml.j2"
 ).read_text(encoding="utf-8")
 assert "for address in frappe_bind_addresses" in frappe_compose
+assert "image: {{ frappe_redis_image | to_json }}" in frappe_compose
 assert "tai.deploy.secrets-checksum" in frappe_compose
 assert "deployment_no_proxy" in frappe_compose
 

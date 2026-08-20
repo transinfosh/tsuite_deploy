@@ -1,6 +1,10 @@
 services:
   db:
     image: {{ frappe_postgres_image | to_json }}
+  redis-cache:
+    image: {{ frappe_redis_image | to_json }}
+  redis-queue:
+    image: {{ frappe_redis_image | to_json }}
   configurator:
     environment:
       DB_HOST: db

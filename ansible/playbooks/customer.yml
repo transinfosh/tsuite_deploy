@@ -33,7 +33,8 @@
           - tai
         frappe_db_password: "{{ vault_customer_db_password }}"
         frappe_admin_password: "{{ vault_customer_admin_password }}"
-        frappe_postgres_image: postgres:16
+        frappe_postgres_image: "{{ customer_postgres_image | default('postgres:16') }}"
+        frappe_redis_image: "{{ customer_redis_image | default('redis:8.6-alpine') }}"
         frappe_http_port: 8080
         frappe_docker_subnet: 172.31.10.0/24
         frappe_secret_files: >-
