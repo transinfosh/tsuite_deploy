@@ -1,4 +1,15 @@
 ---
+- name: 等待 TAI Service 就绪
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ tai_service_port }}/readyz"
+    method: GET
+    status_code: 200
+  register: tai_service_readiness
+  retries: 30
+  delay: 2
+  until: tai_service_readiness.status == 200
+  changed_when: false
+
 - name: 初始化 TAI Service 运行时模型策略
   ansible.builtin.command:
     argv:

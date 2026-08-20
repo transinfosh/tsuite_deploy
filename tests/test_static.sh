@@ -73,6 +73,23 @@ assert '"issuer": "https://{{ control_site_name }}"' in tai_service_config
 assert '"collectorEndpoint": "{{ phoenix_internal_base_url }}/v1/traces"' in tai_service_config
 assert "python_container_extra_hosts:" in runtime_playbook
 
+runtime_bootstrap_tasks = yaml.safe_load(
+    (
+        pathlib.Path(sys.argv[1])
+        / "roles/tai_service_runtime_bootstrap/tasks/main.yml"
+    ).read_text(encoding="utf-8")
+)
+runtime_bootstrap_names = [task["name"] for task in runtime_bootstrap_tasks]
+wait_for_runtime = runtime_bootstrap_names.index("等待 TAI Service 就绪")
+initialize_runtime = runtime_bootstrap_names.index("初始化 TAI Service 运行时模型策略")
+assert wait_for_runtime < initialize_runtime
+runtime_readiness = runtime_bootstrap_tasks[wait_for_runtime]
+assert runtime_readiness["ansible.builtin.uri"]["url"] == (
+    "http://127.0.0.1:{{ tai_service_port }}/readyz"
+)
+assert runtime_readiness["retries"] >= 10
+assert runtime_readiness["until"] == "tai_service_readiness.status == 200"
+
 control_playbook = (playbook_dir / "control.yml").read_text(encoding="utf-8")
 assert "frappe_bind_addresses:" in control_playbook
 assert '- "{{ ansible_host }}"' in control_playbook
