@@ -224,6 +224,9 @@ assert legacy_source_cleanup["when"] == [
     "not frappe_docker_git_metadata.stat.exists",
 ]
 registry_source_sync = frappe_stack_document[sync_registry_source]
+assert registry_source_sync["ansible.builtin.git"]["depth"] == 1
+assert registry_source_sync["ansible.builtin.git"]["single_branch"] is True
+assert registry_source_sync["retries"] == 3
 assert registry_source_sync["environment"] == {
     "http_proxy": "{{ deployment_http_proxy | default('') }}",
     "https_proxy": "{{ deployment_http_proxy | default('') }}",
