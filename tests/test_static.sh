@@ -97,6 +97,8 @@ ruisu_inventory_vars = (
 ).read_text(encoding="utf-8")
 assert "customer_database_name: tai" in ruisu_inventory_vars
 assert "customer_database_user: tai_app" in ruisu_inventory_vars
+assert 'customer_control_client_id: ""' in ruisu_inventory_vars
+assert 'customer_control_client_secret: ""' in ruisu_inventory_vars
 
 tai_service_config = (
     pathlib.Path(sys.argv[1])
@@ -171,8 +173,9 @@ assert '"issuer": "https://{{ control_site_name }}"' in control_settings_script
 assert '"agent_runtime_url": "https://{{ runtime_public_hostname }}"' in control_settings_script
 
 customer_playbook = (playbook_dir / "customer.yml").read_text(encoding="utf-8")
-assert "tai_control_client_secret_file: /run/secrets/tai_control_client_secret" in customer_playbook
-assert 'tai_control_client_id: "{{ vault_tai_control_client_id }}"' in customer_playbook
+assert "'/run/secrets/tai_control_client_secret'" in customer_playbook
+assert "customer_control_client_id | default(vault_tai_control_client_id)" in customer_playbook
+assert "customer_control_client_secret | default(vault_tai_control_client_secret)" in customer_playbook
 assert "python_container_install_mssql_driver: true" in customer_playbook
 assert 'tbi_engine_base_url: "http://tbi-engine:{{ tbi_engine_port }}"' in customer_playbook
 assert "python_container_network_aliases:" in customer_playbook

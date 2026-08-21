@@ -221,7 +221,9 @@ Docker daemon 代理拉取 GHCR 镜像；部署时只执行 `docker pull`、迁�
 使用本机 Caddy 自动申请 HTTPS 证书，不经过内部 FRP；部署前需放行 TCP 80/443。当前节点无法访问
 内部 Benchmark SQL Server，因此 `enable_benchmark` 保持关闭。
 
-该节点暂时复用内部演示 Vault 中的 GHCR 和控制面凭据，执行命令时显式加载：
+该节点暂时复用内部演示 Vault 中的 GHCR、数据库及服务级部署 Secret，执行命令时显式加载。
+客户专属的 Control Client ID 和 Client Secret 由客户在本站 `TAI Settings` 中维护，部署 inventory
+将对应覆盖值留空，不得使用内部演示租户凭据覆盖客户设置：
 
 ```bash
 cd ansible

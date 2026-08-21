@@ -21,6 +21,9 @@ customer_redis_image: docker.m.daocloud.io/library/redis:8.6-alpine
 customer_site_name: tai.ruisu.cn
 customer_database_name: tai
 customer_database_user: tai_app
+# 外部客户在本站 TAI Settings 中维护 Control Client 凭据，部署不得覆盖。
+customer_control_client_id: ""
+customer_control_client_secret: ""
 runtime_public_hostname: api.trinfo.net
 control_site_name: control.trinfo.net
 auth_public_hostname: auth.trinfo.net
