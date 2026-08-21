@@ -216,6 +216,8 @@ Docker daemon 代理拉取 GHCR 镜像；部署时只执行 `docker pull`、迁�
 ### 独立公网 Customer 节点
 
 `ansible/inventories/ruisu-customer/` 用于域名直接解析到服务器的独立 Customer 节点。该 inventory
+固定使用数据库 `tai` 和登录角色 `tai_app`，数据库密码读取
+`vault_customer_db_password`。
 使用本机 Caddy 自动申请 HTTPS 证书，不经过内部 FRP；部署前需放行 TCP 80/443。当前节点无法访问
 内部 Benchmark SQL Server，因此 `enable_benchmark` 保持关闭。
 

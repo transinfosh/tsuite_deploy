@@ -91,6 +91,13 @@ assert "customer_database_name: tai" in inventory_vars
 assert "customer_database_user: tai_app" in inventory_vars
 assert "runtime_database_name: tai_service" in inventory_vars
 
+ruisu_inventory_vars = (
+    pathlib.Path(sys.argv[1])
+    / "inventories/ruisu-customer/group_vars/all.yml"
+).read_text(encoding="utf-8")
+assert "customer_database_name: tai" in ruisu_inventory_vars
+assert "customer_database_user: tai_app" in ruisu_inventory_vars
+
 tai_service_config = (
     pathlib.Path(sys.argv[1])
     / "roles/tai_service_config/templates/config.json.j2"

@@ -19,6 +19,8 @@ customer_postgres_image: docker.m.daocloud.io/library/postgres:16
 customer_redis_image: docker.m.daocloud.io/library/redis:8.6-alpine
 
 customer_site_name: tai.ruisu.cn
+customer_database_name: tai
+customer_database_user: tai_app
 runtime_public_hostname: api.trinfo.net
 control_site_name: control.trinfo.net
 auth_public_hostname: auth.trinfo.net
