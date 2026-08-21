@@ -9,10 +9,12 @@ deployment_registry: ghcr.io
 deployment_registry_username: "{{ vault_ghcr_username | default('') }}"
 deployment_registry_token: "{{ vault_ghcr_token | default('') }}"
 deployment_image_tag: v0.1.0-internal-demo.2
-customer_frappe_image: "ghcr.io/transinfosh/tai-customer:{{ deployment_image_tag }}"
-control_image_tag: v0.1.0-internal-demo.4
+customer_image_tag: v0.1.0-internal-demo.5
+customer_frappe_image: "ghcr.io/transinfosh/tai-customer:{{ customer_image_tag }}"
+control_image_tag: v0.1.0-internal-demo.5
 control_frappe_image: "ghcr.io/transinfosh/tai-control:{{ control_image_tag }}"
-tai_service_image: "ghcr.io/transinfosh/tai-service:{{ deployment_image_tag }}"
+tai_service_image_tag: v0.1.0-internal-demo.5
+tai_service_image: "ghcr.io/transinfosh/tai-service:{{ tai_service_image_tag }}"
 tbi_engine_image: "ghcr.io/transinfosh/tbi-engine:{{ deployment_image_tag }}"
 tai_auth_image: "ghcr.io/transinfosh/tai-auth:{{ deployment_image_tag }}"
 frappe_docker_repo: https://github.com/transinfosh/frappe_docker.git
