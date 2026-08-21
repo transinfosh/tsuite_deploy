@@ -69,9 +69,9 @@ external_database_port: 5432
 postgresql_host_version: "18"
 postgresql_host_listen_addresses: "{{ ansible_host }}"
 postgresql_host_allowed_cidrs:
-  - 192.168.2.181/32
-  - 192.168.2.182/32
-  - 192.168.2.183/32
+  - 192.168.2.0/24
+  - 192.168.3.0/24
+  - 192.168.4.0/24
 postgresql_host_shared_buffers: 2GB
 postgresql_host_effective_cache_size: 6GB
 postgresql_host_maintenance_work_mem: 512MB
