@@ -1,4 +1,5 @@
 services:
+{% if phoenix_manage_postgres | default(true) | bool %}
   db:
     image: {{ phoenix_postgres_image | to_json }}
     restart: unless-stopped
@@ -13,14 +14,17 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+{% endif %}
   phoenix:
     image: {{ phoenix_image | to_json }}
     restart: unless-stopped
+{% if phoenix_manage_postgres | default(true) | bool %}
     depends_on:
       db:
         condition: service_healthy
+{% endif %}
     environment:
-      PHOENIX_SQL_DATABASE_URL: postgresql://phoenix:${PHOENIX_DB_PASSWORD}@db:5432/phoenix
+      PHOENIX_SQL_DATABASE_URL: postgresql://phoenix:${PHOENIX_DB_PASSWORD}@{{ phoenix_database_host | default('db') }}:{{ phoenix_database_port | default(5432) }}/phoenix
       PHOENIX_ENABLE_AUTH: "true"
       PHOENIX_SECRET: ${PHOENIX_SECRET}
     ports:
@@ -28,5 +32,7 @@ services:
       - "{{ address }}:{{ phoenix_port }}:6006"
 {% endfor %}
 
+{% if phoenix_manage_postgres | default(true) | bool %}
 volumes:
   phoenix-postgres-data:
+{% endif %}

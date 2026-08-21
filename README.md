@@ -161,31 +161,36 @@ sudo frappe-deploy
 
 ## tAI 三节点部署工程
 
-`ansible/` 提供内部准生产环境的三节点部署骨架，与上面的单机交互式工具相互独立：
+`ansible/` 提供内部准生产环境的三应用节点加独立数据库节点部署骨架，与上面的单机交互式工具相互独立：
 
 ```text
-customer_nodes  Frappe + frappe_ext/tbi/tai + tbi-engine + 客户数据库
-runtime_nodes   tai-service + Runtime PostgreSQL + 在线 Embedding 调用
-control_nodes   Frappe + tai_control + PostgreSQL/pgvector + Redis + Phoenix
+customer_nodes  Frappe + frappe_ext/tbi/tai + tbi-engine
+runtime_nodes   tai-service + 在线 Embedding 调用
+control_nodes   Frappe + tai_control + Redis + Phoenix
+database_nodes  PostgreSQL 18 + pgvector（Control/Customer/Runtime/Phoenix）
 ```
 
-Frappe、数据库、Redis、tbi-engine、tai-service 和 Phoenix 都以 Docker/Compose 运行；
-`cloudflared` 或 `frpc` 由宿主机 Systemd 守护。业务域名不随入口实现改变，因此后续可以把
+Frappe、Redis、tbi-engine、tai-service 和 Phoenix 以 Docker/Compose 运行；PostgreSQL 18
+直接安装在独立数据库服务器上，不使用 Docker。`cloudflared` 或 `frpc` 由宿主机 Systemd 守护。
+业务域名不随入口实现改变，因此后续可以把
 `ingress_provider` 从 `cloudflare` 改为 `frp`，而不修改 tai/tai-service/tai_control 的外部地址。
 
-### 预装宿主机 PostgreSQL 18
+### 独立 PostgreSQL 18
 
-需要为后续数据库外置迁移预装 PostgreSQL 时，先把独立数据库服务器加入 inventory 的
-`database_nodes`，再单独执行：
+把独立数据库服务器加入 inventory 的 `database_nodes`，并设置
+`external_database_enabled: true`、允许访问的应用节点 CIDR 和 8G 内存对应的 PostgreSQL 参数，
+再单独执行：
 
 ```bash
 cd ansible
 ansible-playbook -i inventories/internal-demo/hosts.yml playbooks/database.yml
 ```
 
-该 playbook 只会在 `database_nodes` 上从 PostgreSQL 官方 PGDG 仓库安装 PostgreSQL 18、客户端和 pgvector，默认仅监听
-`127.0.0.1:5432`。它不会创建业务数据库、修改现有容器数据库或切换应用连接；开放私网监听、
-创建独立账号及数据迁移应在备份和回滚方案确认后单独执行。
+该 playbook 会在 `database_nodes` 上从 PostgreSQL 官方 PGDG 仓库安装 PostgreSQL 18、客户端和
+pgvector，并只允许 inventory 配置的应用节点通过 SCRAM 认证访问。数据迁移仍应先暂停写入，
+使用 `pg_dump`/`pg_restore` 完成角色和数据库迁移，再运行 `control.yml`、`runtime.yml`、
+`customer.yml` 切换连接。验收通过前不要删除旧容器或数据卷；迁移归档应保存在数据库服务器的
+受限目录并记录 SHA-256。
 
 ### GHCR 镜像发布
 

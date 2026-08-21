@@ -16,7 +16,7 @@
     control_site_database_name: "{{ (control_site_config.stdout | from_json).db_name }}"
   no_log: true
 
-- name: 启用控制站点 pgvector 扩展
+- name: 在容器数据库启用控制站点 pgvector 扩展
   ansible.builtin.command:
     argv:
       - docker
@@ -31,6 +31,24 @@
       - "{{ control_site_database_name }}"
       - -c
       - CREATE EXTENSION IF NOT EXISTS vector
+  when: not (external_database_enabled | default(false) | bool)
+  changed_when: false
+  no_log: true
+
+- name: 在外部数据库启用控制站点 pgvector 扩展
+  become_user: postgres
+  delegate_to: "{{ groups['database_nodes'][0] }}"
+  ansible.builtin.command:
+    argv:
+      - "/usr/lib/postgresql/{{ postgresql_host_version }}/bin/psql"
+      - --no-psqlrc
+      - --set
+      - ON_ERROR_STOP=1
+      - --dbname
+      - "{{ control_site_database_name }}"
+      - --command
+      - CREATE EXTENSION IF NOT EXISTS vector
+  when: external_database_enabled | default(false) | bool
   changed_when: false
   no_log: true
 

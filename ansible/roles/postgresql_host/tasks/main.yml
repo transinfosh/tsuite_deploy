@@ -79,6 +79,34 @@
     line: "password_encryption = 'scram-sha-256'"
   notify: 重启宿主机 PostgreSQL
 
+- name: 配置 PostgreSQL 内存与连接参数
+  ansible.builtin.lineinfile:
+    path: "/etc/postgresql/{{ postgresql_host_version }}/main/postgresql.conf"
+    regexp: "^\\s*#?\\s*{{ item.key }}\\s*="
+    line: "{{ item.key }} = {{ item.value }}"
+  loop:
+    - key: shared_buffers
+      value: "{{ postgresql_host_shared_buffers }}"
+    - key: effective_cache_size
+      value: "{{ postgresql_host_effective_cache_size }}"
+    - key: maintenance_work_mem
+      value: "{{ postgresql_host_maintenance_work_mem }}"
+    - key: work_mem
+      value: "{{ postgresql_host_work_mem }}"
+    - key: max_connections
+      value: "{{ postgresql_host_max_connections }}"
+  notify: 重启宿主机 PostgreSQL
+
+- name: 允许应用节点通过 SCRAM 连接 PostgreSQL
+  ansible.builtin.blockinfile:
+    path: "/etc/postgresql/{{ postgresql_host_version }}/main/pg_hba.conf"
+    marker: "# {mark} TAI MANAGED APPLICATION NODES"
+    block: |
+      {% for cidr in postgresql_host_allowed_cidrs %}
+      host    all    all    {{ cidr }}    scram-sha-256
+      {% endfor %}
+  notify: 重启宿主机 PostgreSQL
+
 - name: 应用 PostgreSQL 配置
   ansible.builtin.meta: flush_handlers
 

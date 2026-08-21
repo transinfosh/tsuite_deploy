@@ -4,6 +4,10 @@ frappe_http_port: 8080
 frappe_bind_addresses:
   - 127.0.0.1
 frappe_postgres_image: postgres:16
+frappe_db_host: db
+frappe_db_port: 5432
+frappe_db_root_password: "{{ frappe_db_password }}"
+frappe_manage_postgres: true
 frappe_redis_image: redis:8.6-alpine
 frappe_pull_policy: always
 frappe_apps: []

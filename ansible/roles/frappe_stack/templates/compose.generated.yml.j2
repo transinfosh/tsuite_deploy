@@ -2,14 +2,24 @@ services:
   db:
     image: {{ frappe_postgres_image | to_json }}
     restart: unless-stopped
+{% if not frappe_manage_postgres | bool %}
+    profiles:
+      - local-database
+{% endif %}
   redis-cache:
     image: {{ frappe_redis_image | to_json }}
   redis-queue:
     image: {{ frappe_redis_image | to_json }}
   configurator:
     environment:
-      DB_HOST: db
-      DB_PORT: "5432"
+      DB_HOST: {{ frappe_db_host | to_json }}
+      DB_PORT: {{ frappe_db_port | string | to_json }}
+{% if not frappe_manage_postgres | bool %}
+    depends_on:
+      db:
+        condition: service_healthy
+        required: false
+{% endif %}
   backend:
     extra_hosts:
       - "host.docker.internal:host-gateway"

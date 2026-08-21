@@ -2,3 +2,9 @@
 postgresql_host_version: "18"
 postgresql_host_port: 5432
 postgresql_host_listen_addresses: 127.0.0.1
+postgresql_host_allowed_cidrs: []
+postgresql_host_shared_buffers: 2GB
+postgresql_host_effective_cache_size: 6GB
+postgresql_host_maintenance_work_mem: 512MB
+postgresql_host_work_mem: 8MB
+postgresql_host_max_connections: 200

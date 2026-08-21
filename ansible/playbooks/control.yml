@@ -34,6 +34,10 @@
         frappe_apps:
           - tai_control
         frappe_db_password: "{{ vault_control_db_password }}"
+        frappe_db_root_password: "{{ vault_runtime_db_admin_password if (external_database_enabled | default(false) | bool) else vault_control_db_password }}"
+        frappe_db_host: "{{ external_database_host if (external_database_enabled | default(false) | bool) else 'db' }}"
+        frappe_db_port: "{{ external_database_port if (external_database_enabled | default(false) | bool) else 5432 }}"
+        frappe_manage_postgres: "{{ not (external_database_enabled | default(false) | bool) }}"
         frappe_admin_password: "{{ vault_control_admin_password }}"
         frappe_postgres_image: pgvector/pgvector:pg16
         frappe_http_port: 8080

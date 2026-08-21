@@ -32,6 +32,10 @@
           - tbi
           - tai
         frappe_db_password: "{{ vault_customer_db_password }}"
+        frappe_db_root_password: "{{ vault_runtime_db_admin_password if (external_database_enabled | default(false) | bool) else vault_customer_db_password }}"
+        frappe_db_host: "{{ external_database_host if (external_database_enabled | default(false) | bool) else 'db' }}"
+        frappe_db_port: "{{ external_database_port if (external_database_enabled | default(false) | bool) else 5432 }}"
+        frappe_manage_postgres: "{{ not (external_database_enabled | default(false) | bool) }}"
         frappe_admin_password: "{{ vault_customer_admin_password }}"
         frappe_postgres_image: "{{ customer_postgres_image | default('postgres:16') }}"
         frappe_redis_image: "{{ customer_redis_image | default('redis:8.6-alpine') }}"

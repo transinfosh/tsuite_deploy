@@ -10,6 +10,7 @@
     - role: source_snapshot
       when: image_delivery_mode == 'local_bundle'
     - role: runtime_postgres
+      when: not (external_database_enabled | default(false) | bool)
     - role: tai_service_config
     - role: python_container
       vars:
@@ -30,7 +31,7 @@
         python_container_environment:
           TAI_SERVICE_CONFIG: /etc/tai-service/config.json
           TAI_SERVICE_RUNTIME_LOG: /data/tai-service/tai-service-runtime.log
-          TAI_RUNTIME_DATABASE_URL: "postgresql://{{ runtime_database_user }}:{{ vault_runtime_db_app_password | urlencode }}@tai-runtime-postgres:5432/{{ runtime_database_name }}"
+          TAI_RUNTIME_DATABASE_URL: "postgresql://{{ runtime_database_user }}:{{ vault_runtime_db_app_password | urlencode }}@{{ external_database_host if (external_database_enabled | default(false) | bool) else 'tai-runtime-postgres' }}:{{ external_database_port if (external_database_enabled | default(false) | bool) else 5432 }}/{{ runtime_database_name }}"
           DEEPSEEK_API_KEY: "{{ vault_deepseek_api_key }}"
           OPENAI_API_KEY: "{{ vault_openai_api_key }}"
           WREN_ENGINE_VERSION: "0.13.2"
@@ -42,7 +43,7 @@
           no_proxy: "{{ deployment_no_proxy | replace('\n', '') | replace(' ', '') }}"
         python_container_migrate_command: >-
           python -m tai_service.migrate
-          --database-url postgresql://postgres:{{ vault_runtime_db_admin_password | urlencode }}@tai-runtime-postgres:5432/{{ runtime_database_name }}
+          --database-url postgresql://postgres:{{ vault_runtime_db_admin_password | urlencode }}@{{ external_database_host if (external_database_enabled | default(false) | bool) else 'tai-runtime-postgres' }}:{{ external_database_port if (external_database_enabled | default(false) | bool) else 5432 }}/{{ runtime_database_name }}
         python_container_secrets:
           tai_service_token: "{{ vault_tai_service_token }}"
           tai_control_usage: "{{ vault_tai_control_usage_secret }}"
