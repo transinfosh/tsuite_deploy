@@ -151,6 +151,8 @@ assert {"frappe_ext", "tbi", "tai", "tai_control"}.issubset(
 assert control_stack_role["vars"]["frappe_apps"] == ["tai_control"], (
     "控制站点只安装 tai_control；tAI、tBI 和 frappe_ext 仅用于构建审计前端资源"
 )
+assert 'tai_service_token: "{{ vault_tai_service_token }}"' in control_playbook
+assert "tai_service_token_file: /run/secrets/tai_service_token" in control_playbook
 
 control_config_tasks = (
     pathlib.Path(sys.argv[1])
