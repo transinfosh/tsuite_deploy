@@ -75,10 +75,21 @@ assert "validate: caddy validate" in direct_ingress
 assert "reverse_proxy {{ ingress_local_url }}" in direct_caddyfile
 
 runtime_playbook = (playbook_dir / "runtime.yml").read_text(encoding="utf-8")
-assert "@tai-runtime-postgres:5432/" in runtime_playbook
+assert "else 'tai-runtime-postgres'" in runtime_playbook
+assert "/{{ runtime_database_name }}" in runtime_playbook
 assert "@host.docker.internal:{{ runtime_database_port }}/" not in runtime_playbook
 assert "role: embedding" not in runtime_playbook
 assert "qwen_api_key:" in runtime_playbook
+
+inventory_vars = (
+    pathlib.Path(sys.argv[1])
+    / "inventories/internal-demo/group_vars/all.yml"
+).read_text(encoding="utf-8")
+assert "control_database_name: tai_control" in inventory_vars
+assert "control_database_user: tai_control_app" in inventory_vars
+assert "customer_database_name: tai" in inventory_vars
+assert "customer_database_user: tai_app" in inventory_vars
+assert "runtime_database_name: tai_service" in inventory_vars
 
 tai_service_config = (
     pathlib.Path(sys.argv[1])

@@ -37,6 +37,8 @@
         frappe_db_root_password: "{{ vault_runtime_db_admin_password if (external_database_enabled | default(false) | bool) else vault_control_db_password }}"
         frappe_db_host: "{{ external_database_host if (external_database_enabled | default(false) | bool) else 'db' }}"
         frappe_db_port: "{{ external_database_port if (external_database_enabled | default(false) | bool) else 5432 }}"
+        frappe_db_name: "{{ control_database_name | default('') }}"
+        frappe_db_user: "{{ control_database_user | default('') }}"
         frappe_manage_postgres: "{{ not (external_database_enabled | default(false) | bool) }}"
         frappe_admin_password: "{{ vault_control_admin_password }}"
         frappe_postgres_image: pgvector/pgvector:pg16

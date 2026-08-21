@@ -56,7 +56,11 @@ source_bundle_checksum_path: "{{ source_bundle_path }}.sha256"
 source_root: /opt/tai-source/current
 secrets_root: /etc/tai-deploy/secrets
 
-runtime_database_name: tai_runtime
+control_database_name: tai_control
+control_database_user: tai_control_app
+customer_database_name: tai
+customer_database_user: tai_app
+runtime_database_name: tai_service
 runtime_database_port: 5433
 runtime_database_user: tai_runtime_app
 runtime_database_owner: tai_runtime_owner

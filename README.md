@@ -170,6 +170,10 @@ control_nodes   Frappe + tai_control + Redis + Phoenix
 database_nodes  PostgreSQL 18 + pgvector（Control/Customer/Runtime/Phoenix）
 ```
 
+内部演示环境使用可识别的业务数据库名：Control 为 `tai_control`，Customer 为 `tai`，
+TAI Service 为 `tai_service`。Frappe 登录角色分别为 `tai_control_app` 和 `tai_app`；
+TAI Service 的 `tai_runtime_*` 角色属于运行时安全契约，数据库改名时不应同步改名。
+
 Frappe、Redis、tbi-engine、tai-service 和 Phoenix 以 Docker/Compose 运行；PostgreSQL 18
 直接安装在独立数据库服务器上，不使用 Docker。`cloudflared` 或 `frpc` 由宿主机 Systemd 守护。
 业务域名不随入口实现改变，因此后续可以把

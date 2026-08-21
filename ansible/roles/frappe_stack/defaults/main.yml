@@ -6,6 +6,8 @@ frappe_bind_addresses:
 frappe_postgres_image: postgres:16
 frappe_db_host: db
 frappe_db_port: 5432
+frappe_db_name: ""
+frappe_db_user: ""
 frappe_db_root_password: "{{ frappe_db_password }}"
 frappe_manage_postgres: true
 frappe_redis_image: redis:8.6-alpine
