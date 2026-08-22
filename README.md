@@ -1,6 +1,6 @@
-# Frappe Deploy
+# TSUIE Deploy
 
-面向 Ubuntu 单机服务器的交互式 Frappe Docker 部署工具。脚本会自动下载
+TSUIE 平台部署仓库；其中包含面向 Ubuntu 单机服务器的交互式 Frappe Docker 部署工具。脚本会自动下载
 `frappe_docker`，安装缺失的软件，生成部署配置，并完成站点创建、应用安装和迁移。
 本仓库不复制或跟踪 `frappe_docker` 的文件，两者可以独立升级。
 
@@ -24,7 +24,7 @@
 不需要克隆 Git 仓库，一条命令即可安装并启动部署：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/transinfosh/frappe_deploy/main/install.sh | sudo bash && sudo frappe-deploy
+curl -fsSL https://raw.githubusercontent.com/transinfosh/tsuie_deploy/main/install.sh | sudo bash && sudo frappe-deploy
 ```
 
 安装器会检查下载结果的 Bash 语法，然后把部署脚本安装到
@@ -65,7 +65,7 @@ frappe-deploy --dry-run
 `/usr/local/sbin/frappe-deploy` 更新到最新的 `main`：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/transinfosh/frappe_deploy/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/transinfosh/tsuie_deploy/main/install.sh | sudo bash
 ```
 
 更新部署工具不会自动升级正在运行的应用。更新完成后再执行：
@@ -233,7 +233,7 @@ ansible-playbook -i inventories/ruisu-customer/hosts.yml playbooks/customer.yml 
 
 组织需要完成一次性配置：
 
-1. 允许上述私有仓库调用 `frappe_deploy` 的 reusable workflow；
+1. 允许上述私有仓库调用 `tsuie_deploy` 的 reusable workflow；
 2. 统一使用名为 `APP_SOURCE_TOKEN` 的专用 fine-grained Token，只授予构建涉及的私有源码仓库
    `Contents: read`，不要复用个人管理 Token。GitHub Team 及以上套餐可以把它配置为组织级 Secret，
    并将 Repository access 限定为 `tai`、`tai_control`、`tai-service`、`tbi-engine` 和 `tai-auth`。

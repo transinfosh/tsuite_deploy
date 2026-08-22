@@ -1,8 +1,8 @@
-# frappe_deploy 代理执行说明
+# tsuie_deploy 代理执行说明
 
 ## 适用范围
 
-本文档适用于 `frappe_deploy` 部署仓库。
+本文档适用于 `tsuie_deploy` 部署仓库。
 
 ## 共享组件版本
 
