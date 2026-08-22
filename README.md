@@ -198,14 +198,12 @@ pgvector，并只允许 inventory 配置的应用节点通过 SCRAM 认证访问
 
 ### GHCR 镜像发布
 
-三节点部署默认不再在目标服务器构建 Node 资产或 Docker 镜像。应用仓库推送 `v*` Tag 后，
-由各仓库的 GitHub Actions 调用本仓库
-`.github/workflows/build-images.yml`，通过 Buildx 构建并发布到 GHCR：
+三节点部署默认不再在目标服务器构建 Node 资产或 Docker 镜像。Frappe 应用仓库推送 `v*`
+Tag 后，由各仓库调用 `transinfosh/frappe_docker` 的共享工作流构建并发布到 GHCR；本仓库
+`.github/workflows/build-images.yml` 仅保留独立 Python 服务的构建：
 
 | Tag 所在仓库 | 发布镜像 |
 | --- | --- |
-| `tai` | `ghcr.io/transinfosh/tai-customer:<tag>` |
-| `tai_control` | `ghcr.io/transinfosh/tai-control:<tag>` |
 | `tai-service` | `ghcr.io/transinfosh/tai-service:<tag>` |
 | `tbi-engine` | `ghcr.io/transinfosh/tbi-engine:<tag>` |
 | `tai-auth` | `ghcr.io/transinfosh/tai-auth:<tag>` |
@@ -256,11 +254,8 @@ ansible-playbook -i inventories/ruisu-customer/hosts.yml playbooks/customer.yml 
 4. 如果标准 GitHub Runner 的磁盘不足，在仓库变量 `TAI_BUILD_RUNNER` 中填写大磁盘或
    self-hosted runner 标签。
 
-`tai` 与 `tai_control` 是聚合镜像。创建发布 Tag 前，必须先在 `frappe_ext`、`tbi`、`tai`
-（控制镜像还包括 `tai_control`）创建同名 Tag；工作流会用这个 Tag 检出所有业务应用，缺少
-任一 Tag 会直接失败。共享包固定使用 `tai-chat@v0.2.31` 与
-`transinfo-ui@v0.1.4`（包含 `TuiTabs` 导出），升级共享包时
-先修改 reusable workflow 的默认输入，再创建新的业务发布 Tag。
+`tai` 与 `tai_control` 是聚合镜像；其 Frappe 应用和共享包版本均由各自仓库的发布工作流
+以 Tag 与提交 SHA 双重锁定。调整组合依赖时，先更新并提交调用方工作流，再创建新的业务发布 Tag。
 
 镜像构建完成后，把 inventory 的 `deployment_image_tag` 改为同一个 Tag，再执行部署：
 
@@ -270,38 +265,38 @@ ansible-playbook playbooks/preflight.yml --vault-password-file ../.vault-pass
 ansible-playbook playbooks/deploy-all.yml --vault-password-file ../.vault-pass
 ```
 
-`build-images.yml` 也保留 `workflow_dispatch`，用于重试某一个镜像；正式发布仍应使用不可变 Tag，
-不要覆盖已经部署过的镜像标签。
+`build-images.yml` 也保留 `workflow_dispatch`，用于重试独立服务镜像；正式发布仍应使用
+不可变 Tag，不要覆盖已经部署过的镜像标签。
 
 #### 发布与部署演练清单
 
 以下示例使用预发布 Tag `v0.1.0-internal-demo.1`。开始前应确认所有待发布改动已经提交并推送，
 尤其是 `tai`、`tbi` 和 `tai-service` 的跨应用接口改动；不要给仍有未提交改动的旧 commit 打 Tag。
 
-1. 开发阶段先把 `frappe_deploy` 的 reusable workflow 推送到 `develop`，再把五个发布仓库各自的
-   `publish-image.yml` 推送到 `develop`。调用方固定引用 `frappe_deploy@develop`，因此这一步必须
-   先完成；正式发布前再把 reusable workflow 改为固定 commit 或正式 Tag。
+1. 先发布 `frappe_docker` 的共享工作流，再把 `tai`、`tai_control` 的
+   `publish-image.yml` 更新为固定的共享提交 SHA；不要引用可变分支。
 2. 配置并核验五个发布仓库都能读取统一的 `APP_SOURCE_TOKEN`，同时检查 GHCR 包权限和服务器
    Vault 中的 `vault_ghcr_username`、`vault_ghcr_token`。服务器拉取 Token 应单独创建并只授予
    `read:packages`，不要与源码读取 Token 共用。可以先手动运行一个发布仓库的
    `Publish GHCR image` workflow，使用临时演练标签验证权限；手动运行不会代替正式 Tag 发布。
-3. 在 `frappe_ext`、`tbi`、`tai` 和 `tai_control` 的目标 commit 上创建完全相同的 Tag。
-   先推送依赖仓库 `frappe_ext`、`tbi` 的 Tag，确认远端可见后，再推送 `tai`、`tai_control`
-   的 Tag 触发两个聚合镜像，避免工作流启动时找不到依赖 Tag。
-4. 在 `tai-service`、`tbi-engine` 和 `tai-auth` 的目标 commit 上创建并推送同名 Tag，触发其余
-   三个镜像。五个仓库的 `Publish GHCR image` workflow 都成功后，再进入部署阶段。
+3. 为组合镜像中变更的依赖应用创建并推送各自的发布 Tag，然后将对应 Tag 和 40 位提交 SHA
+   更新到 `tai` 或 `tai_control` 的发布工作流。基础镜像已经固定 `frappe_ext`；仅在更新基础镜像时
+   才需要先发布新的 `tsuite-base`。
+4. 在 `tai`、`tai_control` 的目标 commit 上创建并推送各自与 `__version__` 匹配的 Tag，触发两个
+   聚合镜像；独立服务仍按原流程发布。全部相关镜像构建成功后，再进入部署阶段。
 5. 确认 GHCR 中存在以下五个不可变镜像，并记录构建对应的 commit：
 
    ```text
-   ghcr.io/transinfosh/tai-customer:v0.1.0-internal-demo.1
-   ghcr.io/transinfosh/tai-control:v0.1.0-internal-demo.1
+   ghcr.io/transinfosh/tai-customer:0.1.0-internal-demo.1
+   ghcr.io/transinfosh/tai-control:0.1.0-internal-demo.1
    ghcr.io/transinfosh/tai-service:v0.1.0-internal-demo.1
    ghcr.io/transinfosh/tbi-engine:v0.1.0-internal-demo.1
    ghcr.io/transinfosh/tai-auth:v0.1.0-internal-demo.1
    ```
 
-6. 把 `inventories/internal-demo/group_vars/all.yml` 的 `deployment_image_tag` 更新为该 Tag，先执行
-   `preflight.yml`，通过后执行 `deploy-all.yml` 和 `verify.yml`：
+6. 把 inventory 中的 `customer_image_tag`、`control_image_tag` 更新为对应的 Docker 镜像版本
+   （不带 `v`）；独立服务的镜像 Tag 仍按其各自发布流程设置。然后先执行 `preflight.yml`，通过后
+   执行 `deploy-all.yml` 和 `verify.yml`：
 
    ```bash
    cd ansible
@@ -311,7 +306,7 @@ ansible-playbook playbooks/deploy-all.yml --vault-password-file ../.vault-pass
    ```
 
 7. 验证失败时停止继续发布，不覆盖原 Tag。修复代码后递增预发布序号并重新构建；需要回退时，
-   把 `deployment_image_tag` 改回上一组已验证镜像，再重新执行部署。数据库迁移是否可逆仍需单独评估。
+   将对应应用镜像 Tag 改回上一组已验证版本，再重新执行部署。数据库迁移是否可逆仍需单独评估。
 
 内部演示环境通过阿里云百炼在线 `text-embedding-v4` 为 tai-service 生成 1024 维向量，向量仍
 保存在控制节点的 pgvector。在线 Endpoint、模型和回填批次由 inventory 配置，API Key 只保存在
