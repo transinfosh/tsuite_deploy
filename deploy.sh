@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 # 可按团队环境修改这些默认值，运行时仍会逐项询问。
-DEFAULT_DEPLOY_DIR="/opt/frappe-deploy"
+DEFAULT_DEPLOY_DIR="/opt/tsuie-deploy"
 DEFAULT_FRAPPE_DOCKER_REPO="https://github.com/transinfosh/frappe_docker.git"
 DEFAULT_FRAPPE_DOCKER_REF="main"
 DEFAULT_IMAGE="ghcr.io/transinfosh/project_management:0.0.2"
@@ -383,7 +383,7 @@ collect_deployment_settings() {
 prepare_dry_run_workspace() {
 	TARGET_DEPLOY_DIR="$DEPLOY_DIR"
 	"$DRY_RUN" || return 0
-	DEPLOY_DIR="$(mktemp -d /tmp/frappe-deploy-dry-run.XXXXXX)"
+	DEPLOY_DIR="$(mktemp -d /tmp/tsuie-deploy-dry-run.XXXXXX)"
 	log "dry-run 配置文件将写入 $DEPLOY_DIR"
 }
 
@@ -416,7 +416,7 @@ show_summary() {
 }
 
 apply_apt_proxy() {
-	local proxy_file="/etc/apt/apt.conf.d/90-frappe-deploy-proxy"
+	local proxy_file="/etc/apt/apt.conf.d/90-tsuie-deploy-proxy"
 	if ! "$PROXY_ENABLED"; then
 		run rm -f "$proxy_file"
 		return
@@ -449,7 +449,7 @@ systemd_escape() {
 
 apply_docker_proxy() {
 	local dropin_dir="/etc/systemd/system/docker.service.d"
-	local dropin="$dropin_dir/frappe-deploy-proxy.conf"
+	local dropin="$dropin_dir/tsuie-deploy-proxy.conf"
 	if ! "$PROXY_ENABLED"; then
 		if [[ -f "$dropin" ]]; then
 			run rm -f "$dropin"
@@ -464,7 +464,7 @@ apply_docker_proxy() {
 	fi
 	install -d -m 0755 "$dropin_dir"
 	local desired_dropin
-	desired_dropin="$(mktemp /tmp/frappe-deploy-docker-proxy.XXXXXX)"
+	desired_dropin="$(mktemp /tmp/tsuie-deploy-docker-proxy.XXXXXX)"
 	{
 		printf '[Service]\n'
 		[[ -z "$HTTP_PROXY_VALUE" ]] ||
@@ -648,11 +648,11 @@ END
 ALTER SYSTEM SET listen_addresses = '*';
 SQL
 	hba_file="$(runuser -u postgres -- psql -Atqc 'SHOW hba_file;')"
-	sed -i '/^# BEGIN frappe_deploy$/,/^# END frappe_deploy$/d' "$hba_file"
+	sed -i '/^# BEGIN tsuie_deploy$/,/^# END tsuie_deploy$/d' "$hba_file"
 	{
-		printf '\n# BEGIN frappe_deploy\n'
+		printf '\n# BEGIN tsuie_deploy\n'
 		printf 'host all all %s scram-sha-256\n' "$DOCKER_SUBNET"
-		printf '# END frappe_deploy\n'
+		printf '# END tsuie_deploy\n'
 	} >>"$hba_file"
 	systemctl restart postgresql
 }

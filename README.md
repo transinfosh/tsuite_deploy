@@ -24,11 +24,11 @@ TSUIE 平台部署仓库；其中包含面向 Ubuntu 单机服务器的交互式
 不需要克隆 Git 仓库，一条命令即可安装并启动部署：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/transinfosh/tsuie_deploy/main/install.sh | sudo bash && sudo frappe-deploy
+curl -fsSL https://raw.githubusercontent.com/transinfosh/tsuie_deploy/main/install.sh | sudo bash && sudo tsuie-deploy
 ```
 
 安装器会检查下载结果的 Bash 语法，然后把部署脚本安装到
-`/usr/local/sbin/frappe-deploy`。
+`/usr/local/sbin/tsuie-deploy`。
 
 默认镜像为：
 
@@ -53,16 +53,16 @@ Compose 的 `.env` 文件，密码应使用字母、数字以及
 部署前可先预览：
 
 ```bash
-frappe-deploy --dry-run
+tsuie-deploy --dry-run
 ```
 
-`--dry-run` 会把生成结果留在 `/tmp/frappe-deploy-dry-run.*` 中供检查，不会改动
+`--dry-run` 会把生成结果留在 `/tmp/tsuie-deploy-dry-run.*` 中供检查，不会改动
 目标部署目录、安装软件或启动容器。
 
 ## 更新部署工具
 
 服务器不需要执行 `git pull`。重新下载安装器即可把
-`/usr/local/sbin/frappe-deploy` 更新到最新的 `main`：
+`/usr/local/sbin/tsuie-deploy` 更新到最新的 `main`：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/transinfosh/tsuie_deploy/main/install.sh | sudo bash
@@ -71,12 +71,12 @@ curl -fsSL https://raw.githubusercontent.com/transinfosh/tsuie_deploy/main/insta
 更新部署工具不会自动升级正在运行的应用。更新完成后再执行：
 
 ```bash
-sudo frappe-deploy
+sudo tsuie-deploy
 ```
 
-脚本会读取 `/opt/frappe-deploy` 中的现有状态；输入新的应用镜像标签才会执行镜像
-升级。如果需要固定部署工具版本，可以把 `FRAPPE_DEPLOY_REF` 设置为仓库中实际存在
-的 Tag 或 commit。也可以通过 `FRAPPE_DEPLOY_INSTALL_PATH` 修改安装位置。
+脚本会读取 `/opt/tsuie-deploy` 中的现有状态；输入新的应用镜像标签才会执行镜像
+升级。如果需要固定部署工具版本，可以把 `TSUIE_DEPLOY_REF` 设置为仓库中实际存在
+的 Tag 或 commit。也可以通过 `TSUIE_DEPLOY_INSTALL_PATH` 修改安装位置。
 
 ## 数据库模式
 
@@ -100,14 +100,14 @@ sudo frappe-deploy
 
 脚本会在任何安装操作之前询问是否启用代理，并显示最终配置供确认。启用后会写入：
 
-- `/etc/apt/apt.conf.d/90-frappe-deploy-proxy`
-- `/etc/systemd/system/docker.service.d/frappe-deploy-proxy.conf`
+- `/etc/apt/apt.conf.d/90-tsuie-deploy-proxy`
+- `/etc/systemd/system/docker.service.d/tsuie-deploy-proxy.conf`
 - 部署目录中的 `compose.proxy.yaml`
 
 脚本顶部的 `DEFAULT_HTTP_PROXY`、`DEFAULT_HTTPS_PROXY` 和 `DEFAULT_NO_PROXY`
 可作为团队默认值，也可在交互过程中修改。
 
-脚本只管理以上带有 `frappe-deploy` 名称的代理配置；后续选择不使用代理时会移除
+脚本只管理以上带有 `tsuie-deploy` 名称的代理配置；后续选择不使用代理时会移除
 这些配置。变更 Docker daemon 代理需要重启 Docker 服务，执行前请确认服务器上
 其他容器可以承受这次重启。
 
@@ -124,10 +124,10 @@ sudo frappe-deploy
 
 ## 文件结构
 
-脚本默认将运行环境写入 `/opt/frappe-deploy`：
+脚本默认将运行环境写入 `/opt/tsuie-deploy`：
 
 ```text
-/opt/frappe-deploy/
+/opt/tsuie-deploy/
 ├── .env
 ├── compose.generated.yaml
 ├── compose.proxy.yaml

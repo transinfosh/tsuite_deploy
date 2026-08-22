@@ -2,11 +2,11 @@
 set -Eeuo pipefail
 
 DEFAULT_REF="main"
-DEFAULT_INSTALL_PATH="/usr/local/sbin/frappe-deploy"
+DEFAULT_INSTALL_PATH="/usr/local/sbin/tsuie-deploy"
 REPOSITORY_RAW_URL="https://raw.githubusercontent.com/transinfosh/tsuie_deploy"
 
-REF="${FRAPPE_DEPLOY_REF:-$DEFAULT_REF}"
-INSTALL_PATH="${FRAPPE_DEPLOY_INSTALL_PATH:-$DEFAULT_INSTALL_PATH}"
+REF="${TSUIE_DEPLOY_REF:-$DEFAULT_REF}"
+INSTALL_PATH="${TSUIE_DEPLOY_INSTALL_PATH:-$DEFAULT_INSTALL_PATH}"
 
 die() {
 	printf '错误: %s\n' "$*" >&2
@@ -18,7 +18,7 @@ die() {
 [[ "$INSTALL_PATH" == /* ]] || die "安装路径必须是绝对路径"
 command -v curl >/dev/null 2>&1 || die "未找到 curl，请先安装 curl"
 
-temporary_script="$(mktemp /tmp/frappe-deploy.XXXXXX)"
+temporary_script="$(mktemp /tmp/tsuie-deploy.XXXXXX)"
 trap 'rm -f -- "$temporary_script"' EXIT
 
 printf '正在下载 tsuie_deploy（%s）...\n' "$REF"
