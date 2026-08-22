@@ -1,7 +1,7 @@
 ---
 - name: 创建 Phoenix 目录
   ansible.builtin.file:
-    path: /opt/tai-deploy/phoenix
+    path: /opt/tsuie-deploy/phoenix
     state: directory
     owner: root
     group: root
@@ -10,7 +10,7 @@
 - name: 写入 Phoenix 环境
   ansible.builtin.template:
     src: env.j2
-    dest: /opt/tai-deploy/phoenix/.env
+    dest: /opt/tsuie-deploy/phoenix/.env
     owner: root
     group: root
     mode: "0600"
@@ -19,14 +19,14 @@
 - name: 写入 Phoenix Compose
   ansible.builtin.template:
     src: compose.yml.j2
-    dest: /opt/tai-deploy/phoenix/compose.yml
+    dest: /opt/tsuie-deploy/phoenix/compose.yml
     owner: root
     group: root
     mode: "0640"
 
 - name: 启动 Phoenix
   ansible.builtin.command: >-
-    docker compose --env-file /opt/tai-deploy/phoenix/.env
-    -p tai-phoenix -f /opt/tai-deploy/phoenix/compose.yml up -d
+    docker compose --env-file /opt/tsuie-deploy/phoenix/.env
+    -p tai-phoenix -f /opt/tsuie-deploy/phoenix/compose.yml up -d
   register: phoenix_up
   changed_when: "'Started' in phoenix_up.stdout or 'Created' in phoenix_up.stderr"

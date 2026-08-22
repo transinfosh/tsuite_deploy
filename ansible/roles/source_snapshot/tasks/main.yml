@@ -18,13 +18,13 @@
 - name: 上传源码快照
   ansible.builtin.copy:
     src: "{{ source_bundle_path }}"
-    dest: "/opt/tai-deploy/{{ deployment_snapshot_id }}.tar.gz"
+    dest: "/opt/tsuie-deploy/{{ deployment_snapshot_id }}.tar.gz"
     owner: root
     group: root
     mode: "0644"
 
 - name: 计算远端源码快照校验和
-  ansible.builtin.command: "sha256sum /opt/tai-deploy/{{ deployment_snapshot_id }}.tar.gz"
+  ansible.builtin.command: "sha256sum /opt/tsuie-deploy/{{ deployment_snapshot_id }}.tar.gz"
   register: remote_source_checksum
   changed_when: false
 
@@ -43,7 +43,7 @@
 
 - name: 解压源码快照
   ansible.builtin.unarchive:
-    src: "/opt/tai-deploy/{{ deployment_snapshot_id }}.tar.gz"
+    src: "/opt/tsuie-deploy/{{ deployment_snapshot_id }}.tar.gz"
     dest: "/opt/tai-source/releases/{{ deployment_snapshot_id }}"
     remote_src: true
     creates: "/opt/tai-source/releases/{{ deployment_snapshot_id }}/.snapshot-complete"

@@ -2,7 +2,7 @@
 - name: 写入 Benchmark Agent 初始化脚本
   ansible.builtin.template:
     src: bootstrap_agent.py.j2
-    dest: /opt/tai-deploy/bootstrap-benchmark-agent.py
+    dest: /opt/tsuie-deploy/bootstrap-benchmark-agent.py
     owner: root
     group: root
     mode: "0644"
@@ -12,7 +12,7 @@
     argv:
       - docker
       - cp
-      - /opt/tai-deploy/bootstrap-benchmark-agent.py
+      - /opt/tsuie-deploy/bootstrap-benchmark-agent.py
       - frappe-control-backend-1:/tmp/bootstrap-benchmark-agent.py
   changed_when: false
 

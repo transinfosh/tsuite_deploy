@@ -1,5 +1,5 @@
 ---
-python_container_root: "/opt/tai-deploy/{{ python_container_name }}"
+python_container_root: "/opt/tsuie-deploy/{{ python_container_name }}"
 python_container_extras: []
 python_container_environment: {}
 python_container_secrets: {}

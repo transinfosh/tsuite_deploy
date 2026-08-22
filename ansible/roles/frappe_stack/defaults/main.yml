@@ -1,5 +1,5 @@
 ---
-frappe_stack_root: "/opt/tai-deploy/frappe-{{ frappe_stack_name }}"
+frappe_stack_root: "/opt/tsuie-deploy/frappe-{{ frappe_stack_name }}"
 frappe_http_port: 8080
 frappe_bind_addresses:
   - 127.0.0.1

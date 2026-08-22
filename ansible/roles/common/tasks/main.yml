@@ -42,7 +42,7 @@
     group: root
     mode: "{{ item.mode }}"
   loop:
-    - path: /opt/tai-deploy
+    - path: /opt/tsuie-deploy
       mode: "0755"
     - path: "{{ secrets_root }}"
       mode: "0700"
