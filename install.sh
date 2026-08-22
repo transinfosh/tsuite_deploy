@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 DEFAULT_REF="main"
 DEFAULT_INSTALL_PATH="/usr/local/sbin/frappe-deploy"
-REPOSITORY_RAW_URL="https://raw.githubusercontent.com/transinfosh/frappe_deploy"
+REPOSITORY_RAW_URL="https://raw.githubusercontent.com/transinfosh/tsuie_deploy"
 
 REF="${FRAPPE_DEPLOY_REF:-$DEFAULT_REF}"
 INSTALL_PATH="${FRAPPE_DEPLOY_INSTALL_PATH:-$DEFAULT_INSTALL_PATH}"
@@ -21,7 +21,7 @@ command -v curl >/dev/null 2>&1 || die "未找到 curl，请先安装 curl"
 temporary_script="$(mktemp /tmp/frappe-deploy.XXXXXX)"
 trap 'rm -f -- "$temporary_script"' EXIT
 
-printf '正在下载 frappe_deploy（%s）...\n' "$REF"
+printf '正在下载 tsuie_deploy（%s）...\n' "$REF"
 curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
 	--retry 3 \
 	"$REPOSITORY_RAW_URL/$REF/deploy.sh" \
