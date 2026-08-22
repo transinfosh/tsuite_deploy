@@ -337,7 +337,7 @@ python_container_compose = (
 assert "python_container_network_aliases" in python_container_compose
 PY
 
-fixture_dir="$(mktemp -d /tmp/frappe-deploy-test.XXXXXX)"
+fixture_dir="$(mktemp -d /tmp/tsuie-deploy-test.XXXXXX)"
 trap 'rm -rf -- "$fixture_dir"' EXIT
 
 # 载入函数但不执行脚本入口，验证生成文件可以被 YAML 解析。
