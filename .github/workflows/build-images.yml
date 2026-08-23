@@ -1,0 +1,223 @@
+name: Build one GHCR image
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: Image target to build
+        required: true
+        type: string
+      release_tag:
+        description: Immutable GHCR image tag
+        required: true
+        type: string
+      source_ref:
+        description: Source ref; defaults to release_tag
+        required: false
+        default: ""
+        type: string
+    secrets:
+      APP_SOURCE_TOKEN:
+        description: Token with read access to the private source repositories
+        required: true
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Image target to build
+        required: true
+        type: choice
+        options:
+          - tai-service
+          - tbi-engine
+          - tai-auth
+      release_tag:
+        description: Immutable GHCR image tag
+        required: true
+        type: string
+      source_ref:
+        description: Source ref; defaults to release_tag
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: tai-image-${{ inputs.target }}-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAMESPACE: transinfosh
+  SOURCE_REF: ${{ inputs.source_ref || inputs.release_tag }}
+  SOURCE_TOKEN: ${{ secrets.APP_SOURCE_TOKEN }}
+
+jobs:
+  build:
+    runs-on: ${{ vars.TAI_BUILD_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - name: Validate release inputs
+        env:
+          TARGET: ${{ inputs.target }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -eu
+          case "$TARGET" in
+            tai-service | tbi-engine | tai-auth) ;;
+            *) echo "不支持的镜像目标: $TARGET" >&2; exit 1 ;;
+          esac
+          case "$RELEASE_TAG" in
+            *[!a-zA-Z0-9._-]* | '')
+              echo "release_tag 只能包含字母、数字、点、下划线和连字符" >&2
+              exit 1
+              ;;
+          esac
+          test -n "$SOURCE_TOKEN" || {
+            echo "缺少可读取跨仓库私有源码的 APP_SOURCE_TOKEN" >&2
+            exit 1
+          }
+
+      - name: Checkout deployment build definitions
+        uses: actions/checkout@v6
+        with:
+          repository: transinfosh/tsuite_deploy
+          ref: develop
+          token: ${{ env.SOURCE_TOKEN }}
+          path: .ci-deploy
+
+      - name: Checkout Python service
+        if: inputs.target == 'tai-service' || inputs.target == 'tbi-engine' || inputs.target == 'tai-auth'
+        uses: actions/checkout@v6
+        with:
+          repository: transinfosh/${{ inputs.target }}
+          ref: ${{ env.SOURCE_REF }}
+          token: ${{ env.SOURCE_TOKEN }}
+          path: .ci-service
+
+      - name: Checkout tBI Benchmark assets
+        if: inputs.target == 'tai-service'
+        uses: actions/checkout@v6
+        with:
+          repository: transinfosh/tbi
+          ref: ${{ env.SOURCE_REF }}
+          token: ${{ env.SOURCE_TOKEN }}
+          path: .ci-tbi
+
+      - name: Validate release tag and capture source commit
+        id: source
+        env:
+          TARGET: ${{ inputs.target }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          SOURCE_REF: ${{ env.SOURCE_REF }}
+        run: |
+          set -eu
+          source_commit="$(git -C .ci-service rev-parse HEAD)"
+          test "${#source_commit}" -eq 40
+
+          if [ "$TARGET" = "tai-service" ]; then
+            package_version="$(python3 - <<'PY'
+          import pathlib
+          import tomllib
+
+          project = tomllib.loads(pathlib.Path('.ci-service/pyproject.toml').read_text())['project']
+          print(project['version'])
+          PY
+            )"
+            case "$RELEASE_TAG" in
+              "v$package_version")
+                release_channel=stable
+                test "$SOURCE_REF" = "$RELEASE_TAG" || {
+                  echo "正式 tai-service Release 必须从同名 Git Tag 构建" >&2
+                  exit 1
+                }
+                ;;
+              "v$package_version-internal-demo."[0-9]*) release_channel=internal-demo ;;
+              *)
+                echo "tai-service Tag 必须为 v${package_version}（正式）或 v${package_version}-internal-demo.N（演示）" >&2
+                exit 1
+                ;;
+            esac
+          else
+            release_channel=service
+          fi
+
+          {
+            echo "commit=$source_commit"
+            echo "channel=$release_channel"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Add Benchmark Knowledge to tai-service image context
+        if: inputs.target == 'tai-service'
+        run: |
+          mkdir -p .ci-service/deploy/benchmark-knowledge
+          cp -a .ci-tbi/evaluation/tai_benchmark/knowledge/. .ci-service/deploy/benchmark-knowledge/
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Resolve build settings
+        id: settings
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -eu
+          case "$TARGET" in
+            tai-service)
+              echo "context=.ci-service" >> "$GITHUB_OUTPUT"
+              echo "file=.ci-deploy/build/python/Containerfile" >> "$GITHUB_OUTPUT"
+              echo "build_args=UV_SYNC_ARGS=--extra runtime --extra observability" >> "$GITHUB_OUTPUT"
+              ;;
+            tbi-engine)
+              echo "context=.ci-service" >> "$GITHUB_OUTPUT"
+              echo "file=.ci-deploy/build/python/Containerfile" >> "$GITHUB_OUTPUT"
+              echo "build_args=INSTALL_MSSQL_DRIVER=true" >> "$GITHUB_OUTPUT"
+              ;;
+            tai-auth)
+              echo "context=.ci-service" >> "$GITHUB_OUTPUT"
+              echo "file=.ci-deploy/build/python/Containerfile" >> "$GITHUB_OUTPUT"
+              echo "build_args=" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - name: Build and push image
+        id: image
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ steps.settings.outputs.context }}
+          file: ${{ steps.settings.outputs.file }}
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ inputs.target }}:${{ inputs.release_tag }}
+          build-args: ${{ steps.settings.outputs.build_args }}
+          labels: |
+            org.opencontainers.image.revision=${{ steps.source.outputs.commit }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ inputs.release_tag }}
+          cache-from: type=gha,scope=${{ inputs.target }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.target }}
+
+      - name: Publish release provenance
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ inputs.target }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          SOURCE_COMMIT: ${{ steps.source.outputs.commit }}
+          CHANNEL: ${{ steps.source.outputs.channel }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -eu
+          test -n "$IMAGE_DIGEST"
+          {
+            echo "## Image release provenance"
+            echo
+            echo "- channel: \`$CHANNEL\`"
+            echo "- version tag: \`$RELEASE_TAG\`"
+            echo "- source commit: \`$SOURCE_COMMIT\`"
+            echo "- immutable image: \`${IMAGE}@${IMAGE_DIGEST}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
