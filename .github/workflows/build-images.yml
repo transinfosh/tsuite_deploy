@@ -81,7 +81,7 @@ jobs:
       - name: Checkout deployment build definitions
         uses: actions/checkout@v6
         with:
-          repository: transinfosh/frappe_deploy
+          repository: transinfosh/tsuite_deploy
           ref: develop
           token: ${{ env.SOURCE_TOKEN }}
           path: .ci-deploy
@@ -103,6 +103,49 @@ jobs:
           ref: ${{ env.SOURCE_REF }}
           token: ${{ env.SOURCE_TOKEN }}
           path: .ci-tbi
+
+      - name: Validate release tag and capture source commit
+        id: source
+        env:
+          TARGET: ${{ inputs.target }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          SOURCE_REF: ${{ env.SOURCE_REF }}
+        run: |
+          set -eu
+          source_commit="$(git -C .ci-service rev-parse HEAD)"
+          test "${#source_commit}" -eq 40
+
+          if [ "$TARGET" = "tai-service" ]; then
+            package_version="$(python3 - <<'PY'
+          import pathlib
+          import tomllib
+
+          project = tomllib.loads(pathlib.Path('.ci-service/pyproject.toml').read_text())['project']
+          print(project['version'])
+          PY
+            )"
+            case "$RELEASE_TAG" in
+              "v$package_version")
+                release_channel=stable
+                test "$SOURCE_REF" = "$RELEASE_TAG" || {
+                  echo "正式 tai-service Release 必须从同名 Git Tag 构建" >&2
+                  exit 1
+                }
+                ;;
+              "v$package_version-internal-demo."[0-9]*) release_channel=internal-demo ;;
+              *)
+                echo "tai-service Tag 必须为 v${package_version}（正式）或 v${package_version}-internal-demo.N（演示）" >&2
+                exit 1
+                ;;
+            esac
+          else
+            release_channel=service
+          fi
+
+          {
+            echo "commit=$source_commit"
+            echo "channel=$release_channel"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Add Benchmark Knowledge to tai-service image context
         if: inputs.target == 'tai-service'
@@ -145,6 +188,7 @@ jobs:
           esac
 
       - name: Build and push image
+        id: image
         uses: docker/build-push-action@v7
         with:
           context: ${{ steps.settings.outputs.context }}
@@ -153,7 +197,27 @@ jobs:
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ inputs.target }}:${{ inputs.release_tag }}
           build-args: ${{ steps.settings.outputs.build_args }}
           labels: |
-            org.opencontainers.image.revision=${{ env.SOURCE_REF }}
+            org.opencontainers.image.revision=${{ steps.source.outputs.commit }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ inputs.release_tag }}
           cache-from: type=gha,scope=${{ inputs.target }}
           cache-to: type=gha,mode=max,scope=${{ inputs.target }}
+
+      - name: Publish release provenance
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ inputs.target }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          SOURCE_COMMIT: ${{ steps.source.outputs.commit }}
+          CHANNEL: ${{ steps.source.outputs.channel }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -eu
+          test -n "$IMAGE_DIGEST"
+          {
+            echo "## Image release provenance"
+            echo
+            echo "- channel: \`$CHANNEL\`"
+            echo "- version tag: \`$RELEASE_TAG\`"
+            echo "- source commit: \`$SOURCE_COMMIT\`"
+            echo "- immutable image: \`${IMAGE}@${IMAGE_DIGEST}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
