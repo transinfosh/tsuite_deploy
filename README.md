@@ -24,7 +24,7 @@ TSUIE 平台部署仓库；其中包含面向 Ubuntu 单机服务器的交互式
 不需要克隆 Git 仓库，一条命令即可安装并启动部署：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/transinfosh/tsuie_deploy/main/install.sh | sudo bash && sudo tsuie-deploy
+curl -fsSL https://raw.githubusercontent.com/transinfosh/tsuite_deploy/main/install.sh | sudo bash && sudo tsuite-deploy
 ```
 
 安装器会检查下载结果的 Bash 语法，然后把部署脚本安装到
@@ -65,7 +65,7 @@ tsuie-deploy --dry-run
 `/usr/local/sbin/tsuie-deploy` 更新到最新的 `main`：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/transinfosh/tsuie_deploy/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/transinfosh/tsuite_deploy/main/install.sh | sudo bash
 ```
 
 更新部署工具不会自动升级正在运行的应用。更新完成后再执行：
