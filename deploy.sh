@@ -530,7 +530,7 @@ apply_docker_proxy() {
 install_base_packages() {
 	log "检查基础软件"
 	run apt-get update
-	run apt-get install -y ca-certificates curl git jq openssl python3
+	run apt-get install -y ca-certificates curl git jq openssl python3 tar
 }
 
 configure_docker_repository() {
@@ -640,24 +640,57 @@ create_upgrade_snapshot() {
 
 download_frappe_docker() {
 	local repo_dir="$DEPLOY_DIR/frappe_docker"
+	local archive_url
+	local archive_file
+	local extracted_dir
+	local temporary_dir
 	log "下载 frappe_docker"
 	run install -d -m 0750 "$DEPLOY_DIR"
 	if "$DRY_RUN"; then
-		printf '[dry-run] git clone/fetch %s，并检出 %s\n' "$FRAPPE_DOCKER_REPO" "$FRAPPE_DOCKER_REF"
+		printf '[dry-run] git clone/fetch %s，并检出 %s；失败时回退到 GitHub 源码归档\n' \
+			"$FRAPPE_DOCKER_REPO" "$FRAPPE_DOCKER_REF"
 		return
 	fi
 	if [[ -d "$repo_dir/.git" ]]; then
 		if [[ -n "$(git -C "$repo_dir" status --porcelain)" ]]; then
 			die "$repo_dir 存在未提交修改，请先处理后再升级"
 		fi
-		git -C "$repo_dir" remote set-url origin "$FRAPPE_DOCKER_REPO"
-		git -C "$repo_dir" fetch --force --tags origin
+		if git -C "$repo_dir" remote set-url origin "$FRAPPE_DOCKER_REPO" &&
+			git -C "$repo_dir" fetch --force --tags origin &&
+			git -C "$repo_dir" fetch --force origin "$FRAPPE_DOCKER_REF" &&
+			git -C "$repo_dir" checkout --detach FETCH_HEAD; then
+			FRAPPE_DOCKER_COMMIT="$(git -C "$repo_dir" rev-parse HEAD)"
+			return
+		fi
 	else
-		git clone --filter=blob:none "$FRAPPE_DOCKER_REPO" "$repo_dir"
+		if git clone --filter=blob:none "$FRAPPE_DOCKER_REPO" "$repo_dir" &&
+			git -C "$repo_dir" fetch --force origin "$FRAPPE_DOCKER_REF" &&
+			git -C "$repo_dir" checkout --detach FETCH_HEAD; then
+			FRAPPE_DOCKER_COMMIT="$(git -C "$repo_dir" rev-parse HEAD)"
+			return
+		fi
 	fi
-	git -C "$repo_dir" fetch --force origin "$FRAPPE_DOCKER_REF"
-	git -C "$repo_dir" checkout --detach FETCH_HEAD
-	FRAPPE_DOCKER_COMMIT="$(git -C "$repo_dir" rev-parse HEAD)"
+
+	if [[ ! "$FRAPPE_DOCKER_REPO" =~ ^https://github\\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)\\.git$ ]]; then
+		die "无法通过 Git 下载 frappe_docker，且仅 GitHub HTTPS 仓库支持源码归档回退"
+	fi
+	archive_url="https://codeload.github.com/${BASH_REMATCH[1]}/${BASH_REMATCH[2]}/tar.gz/$FRAPPE_DOCKER_REF"
+	warn "Git 下载失败，回退到 GitHub 源码归档：$archive_url"
+	rm -rf "$repo_dir"
+	temporary_dir="$(mktemp -d "$DEPLOY_DIR/.frappe-docker-archive.XXXXXX")"
+	archive_file="$temporary_dir/frappe_docker.tar.gz"
+	extracted_dir="$temporary_dir/extracted"
+	mkdir "$extracted_dir"
+	if ! curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error --retry 3 \
+		"$archive_url" --output "$archive_file" ||
+		! tar -xzf "$archive_file" --strip-components=1 -C "$extracted_dir" ||
+		[[ ! -f "$extracted_dir/compose.yaml" ]]; then
+		rm -rf "$temporary_dir"
+		die "GitHub 源码归档下载或解压失败"
+	fi
+	mv "$extracted_dir" "$repo_dir"
+	rm -rf "$temporary_dir"
+	FRAPPE_DOCKER_COMMIT="archive:$FRAPPE_DOCKER_REF"
 }
 
 sql_escape_literal() {
