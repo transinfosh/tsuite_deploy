@@ -221,6 +221,19 @@ read_config_value() {
 	awk -F= -v key="$key" '$1 == key {print substr($0, index($0, "=") + 1); exit}' "$file"
 }
 
+read_apt_proxy_value() {
+	local protocol="$1"
+	local proxy_file="/etc/apt/apt.conf.d/90-tsuite-deploy-proxy"
+	[[ -f "$proxy_file" ]] || return 0
+	sed -n "s/^Acquire::${protocol}::Proxy \"\\(.*\\)\";$/\\1/p" "$proxy_file"
+}
+
+read_docker_no_proxy_value() {
+	local proxy_file="/etc/systemd/system/docker.service.d/tsuite-deploy-proxy.conf"
+	[[ -f "$proxy_file" ]] || return 0
+	sed -n 's/^Environment="NO_PROXY=\(.*\)"$/\1/p' "$proxy_file"
+}
+
 load_existing_deployment() {
 	local state_file="$DEPLOY_DIR/deployment.state"
 	local env_file="$DEPLOY_DIR/.env"
@@ -327,16 +340,29 @@ parse_apps() {
 
 collect_proxy_settings() {
 	local proxy_default="no"
-	if [[ -n "$DEFAULT_HTTP_PROXY$DEFAULT_HTTPS_PROXY" ]]; then
+	local http_proxy_default="$DEFAULT_HTTP_PROXY"
+	local https_proxy_default="$DEFAULT_HTTPS_PROXY"
+	local no_proxy_default="$DEFAULT_NO_PROXY"
+	if [[ -z "$http_proxy_default" ]]; then
+		http_proxy_default="$(read_apt_proxy_value http)"
+	fi
+	if [[ -z "$https_proxy_default" ]]; then
+		https_proxy_default="$(read_apt_proxy_value https)"
+	fi
+	if [[ "$no_proxy_default" == "$DEFAULT_NO_PROXY" ]]; then
+		no_proxy_default="$(read_docker_no_proxy_value)"
+		no_proxy_default="${no_proxy_default:-$DEFAULT_NO_PROXY}"
+	fi
+	if [[ -n "$http_proxy_default$https_proxy_default" ]]; then
 		proxy_default="yes"
 	fi
 
 	PROXY_ENABLED=false
 	if confirm "是否为 APT、Docker 拉取和 Frappe 应用配置代理？" "$proxy_default"; then
 		PROXY_ENABLED=true
-		prompt HTTP_PROXY_VALUE "HTTP 代理地址" "$DEFAULT_HTTP_PROXY"
-		prompt HTTPS_PROXY_VALUE "HTTPS 代理地址" "$DEFAULT_HTTPS_PROXY"
-		prompt NO_PROXY_VALUE "不使用代理的地址（逗号分隔）" "$DEFAULT_NO_PROXY"
+		prompt HTTP_PROXY_VALUE "HTTP 代理地址" "$http_proxy_default"
+		prompt HTTPS_PROXY_VALUE "HTTPS 代理地址" "$https_proxy_default"
+		prompt NO_PROXY_VALUE "不使用代理的地址（逗号分隔）" "$no_proxy_default"
 		[[ -n "$HTTP_PROXY_VALUE$HTTPS_PROXY_VALUE" ]] || die "启用代理时至少需要填写一个代理地址"
 
 		printf '\n代理将应用到：APT、Docker daemon、Frappe 后端、队列、调度器和 WebSocket。\n'
@@ -346,7 +372,7 @@ collect_proxy_settings() {
 	else
 		HTTP_PROXY_VALUE=""
 		HTTPS_PROXY_VALUE=""
-		NO_PROXY_VALUE="$DEFAULT_NO_PROXY"
+		NO_PROXY_VALUE="$no_proxy_default"
 	fi
 }
 
