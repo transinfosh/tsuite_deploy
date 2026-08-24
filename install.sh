@@ -21,11 +21,12 @@ command -v curl >/dev/null 2>&1 || die "未找到 curl，请先安装 curl"
 
 temporary_script="$(mktemp /tmp/tsuite-deploy.XXXXXX)"
 trap 'rm -f -- "$temporary_script"' EXIT
+cache_buster="$(date +%s)"
 
 printf '正在下载 tsuite_deploy（%s）...\n' "$REF"
 curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
 	--retry 3 \
-	"$REPOSITORY_RAW_URL/$REF/deploy.sh" \
+	"$REPOSITORY_RAW_URL/$REF/deploy.sh?cache_buster=$cache_buster" \
 	--output "$temporary_script"
 
 bash -n "$temporary_script" || die "下载的部署脚本未通过 Bash 语法检查"
