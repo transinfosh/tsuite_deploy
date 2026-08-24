@@ -18,6 +18,8 @@ grep -q 'EXISTING_ADOPT_SOURCE_COMPOSE' "$repo_root/deploy.sh"
 grep -q 'read_apt_proxy_value()' "$repo_root/deploy.sh"
 grep -q 'read_docker_no_proxy_value()' "$repo_root/deploy.sh"
 grep -q 'codeload.github.com/transinfosh/tsuite_deploy/tar.gz' "$repo_root/install.sh"
+grep -q 'write_deployment_inputs' "$repo_root/deploy.sh"
+grep -q 'deployment.inputs' "$repo_root/deploy.sh"
 
 if command -v shellcheck >/dev/null 2>&1; then
 	shellcheck "$repo_root/deploy.sh" "$repo_root/install.sh"

@@ -36,6 +36,19 @@ ADOPT_DB_HOST=""
 ADOPT_NETWORK_NAME=""
 ADOPT_SOURCE_STOPPED=false
 ADOPT_SOURCE_PROJECT=""
+SAVED_IMAGE=""
+SAVED_APPS=""
+SAVED_SITE_NAME=""
+SAVED_BIND_ADDRESS=""
+SAVED_HTTP_PORT=""
+SAVED_FRAPPE_DOCKER_REPO=""
+SAVED_FRAPPE_DOCKER_REF=""
+SAVED_DOCKER_SUBNET=""
+SAVED_ADOPT_SOURCE_COMPOSE=""
+SAVED_ADOPT_SOURCE_VOLUME=""
+SAVED_ADOPT_TARGET_VOLUME=""
+SAVED_ADOPT_DB_HOST=""
+SAVED_ADOPT_NETWORK_NAME=""
 
 log() {
 	printf '\n\033[1;34m==>\033[0m %s\n' "$*"
@@ -223,15 +236,25 @@ read_config_value() {
 
 read_apt_proxy_value() {
 	local protocol="$1"
-	local proxy_file="/etc/apt/apt.conf.d/90-tsuite-deploy-proxy"
-	[[ -f "$proxy_file" ]] || return 0
-	sed -n "s/^Acquire::${protocol}::Proxy \"\\(.*\\)\";$/\\1/p" "$proxy_file"
+	local proxy_file
+	for proxy_file in \
+		"/etc/apt/apt.conf.d/90-tsuite-deploy-proxy" \
+		"/etc/apt/apt.conf.d/90-tsuie-deploy-proxy"; do
+		[[ -f "$proxy_file" ]] || continue
+		sed -n "s/^Acquire::${protocol}::Proxy \"\\(.*\\)\";$/\\1/p" "$proxy_file"
+		return
+	done
 }
 
 read_docker_no_proxy_value() {
-	local proxy_file="/etc/systemd/system/docker.service.d/tsuite-deploy-proxy.conf"
-	[[ -f "$proxy_file" ]] || return 0
-	sed -n 's/^Environment="NO_PROXY=\(.*\)"$/\1/p' "$proxy_file"
+	local proxy_file
+	for proxy_file in \
+		"/etc/systemd/system/docker.service.d/tsuite-deploy-proxy.conf" \
+		"/etc/systemd/system/docker.service.d/tsuie-deploy-proxy.conf"; do
+		[[ -f "$proxy_file" ]] || continue
+		sed -n 's/^Environment="NO_PROXY=\(.*\)"$/\1/p' "$proxy_file"
+		return
+	done
 }
 
 load_existing_deployment() {
@@ -258,6 +281,27 @@ load_existing_deployment() {
 	EXISTING_DB_PASSWORD="$(read_config_value "$env_file" DB_PASSWORD)"
 
 	log "检测到已有部署，将保留原密码和基础设施版本作为默认值"
+}
+
+load_saved_deployment_inputs() {
+	local input_file="$DEPLOY_DIR/deployment.inputs"
+	[[ -f "$input_file" ]] || return 0
+
+	SAVED_IMAGE="$(read_config_value "$input_file" INPUT_IMAGE)"
+	SAVED_APPS="$(read_config_value "$input_file" INPUT_APPS)"
+	SAVED_SITE_NAME="$(read_config_value "$input_file" INPUT_SITE_NAME)"
+	SAVED_BIND_ADDRESS="$(read_config_value "$input_file" INPUT_BIND_ADDRESS)"
+	SAVED_HTTP_PORT="$(read_config_value "$input_file" INPUT_HTTP_PORT)"
+	SAVED_FRAPPE_DOCKER_REPO="$(read_config_value "$input_file" INPUT_FRAPPE_DOCKER_REPO)"
+	SAVED_FRAPPE_DOCKER_REF="$(read_config_value "$input_file" INPUT_FRAPPE_DOCKER_REF)"
+	SAVED_DOCKER_SUBNET="$(read_config_value "$input_file" INPUT_DOCKER_SUBNET)"
+	SAVED_ADOPT_SOURCE_COMPOSE="$(read_config_value "$input_file" INPUT_ADOPT_SOURCE_COMPOSE)"
+	SAVED_ADOPT_SOURCE_VOLUME="$(read_config_value "$input_file" INPUT_ADOPT_SOURCE_VOLUME)"
+	SAVED_ADOPT_TARGET_VOLUME="$(read_config_value "$input_file" INPUT_ADOPT_TARGET_VOLUME)"
+	SAVED_ADOPT_DB_HOST="$(read_config_value "$input_file" INPUT_ADOPT_DB_HOST)"
+	SAVED_ADOPT_NETWORK_NAME="$(read_config_value "$input_file" INPUT_ADOPT_NETWORK_NAME)"
+
+	log "检测到上次确认的部署输入，将作为默认值复用"
 }
 
 require_ubuntu() {
@@ -386,26 +430,27 @@ collect_deployment_settings() {
 
 	prompt DEPLOY_DIR "部署目录" "$DEFAULT_DEPLOY_DIR"
 	load_existing_deployment
-	image_default="${PREVIOUS_IMAGE:-$DEFAULT_IMAGE}"
-	frappe_docker_ref_default="${PREVIOUS_FRAPPE_DOCKER_COMMIT:-$DEFAULT_FRAPPE_DOCKER_REF}"
+	load_saved_deployment_inputs
+	image_default="${PREVIOUS_IMAGE:-${SAVED_IMAGE:-$DEFAULT_IMAGE}}"
+	frappe_docker_ref_default="${PREVIOUS_FRAPPE_DOCKER_COMMIT:-${SAVED_FRAPPE_DOCKER_REF:-$DEFAULT_FRAPPE_DOCKER_REF}}"
 
 	prompt IMAGE "应用镜像（修改标签即可升级）" "$image_default"
-	prompt APPS_INPUT "需要安装的应用，多个应用用逗号分隔" "${EXISTING_APPS:-$DEFAULT_APPS}"
-	prompt SITE_NAME "Frappe 站点名称（通常使用域名）" "${EXISTING_SITE_NAME:-$DEFAULT_SITE_NAME}"
+	prompt APPS_INPUT "需要安装的应用，多个应用用逗号分隔" "${EXISTING_APPS:-${SAVED_APPS:-$DEFAULT_APPS}}"
+	prompt SITE_NAME "Frappe 站点名称（通常使用域名）" "${EXISTING_SITE_NAME:-${SAVED_SITE_NAME:-$DEFAULT_SITE_NAME}}"
 	prompt BIND_ADDRESS "HTTP 监听地址；使用 0.0.0.0 可直接对外开放" \
-		"${EXISTING_BIND_ADDRESS:-$DEFAULT_BIND_ADDRESS}"
-	prompt HTTP_PORT "HTTP 端口" "${EXISTING_HTTP_PORT:-$DEFAULT_HTTP_PORT}"
-	prompt FRAPPE_DOCKER_REPO "frappe_docker 仓库地址" "$DEFAULT_FRAPPE_DOCKER_REPO"
+		"${EXISTING_BIND_ADDRESS:-${SAVED_BIND_ADDRESS:-$DEFAULT_BIND_ADDRESS}}"
+	prompt HTTP_PORT "HTTP 端口" "${EXISTING_HTTP_PORT:-${SAVED_HTTP_PORT:-$DEFAULT_HTTP_PORT}}"
+	prompt FRAPPE_DOCKER_REPO "frappe_docker 仓库地址" "${SAVED_FRAPPE_DOCKER_REPO:-$DEFAULT_FRAPPE_DOCKER_REPO}"
 	prompt FRAPPE_DOCKER_REF "frappe_docker 分支、标签或提交" "$frappe_docker_ref_default"
-	prompt DOCKER_SUBNET "部署专用 Docker 子网" "${EXISTING_DOCKER_SUBNET:-$DEFAULT_DOCKER_SUBNET}"
+	prompt DOCKER_SUBNET "部署专用 Docker 子网" "${EXISTING_DOCKER_SUBNET:-${SAVED_DOCKER_SUBNET:-$DEFAULT_DOCKER_SUBNET}}"
 
 	if "$ADOPT_EXISTING_SITE"; then
-		prompt ADOPT_SOURCE_COMPOSE "旧 frappe_docker Compose 文件" "${EXISTING_ADOPT_SOURCE_COMPOSE:-}"
-		prompt ADOPT_SOURCE_VOLUME "旧 sites Docker volume" "${EXISTING_ADOPT_SOURCE_VOLUME:-}"
+		prompt ADOPT_SOURCE_COMPOSE "旧 frappe_docker Compose 文件" "${EXISTING_ADOPT_SOURCE_COMPOSE:-${SAVED_ADOPT_SOURCE_COMPOSE:-}}"
+		prompt ADOPT_SOURCE_VOLUME "旧 sites Docker volume" "${EXISTING_ADOPT_SOURCE_VOLUME:-${SAVED_ADOPT_SOURCE_VOLUME:-}}"
 		prompt ADOPT_TARGET_VOLUME "新 sites Docker volume" \
-			"${EXISTING_ADOPT_TARGET_VOLUME:-tsuite-${SITE_NAME//./-}-sites}"
-		prompt ADOPT_DB_HOST "现有 PostgreSQL 地址" "${EXISTING_ADOPT_DB_HOST:-}"
-		prompt ADOPT_NETWORK_NAME "复用的旧 Docker 网络" "${EXISTING_ADOPT_NETWORK_NAME:-}"
+			"${EXISTING_ADOPT_TARGET_VOLUME:-${SAVED_ADOPT_TARGET_VOLUME:-tsuite-${SITE_NAME//./-}-sites}}"
+		prompt ADOPT_DB_HOST "现有 PostgreSQL 地址" "${EXISTING_ADOPT_DB_HOST:-${SAVED_ADOPT_DB_HOST:-}}"
+		prompt ADOPT_NETWORK_NAME "复用的旧 Docker 网络" "${EXISTING_ADOPT_NETWORK_NAME:-${SAVED_ADOPT_NETWORK_NAME:-}}"
 		DB_MODE="adopt"
 		DB_PORT="5432"
 		DB_ADMIN_USER=""
@@ -459,6 +504,32 @@ collect_deployment_settings() {
 
 	parse_apps
 	split_image
+}
+
+write_deployment_inputs() {
+	local input_file="$DEPLOY_DIR/deployment.inputs"
+	local apps_csv
+	"$DRY_RUN" && return 0
+	apps_csv="$(IFS=,; printf '%s' "${APP_LIST[*]}")"
+	run install -d -m 0750 "$DEPLOY_DIR"
+	{
+		printf 'INPUT_IMAGE=%s\n' "$IMAGE"
+		printf 'INPUT_APPS=%s\n' "$apps_csv"
+		printf 'INPUT_SITE_NAME=%s\n' "$SITE_NAME"
+		printf 'INPUT_BIND_ADDRESS=%s\n' "$BIND_ADDRESS"
+		printf 'INPUT_HTTP_PORT=%s\n' "$HTTP_PORT"
+		printf 'INPUT_FRAPPE_DOCKER_REPO=%s\n' "$FRAPPE_DOCKER_REPO"
+		printf 'INPUT_FRAPPE_DOCKER_REF=%s\n' "$FRAPPE_DOCKER_REF"
+		printf 'INPUT_DOCKER_SUBNET=%s\n' "$DOCKER_SUBNET"
+		if "$ADOPT_EXISTING_SITE"; then
+			printf 'INPUT_ADOPT_SOURCE_COMPOSE=%s\n' "$ADOPT_SOURCE_COMPOSE"
+			printf 'INPUT_ADOPT_SOURCE_VOLUME=%s\n' "$ADOPT_SOURCE_VOLUME"
+			printf 'INPUT_ADOPT_TARGET_VOLUME=%s\n' "$ADOPT_TARGET_VOLUME"
+			printf 'INPUT_ADOPT_DB_HOST=%s\n' "$ADOPT_DB_HOST"
+			printf 'INPUT_ADOPT_NETWORK_NAME=%s\n' "$ADOPT_NETWORK_NAME"
+		fi
+	} >"$input_file"
+	chmod 600 "$input_file"
 }
 
 prepare_dry_run_workspace() {
@@ -1152,6 +1223,7 @@ main() {
 	collect_deployment_settings
 	validate_inputs
 	show_summary
+	write_deployment_inputs
 	check_capacity
 	prepare_dry_run_workspace
 	apply_apt_proxy
