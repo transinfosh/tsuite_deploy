@@ -4,7 +4,7 @@ set -Eeuo pipefail
 DEFAULT_REF="main"
 DEFAULT_INSTALL_PATH="/usr/local/sbin/tsuite-deploy"
 LEGACY_INSTALL_PATH="/usr/local/sbin/tsuie-deploy"
-REPOSITORY_RAW_URL="https://raw.githubusercontent.com/transinfosh/tsuite_deploy"
+REPOSITORY_ARCHIVE_URL="https://codeload.github.com/transinfosh/tsuite_deploy/tar.gz"
 
 REF="${TSUITE_DEPLOY_REF:-${TSUIE_DEPLOY_REF:-$DEFAULT_REF}}"
 INSTALL_PATH="${TSUITE_DEPLOY_INSTALL_PATH:-${TSUIE_DEPLOY_INSTALL_PATH:-$DEFAULT_INSTALL_PATH}}"
@@ -19,15 +19,20 @@ die() {
 [[ "$INSTALL_PATH" == /* ]] || die "安装路径必须是绝对路径"
 command -v curl >/dev/null 2>&1 || die "未找到 curl，请先安装 curl"
 
-temporary_script="$(mktemp /tmp/tsuite-deploy.XXXXXX)"
-trap 'rm -f -- "$temporary_script"' EXIT
+temporary_dir="$(mktemp -d /tmp/tsuite-deploy.XXXXXX)"
+temporary_archive="$temporary_dir/source.tar.gz"
+temporary_script=""
+trap 'rm -rf -- "$temporary_dir"' EXIT
 cache_buster="$(date +%s)"
 
 printf '正在下载 tsuite_deploy（%s）...\n' "$REF"
 curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
 	--retry 3 \
-	"$REPOSITORY_RAW_URL/$REF/deploy.sh?cache_buster=$cache_buster" \
-	--output "$temporary_script"
+	"$REPOSITORY_ARCHIVE_URL/$REF?cache_buster=$cache_buster" \
+	--output "$temporary_archive"
+tar -xzf "$temporary_archive" -C "$temporary_dir"
+temporary_script="$(find "$temporary_dir" -mindepth 2 -maxdepth 2 -type f -name deploy.sh -print -quit)"
+[[ -f "$temporary_script" ]] || die "下载的源码归档不包含 deploy.sh"
 
 bash -n "$temporary_script" || die "下载的部署脚本未通过 Bash 语法检查"
 install -D -m 0755 "$temporary_script" "$INSTALL_PATH"
