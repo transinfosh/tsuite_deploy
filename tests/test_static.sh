@@ -6,6 +6,8 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 bash -n "$repo_root/deploy.sh"
 bash -n "$repo_root/install.sh"
 "$repo_root/deploy.sh" --help | grep -q -- "--dry-run"
+grep -q 'GitHub 源码归档' "$repo_root/deploy.sh"
+grep -q 'https://codeload.github.com/' "$repo_root/deploy.sh"
 
 if command -v shellcheck >/dev/null 2>&1; then
 	shellcheck "$repo_root/deploy.sh" "$repo_root/install.sh"
