@@ -28,6 +28,12 @@ PREVIOUS_IMAGE=""
 PREVIOUS_FRAPPE_DOCKER_COMMIT=""
 ROLLBACK_DIR=""
 DB_PASSWORD_CHANGED=false
+ADOPT_EXISTING_SITE=false
+ADOPT_SOURCE_COMPOSE=""
+ADOPT_SOURCE_VOLUME=""
+ADOPT_TARGET_VOLUME=""
+ADOPT_DB_HOST=""
+ADOPT_SOURCE_STOPPED=false
 
 log() {
 	printf '\n\033[1;34m==>\033[0m %s\n' "$*"
@@ -54,6 +60,10 @@ print_failure_hint() {
 		printf "  git -C %q/frappe_docker checkout --detach \"\$(cat %q/frappe_docker.commit)\"\n" \
 			"$DEPLOY_DIR" "$ROLLBACK_DIR" >&2
 		printf '数据库备份不会自动恢复，请确认迁移影响后再决定是否恢复数据库。\n' >&2
+	fi
+	if "$ADOPT_SOURCE_STOPPED"; then
+		printf '旧部署已停止；如需恢复旧容器：\n' >&2
+		printf '  docker compose -f %q up -d\n' "$ADOPT_SOURCE_COMPOSE" >&2
 	fi
 }
 
@@ -88,7 +98,9 @@ usage() {
 
 选项:
   --dry-run     只生成配置并显示系统命令，不安装软件或启动容器
-  --yes         对最终部署确认使用默认答案
+		--yes         对最终部署确认使用默认答案
+		--adopt-existing-site
+		              接管已有 frappe_docker 站点；运行时输入旧 Compose、volume 与数据库地址
   --help        显示帮助
 
 也可通过修改脚本顶部的 DEFAULT_* 值调整团队默认配置。
@@ -256,8 +268,10 @@ validate_inputs() {
 	if [[ ! "$DB_PORT" =~ ^[0-9]+$ ]] || ((DB_PORT < 1 || DB_PORT > 65535)); then
 		die "PostgreSQL 端口无效"
 	fi
-	[[ "$DB_MODE" == "container" || "$DB_MODE" == "local" ]] || die "数据库模式无效"
-	[[ "$DB_ADMIN_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || die "数据库管理员用户名格式无效"
+	[[ "$DB_MODE" == "container" || "$DB_MODE" == "local" || "$DB_MODE" == "adopt" ]] || die "数据库模式无效"
+	if ! "$ADOPT_EXISTING_SITE"; then
+		[[ "$DB_ADMIN_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || die "数据库管理员用户名格式无效"
+	fi
 	validate_private_subnet "$DOCKER_SUBNET" || die "Docker 子网格式无效，必须是规范的私有 IPv4 子网"
 
 	local app
@@ -267,6 +281,16 @@ validate_inputs() {
 
 	if [[ "$DB_MODE" == "local" && "$DOCKER_SUBNET" != 172.* ]]; then
 		warn "本机 PostgreSQL 模式建议使用 172.16.0.0/12 内的 Docker 子网"
+	fi
+	if "$ADOPT_EXISTING_SITE"; then
+		[[ -f "$ADOPT_SOURCE_COMPOSE" ]] || die "旧 Compose 文件不存在: $ADOPT_SOURCE_COMPOSE"
+		[[ "$ADOPT_SOURCE_VOLUME" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]] ||
+			die "旧 sites volume 名称无效"
+		[[ "$ADOPT_TARGET_VOLUME" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]] ||
+			die "新 sites volume 名称无效"
+		[[ "$ADOPT_SOURCE_VOLUME" != "$ADOPT_TARGET_VOLUME" ]] ||
+			die "新旧 sites volume 不能相同"
+		[[ -n "$ADOPT_DB_HOST" ]] || die "接管模式必须指定现有数据库地址"
 	fi
 }
 
@@ -334,6 +358,21 @@ collect_deployment_settings() {
 	prompt FRAPPE_DOCKER_REPO "frappe_docker 仓库地址" "$DEFAULT_FRAPPE_DOCKER_REPO"
 	prompt FRAPPE_DOCKER_REF "frappe_docker 分支、标签或提交" "$frappe_docker_ref_default"
 	prompt DOCKER_SUBNET "部署专用 Docker 子网" "${EXISTING_DOCKER_SUBNET:-$DEFAULT_DOCKER_SUBNET}"
+
+	if "$ADOPT_EXISTING_SITE"; then
+		prompt ADOPT_SOURCE_COMPOSE "旧 frappe_docker Compose 文件" ""
+		prompt ADOPT_SOURCE_VOLUME "旧 sites Docker volume" ""
+		prompt ADOPT_TARGET_VOLUME "新 sites Docker volume" "tsuite-${SITE_NAME//./-}-sites"
+		prompt ADOPT_DB_HOST "现有 PostgreSQL 地址" ""
+		DB_MODE="adopt"
+		DB_PORT="5432"
+		DB_ADMIN_USER=""
+		DB_PASSWORD=""
+		ADMIN_PASSWORD=""
+		parse_apps
+		split_image
+		return
+	fi
 
 	printf '\nPostgreSQL 部署方式：\n'
 	printf '  1) PostgreSQL 容器（推荐，迁移和备份更简单）\n'
@@ -657,6 +696,37 @@ SQL
 	systemctl restart postgresql
 }
 
+backup_and_clone_adopted_site() {
+	"$ADOPT_EXISTING_SITE" || return 0
+	log "备份并复制既有站点 $SITE_NAME"
+	"$DRY_RUN" && {
+		printf '[dry-run] docker compose -f %q exec backend bench --site %q backup --with-files\n' \
+			"$ADOPT_SOURCE_COMPOSE" "$SITE_NAME"
+		printf '[dry-run] 停止旧 Compose，复制 volume %s 到 %s，仅保留 %s\n' \
+			"$ADOPT_SOURCE_VOLUME" "$ADOPT_TARGET_VOLUME" "$SITE_NAME"
+		return
+	}
+	docker volume inspect "$ADOPT_SOURCE_VOLUME" >/dev/null ||
+		die "找不到旧 sites volume: $ADOPT_SOURCE_VOLUME"
+	docker volume inspect "$ADOPT_TARGET_VOLUME" >/dev/null 2>&1 &&
+		die "新 sites volume 已存在，为防止覆盖已中止: $ADOPT_TARGET_VOLUME"
+	docker compose -f "$ADOPT_SOURCE_COMPOSE" exec -T backend \
+		bench --site "$SITE_NAME" backup --with-files
+	docker compose -f "$ADOPT_SOURCE_COMPOSE" stop
+	ADOPT_SOURCE_STOPPED=true
+	docker volume create "$ADOPT_TARGET_VOLUME" >/dev/null
+	docker run --rm \
+		-v "$ADOPT_SOURCE_VOLUME:/from:ro" \
+		-v "$ADOPT_TARGET_VOLUME:/to" \
+		alpine:3.20 sh -ec '
+			cp -a /from/. /to/
+			find /to -mindepth 1 -maxdepth 1 -type d -name "*" \
+				! -name "'$SITE_NAME'" -exec sh -c "[ -f \"\$1/site_config.json\" ] && rm -rf \"\$1\" || true" _ {} \\;
+		'
+	test -f "$(docker volume inspect -f '{{ .Mountpoint }}' "$ADOPT_TARGET_VOLUME")/$SITE_NAME/site_config.json" ||
+		die "复制后的 sites volume 缺少生产站点配置"
+}
+
 yaml_quote() {
 	python3 -c 'import json, sys; print(json.dumps(sys.argv[1]))' "$1"
 }
@@ -679,6 +749,8 @@ write_generated_compose() {
 	local db_host="db"
 	if [[ "$DB_MODE" == "local" ]]; then
 		db_host="host.docker.internal"
+	elif [[ "$DB_MODE" == "adopt" ]]; then
+		db_host="$ADOPT_DB_HOST"
 	fi
 
 	{
@@ -717,6 +789,14 @@ networks:
       config:
         - subnet: $(yaml_quote "$DOCKER_SUBNET")
 EOF
+		if "$ADOPT_EXISTING_SITE"; then
+			cat <<EOF
+volumes:
+  sites:
+    external: true
+    name: $(yaml_quote "$ADOPT_TARGET_VOLUME")
+EOF
+		fi
 	} >"$compose_file"
 	chmod 640 "$compose_file"
 }
@@ -824,6 +904,8 @@ install_or_upgrade_site() {
 	update_container_postgres_password
 
 	if ! site_exists; then
+		"$ADOPT_EXISTING_SITE" &&
+			die "接管后的 sites volume 中未找到站点: $SITE_NAME"
 		log "创建站点 $SITE_NAME"
 		docker compose "${COMPOSE_ARGS[@]}" exec -T backend \
 			bench new-site "$SITE_NAME" \
@@ -904,6 +986,7 @@ main() {
 		case "$1" in
 			--dry-run) DRY_RUN=true ;;
 			--yes) ASSUME_YES=true ;;
+			--adopt-existing-site) ADOPT_EXISTING_SITE=true ;;
 			--help | -h)
 				usage
 				exit 0
@@ -929,6 +1012,7 @@ main() {
 	apply_docker_proxy
 	login_and_pull_image
 	download_frappe_docker
+	backup_and_clone_adopted_site
 	write_env_file
 	write_generated_compose
 	write_proxy_compose
