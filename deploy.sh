@@ -1113,7 +1113,6 @@ main() {
 
 	require_root
 	require_ubuntu
-	migrate_legacy_deployment
 	collect_proxy_settings
 	collect_deployment_settings
 	validate_inputs
