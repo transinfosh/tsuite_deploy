@@ -35,6 +35,7 @@ ADOPT_TARGET_VOLUME=""
 ADOPT_DB_HOST=""
 ADOPT_NETWORK_NAME=""
 ADOPT_SOURCE_STOPPED=false
+ADOPT_SOURCE_PROJECT=""
 
 log() {
 	printf '\n\033[1;34m==>\033[0m %s\n' "$*"
@@ -64,7 +65,12 @@ print_failure_hint() {
 	fi
 	if "$ADOPT_SOURCE_STOPPED"; then
 		printf '旧部署已停止；如需恢复旧容器：\n' >&2
-		printf '  docker compose -f %q up -d\n' "$ADOPT_SOURCE_COMPOSE" >&2
+		if [[ -n "$ADOPT_SOURCE_PROJECT" ]]; then
+			printf '  docker compose -p %q -f %q up -d\n' \
+				"$ADOPT_SOURCE_PROJECT" "$ADOPT_SOURCE_COMPOSE" >&2
+		else
+			printf '  docker compose -f %q up -d\n' "$ADOPT_SOURCE_COMPOSE" >&2
+		fi
 	fi
 }
 
@@ -231,6 +237,11 @@ load_existing_deployment() {
 	EXISTING_HTTP_PORT="$(read_config_value "$state_file" STATE_HTTP_PORT)"
 	EXISTING_DOCKER_SUBNET="$(read_config_value "$state_file" STATE_DOCKER_SUBNET)"
 	EXISTING_APPS="$(read_config_value "$state_file" STATE_APPS)"
+	EXISTING_ADOPT_SOURCE_COMPOSE="$(read_config_value "$state_file" STATE_ADOPT_SOURCE_COMPOSE)"
+	EXISTING_ADOPT_SOURCE_VOLUME="$(read_config_value "$state_file" STATE_ADOPT_SOURCE_VOLUME)"
+	EXISTING_ADOPT_TARGET_VOLUME="$(read_config_value "$state_file" STATE_ADOPT_TARGET_VOLUME)"
+	EXISTING_ADOPT_DB_HOST="$(read_config_value "$state_file" STATE_ADOPT_DB_HOST)"
+	EXISTING_ADOPT_NETWORK_NAME="$(read_config_value "$state_file" STATE_ADOPT_NETWORK_NAME)"
 	EXISTING_DB_PASSWORD="$(read_config_value "$env_file" DB_PASSWORD)"
 
 	log "检测到已有部署，将保留原密码和基础设施版本作为默认值"
@@ -363,11 +374,12 @@ collect_deployment_settings() {
 	prompt DOCKER_SUBNET "部署专用 Docker 子网" "${EXISTING_DOCKER_SUBNET:-$DEFAULT_DOCKER_SUBNET}"
 
 	if "$ADOPT_EXISTING_SITE"; then
-		prompt ADOPT_SOURCE_COMPOSE "旧 frappe_docker Compose 文件" ""
-		prompt ADOPT_SOURCE_VOLUME "旧 sites Docker volume" ""
-		prompt ADOPT_TARGET_VOLUME "新 sites Docker volume" "tsuite-${SITE_NAME//./-}-sites"
-		prompt ADOPT_DB_HOST "现有 PostgreSQL 地址" ""
-		prompt ADOPT_NETWORK_NAME "复用的旧 Docker 网络" ""
+		prompt ADOPT_SOURCE_COMPOSE "旧 frappe_docker Compose 文件" "${EXISTING_ADOPT_SOURCE_COMPOSE:-}"
+		prompt ADOPT_SOURCE_VOLUME "旧 sites Docker volume" "${EXISTING_ADOPT_SOURCE_VOLUME:-}"
+		prompt ADOPT_TARGET_VOLUME "新 sites Docker volume" \
+			"${EXISTING_ADOPT_TARGET_VOLUME:-tsuite-${SITE_NAME//./-}-sites}"
+		prompt ADOPT_DB_HOST "现有 PostgreSQL 地址" "${EXISTING_ADOPT_DB_HOST:-}"
+		prompt ADOPT_NETWORK_NAME "复用的旧 Docker 网络" "${EXISTING_ADOPT_NETWORK_NAME:-}"
 		DB_MODE="adopt"
 		DB_PORT="5432"
 		DB_ADMIN_USER=""
@@ -733,23 +745,45 @@ SQL
 	systemctl restart postgresql
 }
 
+find_adopt_source_backend() {
+	local container_id
+	while IFS= read -r container_id; do
+		[[ -n "$container_id" ]] || continue
+		if docker exec "$container_id" \
+			test -f "/home/frappe/frappe-bench/sites/$SITE_NAME/site_config.json"; then
+			printf '%s\n' "$container_id"
+			return 0
+		fi
+	done < <(docker ps --filter 'label=com.docker.compose.service=backend' --format '{{.ID}}')
+	return 1
+}
+
 backup_and_clone_adopted_site() {
 	"$ADOPT_EXISTING_SITE" || return 0
 	log "备份并复制既有站点 $SITE_NAME"
 	"$DRY_RUN" && {
-		printf '[dry-run] docker compose -f %q exec backend bench --site %q backup --with-files\n' \
-			"$ADOPT_SOURCE_COMPOSE" "$SITE_NAME"
+		printf '[dry-run] 查找包含站点 %q 的运行中 backend 容器并执行备份\n' "$SITE_NAME"
 		printf '[dry-run] 停止旧 Compose，复制 volume %s 到 %s，仅保留 %s\n' \
 			"$ADOPT_SOURCE_VOLUME" "$ADOPT_TARGET_VOLUME" "$SITE_NAME"
 		return
 	}
+	local backend_container
+	local container_ids=()
 	docker volume inspect "$ADOPT_SOURCE_VOLUME" >/dev/null ||
 		die "找不到旧 sites volume: $ADOPT_SOURCE_VOLUME"
 	docker volume inspect "$ADOPT_TARGET_VOLUME" >/dev/null 2>&1 &&
 		die "新 sites volume 已存在，为防止覆盖已中止: $ADOPT_TARGET_VOLUME"
-	docker compose -f "$ADOPT_SOURCE_COMPOSE" exec -T backend \
+	backend_container="$(find_adopt_source_backend)" ||
+		die "找不到包含站点 $SITE_NAME 的运行中旧 backend 容器"
+	ADOPT_SOURCE_PROJECT="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' "$backend_container")"
+	[[ -n "$ADOPT_SOURCE_PROJECT" ]] ||
+		die "旧 backend 容器缺少 Docker Compose 项目标记，无法安全停止旧部署"
+	log "备份旧 backend 容器中的站点 $SITE_NAME"
+	docker exec "$backend_container" \
 		bench --site "$SITE_NAME" backup --with-files
-	docker compose -f "$ADOPT_SOURCE_COMPOSE" stop
+	mapfile -t container_ids < <(docker ps -aq --filter "label=com.docker.compose.project=$ADOPT_SOURCE_PROJECT")
+	((${#container_ids[@]})) || die "找不到旧 Compose 项目 $ADOPT_SOURCE_PROJECT 的容器"
+	docker stop "${container_ids[@]}"
 	ADOPT_SOURCE_STOPPED=true
 	docker volume create "$ADOPT_TARGET_VOLUME" >/dev/null
 	docker run --rm \
@@ -888,6 +922,13 @@ write_state() {
 		printf 'STATE_HTTP_PORT=%s\n' "$HTTP_PORT"
 		printf 'STATE_DOCKER_SUBNET=%s\n' "$DOCKER_SUBNET"
 		printf 'STATE_FRAPPE_DOCKER_COMMIT=%s\n' "${FRAPPE_DOCKER_COMMIT:-dry-run}"
+		if "$ADOPT_EXISTING_SITE"; then
+			printf 'STATE_ADOPT_SOURCE_COMPOSE=%s\n' "$ADOPT_SOURCE_COMPOSE"
+			printf 'STATE_ADOPT_SOURCE_VOLUME=%s\n' "$ADOPT_SOURCE_VOLUME"
+			printf 'STATE_ADOPT_TARGET_VOLUME=%s\n' "$ADOPT_TARGET_VOLUME"
+			printf 'STATE_ADOPT_DB_HOST=%s\n' "$ADOPT_DB_HOST"
+			printf 'STATE_ADOPT_NETWORK_NAME=%s\n' "$ADOPT_NETWORK_NAME"
+		fi
 	} >"$state_file"
 	chmod 600 "$state_file"
 }

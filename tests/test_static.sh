@@ -8,6 +8,11 @@ bash -n "$repo_root/install.sh"
 "$repo_root/deploy.sh" --help | grep -q -- "--dry-run"
 grep -q 'GitHub 源码归档' "$repo_root/deploy.sh"
 grep -q 'https://codeload.github.com/' "$repo_root/deploy.sh"
+grep -q 'find_adopt_source_backend()' "$repo_root/deploy.sh"
+grep -q 'docker exec "$backend_container"' "$repo_root/deploy.sh"
+grep -q 'label=com.docker.compose.project=$ADOPT_SOURCE_PROJECT' "$repo_root/deploy.sh"
+grep -q 'STATE_ADOPT_SOURCE_COMPOSE' "$repo_root/deploy.sh"
+grep -q 'EXISTING_ADOPT_SOURCE_COMPOSE' "$repo_root/deploy.sh"
 
 if command -v shellcheck >/dev/null 2>&1; then
 	shellcheck "$repo_root/deploy.sh" "$repo_root/install.sh"
