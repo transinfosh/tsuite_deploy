@@ -784,6 +784,39 @@ find_adopt_source_backend() {
 	return 1
 }
 
+backup_adopted_database_with_postgres_client() {
+	local source_mountpoint
+	local site_config
+	local db_name
+	local db_host
+	local db_port
+	local db_user
+	local db_password
+	local backup_name
+
+	source_mountpoint="$(docker volume inspect -f '{{ .Mountpoint }}' "$ADOPT_SOURCE_VOLUME")"
+	site_config="$source_mountpoint/$SITE_NAME/site_config.json"
+	[[ -f "$site_config" ]] || die "旧 sites volume 中缺少站点配置: $SITE_NAME"
+	db_name="$(jq -er '.db_name // empty' "$site_config")" || die "无法读取旧站点数据库名"
+	db_host="$(jq -r '.db_host // empty' "$site_config")"
+	db_host="${db_host:-$ADOPT_DB_HOST}"
+	db_port="$(jq -r '.db_port // empty' "$site_config")"
+	db_port="${db_port:-5432}"
+	db_user="$(jq -er '.db_user // empty' "$site_config")" || die "无法读取旧站点数据库用户"
+	db_password="$(jq -er '.db_password // empty' "$site_config")" || die "无法读取旧站点数据库密码"
+	backup_name="$(date -u +%Y%m%d_%H%M%S)-${SITE_NAME}-database.sql.gz"
+
+	warn "旧 backend 的 pg_dump 与数据库版本不兼容，改用 PostgreSQL 16 客户端备份数据库"
+	docker run --rm --network "$ADOPT_NETWORK_NAME" \
+		-e "PGPASSWORD=$db_password" \
+		-v "$ADOPT_SOURCE_VOLUME:/sites" \
+		postgres:16 bash -ec '
+			backup_dir="/sites/$1/private/backups"
+			mkdir -p "$backup_dir"
+			pg_dump --host "$2" --port "$3" --username "$4" "$5" | gzip > "$backup_dir/$6"
+		' _ "$SITE_NAME" "$db_host" "$db_port" "$db_user" "$db_name" "$backup_name"
+}
+
 backup_and_clone_adopted_site() {
 	"$ADOPT_EXISTING_SITE" || return 0
 	log "备份并复制既有站点 $SITE_NAME"
@@ -805,8 +838,10 @@ backup_and_clone_adopted_site() {
 	[[ -n "$ADOPT_SOURCE_PROJECT" ]] ||
 		die "旧 backend 容器缺少 Docker Compose 项目标记，无法安全停止旧部署"
 	log "备份旧 backend 容器中的站点 $SITE_NAME"
-	docker exec "$backend_container" \
-		bench --site "$SITE_NAME" backup --with-files
+	if ! docker exec "$backend_container" \
+		bench --site "$SITE_NAME" backup --with-files; then
+		backup_adopted_database_with_postgres_client
+	fi
 	mapfile -t container_ids < <(docker ps -aq --filter "label=com.docker.compose.project=$ADOPT_SOURCE_PROJECT")
 	((${#container_ids[@]})) || die "找不到旧 Compose 项目 $ADOPT_SOURCE_PROJECT 的容器"
 	docker stop "${container_ids[@]}"
