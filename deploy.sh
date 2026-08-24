@@ -16,7 +16,7 @@ DEFAULT_HTTP_PORT="8080"
 DEFAULT_DOCKER_SUBNET="172.30.0.0/24"
 DEFAULT_HTTP_PROXY="${HTTP_PROXY:-${http_proxy:-}}"
 DEFAULT_HTTPS_PROXY="${HTTPS_PROXY:-${https_proxy:-$DEFAULT_HTTP_PROXY}}"
-DEFAULT_NO_PROXY="${NO_PROXY:-${no_proxy:-localhost,127.0.0.1}}"
+DEFAULT_NO_PROXY="${NO_PROXY:-${no_proxy:-localhost,127.0.0.1,::1,host.docker.internal,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,db,redis-cache,redis-queue,configurator,backend,frontend,websocket,queue-short,queue-long,scheduler}}"
 
 SCRIPT_NAME="$(basename "$0")"
 DRY_RUN=false
