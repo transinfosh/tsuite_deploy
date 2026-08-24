@@ -725,7 +725,7 @@ backup_and_clone_adopted_site() {
 		alpine:3.20 sh -ec '
 			cp -a /from/. /to/
 			find /to -mindepth 1 -maxdepth 1 -type d -name "*" \
-				! -name "'$SITE_NAME'" -exec sh -c "[ -f \"\$1/site_config.json\" ] && rm -rf \"\$1\" || true" _ {} \\;
+				! -name "'$SITE_NAME'" -exec sh -c "[ -f \"\$1/site_config.json\" ] && rm -rf \"\$1\" || true" _ {} \;
 		'
 	test -f "$(docker volume inspect -f '{{ .Mountpoint }}' "$ADOPT_TARGET_VOLUME")/$SITE_NAME/site_config.json" ||
 		die "复制后的 sites volume 缺少生产站点配置"
