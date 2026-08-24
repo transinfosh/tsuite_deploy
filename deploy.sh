@@ -33,6 +33,7 @@ ADOPT_SOURCE_COMPOSE=""
 ADOPT_SOURCE_VOLUME=""
 ADOPT_TARGET_VOLUME=""
 ADOPT_DB_HOST=""
+ADOPT_NETWORK_NAME=""
 ADOPT_SOURCE_STOPPED=false
 
 log() {
@@ -291,6 +292,8 @@ validate_inputs() {
 		[[ "$ADOPT_SOURCE_VOLUME" != "$ADOPT_TARGET_VOLUME" ]] ||
 			die "新旧 sites volume 不能相同"
 		[[ -n "$ADOPT_DB_HOST" ]] || die "接管模式必须指定现有数据库地址"
+		[[ "$ADOPT_NETWORK_NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]] ||
+			die "旧 Docker 网络名称无效"
 	fi
 }
 
@@ -364,6 +367,7 @@ collect_deployment_settings() {
 		prompt ADOPT_SOURCE_VOLUME "旧 sites Docker volume" ""
 		prompt ADOPT_TARGET_VOLUME "新 sites Docker volume" "tsuite-${SITE_NAME//./-}-sites"
 		prompt ADOPT_DB_HOST "现有 PostgreSQL 地址" ""
+		prompt ADOPT_NETWORK_NAME "复用的旧 Docker 网络" ""
 		DB_MODE="adopt"
 		DB_PORT="5432"
 		DB_ADMIN_USER=""
@@ -783,12 +787,23 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+EOF
+		if "$ADOPT_EXISTING_SITE"; then
+			cat <<EOF
+networks:
+  default:
+    external: true
+    name: $(yaml_quote "$ADOPT_NETWORK_NAME")
+EOF
+		else
+			cat <<EOF
 networks:
   default:
     ipam:
       config:
         - subnet: $(yaml_quote "$DOCKER_SUBNET")
 EOF
+		fi
 		if "$ADOPT_EXISTING_SITE"; then
 			cat <<EOF
 volumes:
