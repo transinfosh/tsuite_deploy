@@ -1206,10 +1206,43 @@ login_and_pull_image() {
 
 	local registry_user
 	local registry_token
+	local credentials_file="$DEPLOY_DIR/.ghcr-credentials"
+	if [[ -f "$credentials_file" && ! -L "$credentials_file" && -O "$credentials_file" ]] &&
+		[[ "$(stat -c '%a' "$credentials_file")" == "600" ]]; then
+		registry_user="$(read_config_value "$credentials_file" GHCR_USERNAME)"
+		registry_token="$(read_config_value "$credentials_file" GHCR_TOKEN)"
+		if [[ -n "$registry_user" && -n "$registry_token" ]]; then
+			log "使用已保存的 GHCR 凭据登录"
+			if printf '%s' "$registry_token" | docker login ghcr.io -u "$registry_user" --password-stdin; then
+				unset registry_token
+				if run docker pull "$IMAGE_REPOSITORY:$IMAGE_TAG"; then
+					return
+				fi
+				die "GHCR 登录成功，但仍无法拉取镜像；请检查镜像名称、标签和 read:packages 权限"
+			fi
+			warn "已保存的 GHCR 凭据登录失败，需要重新输入"
+			unset registry_token
+		fi
+	elif [[ -e "$credentials_file" ]]; then
+		warn "已保存的 GHCR 凭据文件权限或所有者不安全，已忽略；请重新输入凭据"
+	fi
+
 	prompt registry_user "GHCR 用户名" "${SUDO_USER:-${USER:-}}"
 	prompt_secret registry_token "GHCR Token（至少需要 read:packages）"
 	[[ -n "$registry_token" ]] || die "GHCR Token 不能为空"
-	printf '%s' "$registry_token" | docker login ghcr.io -u "$registry_user" --password-stdin
+	if ! printf '%s' "$registry_token" | docker login ghcr.io -u "$registry_user" --password-stdin; then
+		unset registry_token
+		die "GHCR 登录失败，请检查用户名和 Token"
+	fi
+
+	local credentials_temp
+	credentials_temp="$(mktemp "$DEPLOY_DIR/.ghcr-credentials.XXXXXX")"
+	{
+		printf 'GHCR_USERNAME=%s\n' "$registry_user"
+		printf 'GHCR_TOKEN=%s\n' "$registry_token"
+	} >"$credentials_temp"
+	chmod 600 "$credentials_temp"
+	mv "$credentials_temp" "$credentials_file"
 	unset registry_token
 	run docker pull "$IMAGE_REPOSITORY:$IMAGE_TAG"
 }

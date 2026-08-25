@@ -544,6 +544,7 @@ DB_PORT="5433"
 DB_ADMIN_USER="frappe_admin"
 write_deployment_inputs
 
+# shellcheck disable=SC2317 # 由动态载入的 collect_deployment_settings 间接调用。
 prompt() {
 	local variable_name="$1"
 	local default_value="${3:-}"
@@ -567,3 +568,61 @@ collect_deployment_settings >/dev/null
 [[ "$FRAPPE_DOCKER_REF" == "release-candidate" ]]
 [[ "$DOCKER_SUBNET" == "172.31.0.0/24" ]]
 [[ "$DB_MODE" == "container" ]]
+
+# GHCR 首次手工登录后应保存 root-only 凭据；下一次拉取应先用保存的凭据，
+# 无需再次执行交互输入。
+GHCR_MOCK_PULL_COUNT=0
+GHCR_MOCK_TOKEN=""
+# shellcheck disable=SC2317 # 由动态载入的 login_and_pull_image 间接调用。
+docker() {
+	case "$1" in
+		pull)
+			GHCR_MOCK_PULL_COUNT=$((GHCR_MOCK_PULL_COUNT + 1))
+			[[ "$GHCR_MOCK_PULL_COUNT" -ge 2 ]]
+			;;
+		login)
+			read -r GHCR_MOCK_TOKEN
+			printf '%s' "$GHCR_MOCK_TOKEN" >"$fixture_dir/ghcr-received-token"
+			;;
+		*)
+			echo "未预期的 docker 调用: $*" >&2
+			return 1
+			;;
+	esac
+}
+# shellcheck disable=SC2317 # 由动态载入的 login_and_pull_image 间接调用。
+prompt() {
+	local variable_name="$1"
+	if [[ "$variable_name" == "registry_user" ]]; then
+		printf -v "$variable_name" '%s' "fixture-user"
+	else
+		printf -v "$variable_name" '%s' "${3:-}"
+	fi
+}
+# shellcheck disable=SC2317 # 由动态载入的 login_and_pull_image 间接调用。
+prompt_secret() {
+	printf -v "$1" '%s' "fixture-token"
+}
+rm -f "$fixture_dir/.ghcr-credentials"
+IMAGE_REPOSITORY="ghcr.io/transinfosh/srm"
+IMAGE_TAG="0.1.8"
+login_and_pull_image >/dev/null
+[[ "$(cat "$fixture_dir/ghcr-received-token")" == "fixture-token" ]]
+[[ "$(stat -c '%a' "$fixture_dir/.ghcr-credentials")" == "600" ]]
+grep -qx 'GHCR_USERNAME=fixture-user' "$fixture_dir/.ghcr-credentials"
+grep -qx 'GHCR_TOKEN=fixture-token' "$fixture_dir/.ghcr-credentials"
+
+GHCR_MOCK_PULL_COUNT=0
+# shellcheck disable=SC2317 # 由动态载入的 login_and_pull_image 间接调用。
+prompt() {
+	echo "不应再次询问 GHCR 用户名" >&2
+	return 1
+}
+# shellcheck disable=SC2317 # 由动态载入的 login_and_pull_image 间接调用。
+prompt_secret() {
+	echo "不应再次询问 GHCR Token" >&2
+	return 1
+}
+login_and_pull_image >/dev/null
+[[ "$(cat "$fixture_dir/ghcr-received-token")" == "fixture-token" ]]
+unset -f docker prompt prompt_secret
