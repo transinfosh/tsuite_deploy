@@ -1,23 +1,23 @@
 ---
 # 2026-08-25 BI/AI 正式发布锁；目标 inventory 必须使用 reference@digest。
 lock_state: locked
-resolved_at: "2026-08-25T01:42:00Z"
+resolved_at: "2026-08-25T03:00:00Z"
 frappe_docker:
   ref: main
   resolved_sha: null
 images:
   customer_frappe:
-    reference: ghcr.io/transinfosh/tai-customer:0.0.11
-    digest: sha256:3d99924165ea81218c6d15f3afacb967e0b750f259dd5bc90cd265efac5152f4
-    source_commit: 8e9d2058a2ab33f1f981b1e274b5b7f28fbf2096
+    reference: ghcr.io/transinfosh/tai-customer:0.0.12
+    digest: sha256:e0a954667dbdec37bbcbf2a60b8e5754def67d793eb0528e26c31ed47c34cb59
+    source_commit: 02e75515bcfdb199a9ea2644c03dec8f4c3a630f
   control_frappe:
     reference: ghcr.io/transinfosh/tai-control:0.0.15
     digest: sha256:46fe330cf806d016b28b9d8efac8d4438229561bba04e54821057a27f9f4562f
-    source_commit: bedb3f60d6e1e97f5d144003aa526e7f2f3dd3d8
+    source_commit: 2fb6737fdc9a89f4fee8bf056858b95cbd8055e9
   tai_service:
     reference: ghcr.io/transinfosh/tai-service:v0.1.10
     digest: sha256:8202c232766504aac96b96f379551af1acc4e18f01abe893972740badf5422fd
-    source_commit: 62cb8f7b1960d7ef4cbe35ae446f40d41f54bf97
+    source_commit: fc93b50a38a55fce1ed06ccc2bdeed126b73f15d
   tbi_engine:
     reference: ghcr.io/transinfosh/tbi-engine:v0.1.5
     digest: sha256:728ee0f3ec4518030a7e29c08990463a3da6a47408cc86598c99f945772ea3ad
