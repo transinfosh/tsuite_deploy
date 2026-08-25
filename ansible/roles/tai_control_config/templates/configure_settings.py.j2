@@ -3,14 +3,11 @@ import json
 import frappe
 
 
-settings = frappe.get_single("TAI Control Settings")
 changed = False
 expected = {
     "issuer": "https://{{ control_site_name }}",
     "audience": "tai-service",
     "agent_runtime_url": "https://{{ runtime_public_hostname }}",
-    "chat_provider_key": "openai",
-    "chat_model_key": "deepseek-v4-flash",
     "embedding_enabled": 1,
     "embedding_provider_key": {{ embedding_provider_key | to_json }},
     "embedding_model_key": {{ embedding_model | to_json }},
@@ -20,21 +17,21 @@ expected = {
     "embedding_similarity_threshold": 0.3,
 }
 for fieldname, value in expected.items():
-    if settings.get(fieldname) != value:
-        settings.set(fieldname, value)
+    if frappe.db.get_single_value("TAI Control Settings", fieldname) != value:
+        frappe.db.set_single_value("TAI Control Settings", fieldname, value)
         changed = True
 if changed:
-    settings.save(ignore_permissions=True)
     frappe.db.commit()
+    frappe.clear_cache(doctype="TAI Control Settings")
 
 print(
     "TAI_CONTROL_SETTINGS="
     + json.dumps(
         {
             "changed": changed,
-            "issuer": settings.issuer,
-            "audience": settings.audience,
-            "agent_runtime_url": settings.agent_runtime_url,
+            "issuer": expected["issuer"],
+            "audience": expected["audience"],
+            "agent_runtime_url": expected["agent_runtime_url"],
         },
         sort_keys=True,
     )

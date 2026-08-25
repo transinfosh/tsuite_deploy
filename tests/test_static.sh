@@ -236,6 +236,9 @@ control_settings_script = (
 ).read_text(encoding="utf-8")
 assert '"issuer": "https://{{ control_site_name }}"' in control_settings_script
 assert '"agent_runtime_url": "https://{{ runtime_public_hostname }}"' in control_settings_script
+assert "frappe.db.set_single_value" in control_settings_script
+assert '"chat_provider_key"' not in control_settings_script
+assert '"chat_model_key"' not in control_settings_script
 
 customer_playbook = (playbook_dir / "customer.yml").read_text(encoding="utf-8")
 assert "'/run/secrets/tai_control_client_secret'" in customer_playbook
