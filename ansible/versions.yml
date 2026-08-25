@@ -11,8 +11,8 @@ images:
     digest: sha256:3d99924165ea81218c6d15f3afacb967e0b750f259dd5bc90cd265efac5152f4
     source_commit: 8e9d2058a2ab33f1f981b1e274b5b7f28fbf2096
   control_frappe:
-    reference: ghcr.io/transinfosh/tai-control:0.0.14
-    digest: sha256:1ce3aed3741fbacb7934eecec3537d31e303a633b11314a91e534e9ee24b7ab0
+    reference: ghcr.io/transinfosh/tai-control:0.0.15
+    digest: sha256:46fe330cf806d016b28b9d8efac8d4438229561bba04e54821057a27f9f4562f
     source_commit: bedb3f60d6e1e97f5d144003aa526e7f2f3dd3d8
   tai_service:
     reference: ghcr.io/transinfosh/tai-service:v0.1.9

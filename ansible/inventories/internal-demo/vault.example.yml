@@ -13,6 +13,7 @@ vault_tbi_engine_token: replace-with-at-least-32-random-characters
 vault_tai_service_token: replace-with-at-least-32-random-characters
 vault_tai_control_usage_secret: replace-with-random-secret
 vault_tai_control_service_secret: replace-with-at-least-32-random-characters
+vault_tai_runtime_store_secret: replace-with-at-least-32-random-characters
 vault_phoenix_secret: replace-with-random-secret
 vault_phoenix_db_password: change-me
 vault_deepseek_api_key: replace-me

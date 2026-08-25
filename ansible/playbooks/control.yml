@@ -52,6 +52,7 @@
           tai_control_client_id: "{{ vault_tai_control_client_id }}"
           tai_control_client_secret: "{{ vault_tai_control_client_secret }}"
           tai_service_token: "{{ vault_tai_service_token }}"
+          tai_runtime_store_secret: "{{ vault_tai_runtime_store_secret }}"
         frappe_site_config:
           tai_service_token_file: /run/secrets/tai_service_token
     - role: tai_control_config

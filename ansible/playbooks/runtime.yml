@@ -65,6 +65,7 @@
           tai_service_token: "{{ vault_tai_service_token }}"
           tai_control_usage: "{{ vault_tai_control_usage_secret }}"
           tai_control_service_secret: "{{ vault_tai_control_service_secret }}"
+          tai_runtime_store_secret: "{{ vault_tai_runtime_store_secret }}"
         python_container_mounts:
           - /etc/tai-service/config.json:/etc/tai-service/config.json:ro
         python_container_data_dirs:

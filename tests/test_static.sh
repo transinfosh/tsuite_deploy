@@ -133,7 +133,11 @@ tai_service_config = (
     / "roles/tai_service_config/templates/config.json.j2"
 ).read_text(encoding="utf-8")
 assert '"executionMode"' not in tai_service_config
-assert '"runtimeStoreUrl": "{{ control_internal_base_url }}/' in tai_service_config
+assert '"runtimeStoreId": {{ tai_runtime_store_id | to_json }}' in tai_service_config
+assert '"runtimeStoreSecretFile": "/run/secrets/tai_runtime_store_secret"' in tai_service_config
+assert '"runtimeStoreUrl"' not in tai_service_config
+assert '"harnessStoreUrl"' not in tai_service_config
+assert '"memoryStoreUrl"' not in tai_service_config
 assert '"issuer": "https://{{ control_site_name }}"' in tai_service_config
 assert '"collectorEndpoint": "{{ phoenix_internal_base_url }}/v1/traces"' in tai_service_config
 assert "python_container_extra_hosts:" in runtime_playbook
@@ -203,6 +207,8 @@ assert "frappe_bind_addresses:" in control_playbook
 assert '- "{{ ansible_host }}"' in control_playbook
 assert "role: tai_control_config" in control_playbook
 assert "tai_control_usage:" in control_playbook
+assert "tai_runtime_store_secret:" in control_playbook
+assert "tai_runtime_store_secret:" in runtime_playbook
 
 control_document = yaml.safe_load(control_playbook)
 control_roles = control_document[0]["roles"]

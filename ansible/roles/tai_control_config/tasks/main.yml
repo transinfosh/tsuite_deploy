@@ -108,6 +108,27 @@
   changed_when: false
   no_log: true
 
+- name: 登记 TAI Runtime Store 稳定身份
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - frappe-control-backend-1
+      - bench
+      - --site
+      - "{{ control_site_name }}"
+      - execute
+      - tai_control.install.ensure_runtime_store_from_file
+      - --kwargs
+      - >-
+        {{ {
+          'runtime_store_id': tai_runtime_store_id,
+          'title': tai_runtime_store_title,
+          'service_url': 'https://' ~ runtime_public_hostname
+        } | to_json }}
+  changed_when: false
+  no_log: true
+
 - name: 初始化内部演示租户与客户端凭据
   ansible.builtin.command:
     argv:

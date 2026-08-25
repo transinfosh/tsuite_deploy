@@ -16,6 +16,8 @@
     "baseUrl": "{{ control_internal_base_url }}",
     "serviceId": {{ tai_control_service_id | to_json }},
     "serviceSecretFile": "/run/secrets/tai_control_service_secret",
+    "runtimeStoreId": {{ tai_runtime_store_id | to_json }},
+    "runtimeStoreSecretFile": "/run/secrets/tai_runtime_store_secret",
     "authMode": "hybrid",
     "issuer": "https://{{ control_site_name }}",
     "audience": "tai-service",
@@ -23,9 +25,6 @@
     "authorizeUrl": "{{ control_internal_base_url }}/api/method/tai_control.api.authorization.authorize_ask",
     "releaseUrl": "{{ control_internal_base_url }}/api/method/tai_control.api.authorization.release_ask",
     "usageUrl": "{{ control_internal_base_url }}/api/method/tai_control.api.usage.ingest_usage_event",
-    "harnessStoreUrl": "{{ control_internal_base_url }}/api/method/tai_control.api.harness.execute_step_store",
-    "memoryStoreUrl": "{{ control_internal_base_url }}/api/method/tai_control.api.memory.execute_memory_store",
-    "runtimeStoreUrl": "{{ control_internal_base_url }}/api/method/tai_control.api.runtime_store.execute_runtime_store",
     "usageIngestSecretFile": "/run/secrets/tai_control_usage",
     "usageOutboxPath": "/data/tai-service/usage-outbox"
   },
