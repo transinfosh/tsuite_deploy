@@ -420,6 +420,8 @@ assert "python_container_network_aliases" in python_container_compose
 deploy_script = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
 install_script = pathlib.Path(sys.argv[3]).read_text(encoding="utf-8")
 assert 'DEFAULT_DEPLOY_DIR="/opt/tsuite-deploy"' in deploy_script
+assert '复用已有 PostgreSQL 部署方式：$DB_MODE' in deploy_script
+assert '"$EXISTING_DB_MODE" == "container" || "$EXISTING_DB_MODE" == "local"' in deploy_script
 assert 'LEGACY_DEPLOY_DIR="/opt/tsuie-deploy"' in deploy_script
 assert "migrate_legacy_deployment" in deploy_script
 assert 'mv "$LEGACY_DEPLOY_DIR" "$DEFAULT_DEPLOY_DIR"' in deploy_script

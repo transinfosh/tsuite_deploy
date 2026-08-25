@@ -55,6 +55,7 @@ Compose 的 `.env` 文件，密码应使用字母、数字以及
 检测到已有部署时，脚本会读取 `deployment.state` 和 `.env`：
 
 - 应用镜像默认使用当前已部署版本，输入新标签即执行镜像升级；
+- PostgreSQL 容器或本机部署方式自动沿用，不会重复询问；
 - 数据库密码默认保持不变；
 - `frappe_docker` 默认固定到上次部署的准确 commit，不会自动跟随 `main`；
 - 已有站点不再询问未使用的 Administrator 初始密码。

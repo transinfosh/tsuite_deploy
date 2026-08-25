@@ -502,18 +502,23 @@ collect_deployment_settings() {
 		return
 	fi
 
-	printf '\nPostgreSQL 部署方式：\n'
-	printf '  1) PostgreSQL 容器（推荐，迁移和备份更简单）\n'
-	printf '  2) 安装在 Ubuntu 本机\n'
-	if [[ "${EXISTING_DB_MODE:-$DEFAULT_DB_MODE}" == "local" ]]; then
-		db_choice_default="2"
+	if "$EXISTING_DEPLOYMENT" && [[ "$EXISTING_DB_MODE" == "container" || "$EXISTING_DB_MODE" == "local" ]]; then
+		DB_MODE="$EXISTING_DB_MODE"
+		log "复用已有 PostgreSQL 部署方式：$DB_MODE"
+	else
+		printf '\nPostgreSQL 部署方式：\n'
+		printf '  1) PostgreSQL 容器（推荐，迁移和备份更简单）\n'
+		printf '  2) 安装在 Ubuntu 本机\n'
+		if [[ "${EXISTING_DB_MODE:-$DEFAULT_DB_MODE}" == "local" ]]; then
+			db_choice_default="2"
+		fi
+		read -r -p "请选择 [$db_choice_default]: " db_choice
+		case "${db_choice:-$db_choice_default}" in
+			1) DB_MODE="container" ;;
+			2) DB_MODE="local" ;;
+			*) die "数据库选项无效" ;;
+		esac
 	fi
-	read -r -p "请选择 [$db_choice_default]: " db_choice
-	case "${db_choice:-$db_choice_default}" in
-		1) DB_MODE="container" ;;
-		2) DB_MODE="local" ;;
-		*) die "数据库选项无效" ;;
-	esac
 
 	prompt DB_PORT "PostgreSQL 端口" "${EXISTING_DB_PORT:-$DEFAULT_DB_PORT}"
 	if [[ "$DB_MODE" == "local" ]]; then
