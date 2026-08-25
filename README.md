@@ -1,6 +1,6 @@
-# TSUIE Deploy
+# TSuite Deploy
 
-TSUIE 平台部署仓库；其中包含面向 Ubuntu 单机服务器的交互式 Frappe Docker 部署工具。脚本会自动下载
+TSuite 平台部署仓库；其中包含面向 Ubuntu 单机服务器的交互式 Frappe Docker 部署工具。脚本会自动下载
 `frappe_docker`，安装缺失的软件，生成部署配置，并完成站点创建、应用安装和迁移。
 本仓库不复制或跟踪 `frappe_docker` 的文件，两者可以独立升级。
 
@@ -24,11 +24,11 @@ TSUIE 平台部署仓库；其中包含面向 Ubuntu 单机服务器的交互式
 不需要克隆 Git 仓库，一条命令即可安装并启动部署：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/transinfosh/tsuie_deploy/main/install.sh | sudo bash && sudo tsuie-deploy
+curl -fsSL https://raw.githubusercontent.com/transinfosh/tsuite_deploy/main/install.sh | sudo bash && sudo tsuite-deploy
 ```
 
 安装器会检查下载结果的 Bash 语法，然后把部署脚本安装到
-`/usr/local/sbin/tsuie-deploy`。
+`/usr/local/sbin/tsuite-deploy`。
 
 默认镜像为：
 
@@ -53,30 +53,30 @@ Compose 的 `.env` 文件，密码应使用字母、数字以及
 部署前可先预览：
 
 ```bash
-tsuie-deploy --dry-run
+tsuite-deploy --dry-run
 ```
 
-`--dry-run` 会把生成结果留在 `/tmp/tsuie-deploy-dry-run.*` 中供检查，不会改动
+`--dry-run` 会把生成结果留在 `/tmp/tsuite-deploy-dry-run.*` 中供检查，不会改动
 目标部署目录、安装软件或启动容器。
 
 ## 更新部署工具
 
 服务器不需要执行 `git pull`。重新下载安装器即可把
-`/usr/local/sbin/tsuie-deploy` 更新到最新的 `main`：
+`/usr/local/sbin/tsuite-deploy` 更新到最新的 `main`：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/transinfosh/tsuie_deploy/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/transinfosh/tsuite_deploy/main/install.sh | sudo bash
 ```
 
 更新部署工具不会自动升级正在运行的应用。更新完成后再执行：
 
 ```bash
-sudo tsuie-deploy
+sudo tsuite-deploy
 ```
 
-脚本会读取 `/opt/tsuie-deploy` 中的现有状态；输入新的应用镜像标签才会执行镜像
-升级。如果需要固定部署工具版本，可以把 `TSUIE_DEPLOY_REF` 设置为仓库中实际存在
-的 Tag 或 commit。也可以通过 `TSUIE_DEPLOY_INSTALL_PATH` 修改安装位置。
+脚本会读取 `/opt/tsuite-deploy` 中的现有状态；输入新的应用镜像标签才会执行镜像
+升级。如果需要固定部署工具版本，可以把 `TSUITE_DEPLOY_REF` 设置为仓库中实际存在
+的 Tag 或 commit。也可以通过 `TSUITE_DEPLOY_INSTALL_PATH` 修改安装位置。
 
 ## 数据库模式
 
@@ -100,14 +100,14 @@ sudo tsuie-deploy
 
 脚本会在任何安装操作之前询问是否启用代理，并显示最终配置供确认。启用后会写入：
 
-- `/etc/apt/apt.conf.d/90-tsuie-deploy-proxy`
-- `/etc/systemd/system/docker.service.d/tsuie-deploy-proxy.conf`
+- `/etc/apt/apt.conf.d/90-tsuite-deploy-proxy`
+- `/etc/systemd/system/docker.service.d/tsuite-deploy-proxy.conf`
 - 部署目录中的 `compose.proxy.yaml`
 
 脚本顶部的 `DEFAULT_HTTP_PROXY`、`DEFAULT_HTTPS_PROXY` 和 `DEFAULT_NO_PROXY`
 可作为团队默认值，也可在交互过程中修改。
 
-脚本只管理以上带有 `tsuie-deploy` 名称的代理配置；后续选择不使用代理时会移除
+脚本只管理以上带有 `tsuite-deploy` 名称的代理配置；后续选择不使用代理时会移除
 这些配置。变更 Docker daemon 代理需要重启 Docker 服务，执行前请确认服务器上
 其他容器可以承受这次重启。
 
@@ -124,10 +124,10 @@ sudo tsuie-deploy
 
 ## 文件结构
 
-脚本默认将运行环境写入 `/opt/tsuie-deploy`：
+脚本默认将运行环境写入 `/opt/tsuite-deploy`：
 
 ```text
-/opt/tsuie-deploy/
+/opt/tsuite-deploy/
 ├── .env
 ├── compose.generated.yaml
 ├── compose.proxy.yaml
@@ -211,6 +211,33 @@ Tag 后，由各仓库调用 `transinfosh/frappe_docker` 的共享工作流构�
 工作流使用 `type=gha,mode=max` 保存 BuildKit layer cache。服务器仍使用 inventory 中现有的
 Docker daemon 代理拉取 GHCR 镜像；部署时只执行 `docker pull`、迁移和容器重建。
 
+### 内外网 GHCR 拉取代理
+
+正式镜像统一由 GitHub Actions 构建，部署机只从 GHCR 拉取。代理按 inventory 选择：
+
+- `internal-demo` 使用内网 PassWall：`http://192.168.2.254:1082`；
+- 外网 inventory 使用 `vault_external_deployment_http_proxy`，该变量必须仅写入对应的
+  `vault.yml` 并用 `ansible-vault` 加密，格式为
+  `http://<用户名>:<URL 编码后的密码>@<公网地址>:10820`。
+
+例如首次配置 `ruisu-customer`：
+
+```bash
+cd ansible
+cp inventories/ruisu-customer/vault.example.yml inventories/ruisu-customer/vault.yml
+ansible-vault encrypt inventories/ruisu-customer/vault.yml
+ansible-vault edit inventories/ruisu-customer/vault.yml
+```
+
+Docker daemon 的代理 Systemd 文件权限为 `0600`，且部署默认不会把代理 URL 注入业务容器，
+避免认证凭据出现在容器环境变量或 `docker inspect` 输出中。确有构建阶段需要容器代理时，
+才在 inventory 显式设置 `deployment_proxy_propagate_to_containers: true`。
+首次应用此规则会从已有 Docker Client 配置中移除旧的 `proxies` 项，但会保留 GHCR 登录凭据等
+其余 Docker 配置。
+
+外网代理必须启用账号认证，并由 OpenWrt 防火墙限制允许的来源地址；更优先的方案是让部署机
+通过 WireGuard/Tailscale 接入内网后使用内网代理，避免在公网传输 HTTP 代理认证信息。
+
 ### 独立公网 Customer 节点
 
 `ansible/inventories/ruisu-customer/` 用于域名直接解析到服务器的独立 Customer 节点。该 inventory
@@ -233,7 +260,7 @@ ansible-playbook -i inventories/ruisu-customer/hosts.yml playbooks/customer.yml 
 
 组织需要完成一次性配置：
 
-1. 允许上述私有仓库调用 `tsuie_deploy` 的 reusable workflow；
+1. 允许上述私有仓库调用 `tsuite_deploy` 的 reusable workflow；
 2. 统一使用名为 `APP_SOURCE_TOKEN` 的专用 fine-grained Token，只授予构建涉及的私有源码仓库
    `Contents: read`，不要复用个人管理 Token。GitHub Team 及以上套餐可以把它配置为组织级 Secret，
    并将 Repository access 限定为 `tai`、`tai_control`、`tai-service`、`tbi-engine` 和 `tai-auth`。
@@ -337,7 +364,21 @@ allow_unlocked_revisions: true
 才需要运行 `tools/create-source-bundle.sh` 生成带 SHA256 的统一源码快照。
 `production` inventory 会拒绝 `unlocked` 状态。
 
-正式 Release 时只需更新 `ansible/versions.yml` 和 inventory 中的镜像引用，无需修改角色。
+正式 Release 时无需修改部署角色，但必须将发布工作流摘要中的实际源码 commit 和镜像 digest
+写入 `ansible/versions.yml`，并在目标 inventory 使用 digest 引用。例如对 tai-service：
+
+```yaml
+tai_service_release_lock: true
+tai_service_release_version: "0.1.1"
+tai_service_source_commit: "<发布 Tag 所指向的 40 位 commit>"
+tai_service_image: >-
+  ghcr.io/transinfosh/tai-service@sha256:<Publish GHCR image 工作流输出的 digest>
+```
+
+正式 tai-service Tag 必须与 `pyproject.toml` 的版本完全匹配（如 `0.1.1` 对应
+`v0.1.1`）。发布工作流会校验此约束，并将实际检出的 40 位 commit、语义 Tag 和 digest
+写入 Actions 摘要及 OCI 镜像标签。`v0.1.0-internal-demo.5` 仍仅用于当前内部演示；在正式
+Tag 和 digest 均已发布前，不应把运行 inventory 改成猜测的版本号。
 
 ### 前置条件
 

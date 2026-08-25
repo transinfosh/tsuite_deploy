@@ -19,8 +19,8 @@
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
-    owner: "10001"
-    group: "10001"
+    owner: "{{ python_container_data_owner }}"
+    group: "{{ python_container_data_group }}"
     mode: "0750"
   loop: "{{ python_container_data_dirs }}"
 
@@ -50,6 +50,16 @@
     owner: root
     group: root
     mode: "0600"
+  no_log: true
+
+- name: 写入 Python Worker 环境
+  ansible.builtin.template:
+    src: worker-env.j2
+    dest: "{{ python_container_root }}/.env.worker"
+    owner: root
+    group: root
+    mode: "0600"
+  when: python_container_worker_command | length > 0
   no_log: true
 
 - name: 写入 Python 容器 Compose
@@ -84,6 +94,24 @@
   register: python_container_pull
   when: python_container_image | length > 0
   changed_when: "'Downloaded newer image' in python_container_pull.stdout"
+
+- name: 停止迁移前的 Python 服务
+  ansible.builtin.command: >-
+    docker compose --env-file {{ python_container_root }}/.env
+    -p tai-{{ python_container_name }} -f {{ python_container_root }}/compose.yml stop
+  when: python_container_pre_migrate_command | length > 0
+  changed_when: false
+
+- name: 执行 Python 容器迁移前门禁
+  ansible.builtin.command: >-
+    docker compose --env-file {{ python_container_root }}/.env
+    -p tai-{{ python_container_name }} -f {{ python_container_root }}/compose.yml
+    run --rm -e TAI_RUNTIME_MIGRATION_DATABASE_URL service
+    {{ python_container_pre_migrate_command }}
+  environment: "{{ python_container_pre_migrate_environment }}"
+  when: python_container_pre_migrate_command | length > 0
+  no_log: true
+  changed_when: false
 
 - name: 执行 Python 容器数据库迁移
   ansible.builtin.command: >-

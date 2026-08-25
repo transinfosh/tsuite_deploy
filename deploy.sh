@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 # 可按团队环境修改这些默认值，运行时仍会逐项询问。
-DEFAULT_DEPLOY_DIR="/opt/tsuie-deploy"
+DEFAULT_DEPLOY_DIR="/opt/tsuite-deploy"
 DEFAULT_FRAPPE_DOCKER_REPO="https://github.com/transinfosh/frappe_docker.git"
 DEFAULT_FRAPPE_DOCKER_REF="main"
 DEFAULT_IMAGE="ghcr.io/transinfosh/project_management:0.0.2"
@@ -17,6 +17,9 @@ DEFAULT_DOCKER_SUBNET="172.30.0.0/24"
 DEFAULT_HTTP_PROXY="${HTTP_PROXY:-${http_proxy:-}}"
 DEFAULT_HTTPS_PROXY="${HTTPS_PROXY:-${https_proxy:-$DEFAULT_HTTP_PROXY}}"
 DEFAULT_NO_PROXY="${NO_PROXY:-${no_proxy:-localhost,127.0.0.1}}"
+LEGACY_DEPLOY_DIR="/opt/tsuie-deploy"
+LEGACY_APT_PROXY_FILE="/etc/apt/apt.conf.d/90-tsuie-deploy-proxy"
+LEGACY_DOCKER_PROXY_FILE="/etc/systemd/system/docker.service.d/tsuie-deploy-proxy.conf"
 
 SCRIPT_NAME="$(basename "$0")"
 DRY_RUN=false
@@ -78,6 +81,43 @@ run() {
 		return 0
 	fi
 	"$@"
+}
+
+migrate_legacy_deployment() {
+	local legacy_command="/usr/local/sbin/tsuie-deploy"
+	local canonical_command="/usr/local/sbin/tsuite-deploy"
+	local moved_docker_proxy=false
+
+	if [[ -e "$LEGACY_DEPLOY_DIR" && -e "$DEFAULT_DEPLOY_DIR" ]]; then
+		die "旧部署目录和新部署目录同时存在，请先人工确认：$LEGACY_DEPLOY_DIR、$DEFAULT_DEPLOY_DIR"
+	fi
+	if [[ -e "$LEGACY_DEPLOY_DIR" ]]; then
+		log "迁移旧部署目录到 $DEFAULT_DEPLOY_DIR"
+		run mv "$LEGACY_DEPLOY_DIR" "$DEFAULT_DEPLOY_DIR"
+	fi
+
+	if [[ -e "$LEGACY_APT_PROXY_FILE" && -e "/etc/apt/apt.conf.d/90-tsuite-deploy-proxy" ]]; then
+		die "旧版和新版 APT 代理配置同时存在，请先人工确认"
+	fi
+	[[ ! -e "$LEGACY_APT_PROXY_FILE" ]] ||
+		run mv "$LEGACY_APT_PROXY_FILE" "/etc/apt/apt.conf.d/90-tsuite-deploy-proxy"
+
+	if [[ -e "$LEGACY_DOCKER_PROXY_FILE" && -e "/etc/systemd/system/docker.service.d/tsuite-deploy-proxy.conf" ]]; then
+		die "旧版和新版 Docker 代理配置同时存在，请先人工确认"
+	fi
+	if [[ -e "$LEGACY_DOCKER_PROXY_FILE" ]]; then
+		run mv "$LEGACY_DOCKER_PROXY_FILE" "/etc/systemd/system/docker.service.d/tsuite-deploy-proxy.conf"
+		moved_docker_proxy=true
+	fi
+
+	if "$moved_docker_proxy" && ! "$DRY_RUN"; then
+		systemctl daemon-reload
+		systemctl restart docker
+	fi
+
+	if [[ -e "$legacy_command" && ! -e "$canonical_command" ]]; then
+		warn "旧命令将由安装器迁移为 $canonical_command；本次仍可继续执行。"
+	fi
 }
 
 usage() {
@@ -383,7 +423,7 @@ collect_deployment_settings() {
 prepare_dry_run_workspace() {
 	TARGET_DEPLOY_DIR="$DEPLOY_DIR"
 	"$DRY_RUN" || return 0
-	DEPLOY_DIR="$(mktemp -d /tmp/tsuie-deploy-dry-run.XXXXXX)"
+	DEPLOY_DIR="$(mktemp -d /tmp/tsuite-deploy-dry-run.XXXXXX)"
 	log "dry-run 配置文件将写入 $DEPLOY_DIR"
 }
 
@@ -416,7 +456,7 @@ show_summary() {
 }
 
 apply_apt_proxy() {
-	local proxy_file="/etc/apt/apt.conf.d/90-tsuie-deploy-proxy"
+	local proxy_file="/etc/apt/apt.conf.d/90-tsuite-deploy-proxy"
 	if ! "$PROXY_ENABLED"; then
 		run rm -f "$proxy_file"
 		return
@@ -449,7 +489,7 @@ systemd_escape() {
 
 apply_docker_proxy() {
 	local dropin_dir="/etc/systemd/system/docker.service.d"
-	local dropin="$dropin_dir/tsuie-deploy-proxy.conf"
+	local dropin="$dropin_dir/tsuite-deploy-proxy.conf"
 	if ! "$PROXY_ENABLED"; then
 		if [[ -f "$dropin" ]]; then
 			run rm -f "$dropin"
@@ -464,7 +504,7 @@ apply_docker_proxy() {
 	fi
 	install -d -m 0755 "$dropin_dir"
 	local desired_dropin
-	desired_dropin="$(mktemp /tmp/tsuie-deploy-docker-proxy.XXXXXX)"
+	desired_dropin="$(mktemp /tmp/tsuite-deploy-docker-proxy.XXXXXX)"
 	{
 		printf '[Service]\n'
 		[[ -z "$HTTP_PROXY_VALUE" ]] ||
@@ -649,10 +689,11 @@ ALTER SYSTEM SET listen_addresses = '*';
 SQL
 	hba_file="$(runuser -u postgres -- psql -Atqc 'SHOW hba_file;')"
 	sed -i '/^# BEGIN tsuie_deploy$/,/^# END tsuie_deploy$/d' "$hba_file"
+	sed -i '/^# BEGIN tsuite_deploy$/,/^# END tsuite_deploy$/d' "$hba_file"
 	{
-		printf '\n# BEGIN tsuie_deploy\n'
+		printf '\n# BEGIN tsuite_deploy\n'
 		printf 'host all all %s scram-sha-256\n' "$DOCKER_SUBNET"
-		printf '# END tsuie_deploy\n'
+		printf '# END tsuite_deploy\n'
 	} >>"$hba_file"
 	systemctl restart postgresql
 }
@@ -915,6 +956,7 @@ main() {
 
 	require_root
 	require_ubuntu
+	migrate_legacy_deployment
 	collect_proxy_settings
 	collect_deployment_settings
 	validate_inputs

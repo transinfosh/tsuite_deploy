@@ -6,11 +6,13 @@ vault_control_db_password: change-me
 vault_control_admin_password: change-me
 vault_runtime_db_admin_password: change-me
 vault_runtime_db_app_password: change-me
+vault_runtime_db_worker_password: change-me
 vault_benchmark_mssql_password: change-me
 
 vault_tbi_engine_token: replace-with-at-least-32-random-characters
 vault_tai_service_token: replace-with-at-least-32-random-characters
 vault_tai_control_usage_secret: replace-with-random-secret
+vault_tai_control_service_secret: replace-with-at-least-32-random-characters
 vault_phoenix_secret: replace-with-random-secret
 vault_phoenix_db_password: change-me
 vault_deepseek_api_key: replace-me
@@ -20,6 +22,11 @@ vault_qwen_api_key: replace-me
 # 私有 GHCR 镜像拉取凭据。Token 只需要 read:packages；公开镜像可留空。
 vault_ghcr_username: ""
 vault_ghcr_token: ""
+
+# 外网部署节点的认证 HTTP 代理。复制到 vault.yml 后用 ansible-vault 加密。
+# 密码中的 @、:、/、#、% 等字符必须 URL 编码；例如：
+# http://deploy-user:encoded-password@proxy.example.com:10820
+vault_external_deployment_http_proxy: ""
 
 # 每台机器使用独立 Tunnel Token。未使用的主机可以留空，但对应部署会失败。
 vault_cloudflare_tunnel_tokens:

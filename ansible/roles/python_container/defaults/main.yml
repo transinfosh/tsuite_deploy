@@ -1,13 +1,19 @@
 ---
-python_container_root: "/opt/tsuie-deploy/{{ python_container_name }}"
+python_container_root: "/opt/tsuite-deploy/{{ python_container_name }}"
 python_container_extras: []
 python_container_environment: {}
+python_container_worker_environment: {}
 python_container_secrets: {}
 python_container_mounts: []
 python_container_data_dirs: []
+python_container_data_owner: "10001"
+python_container_data_group: "10001"
 python_container_networks: []
 python_container_network_aliases: []
 python_container_extra_hosts: []
+python_container_worker_command: ""
+python_container_pre_migrate_command: ""
+python_container_pre_migrate_environment: {}
 python_container_migrate_command: ""
 python_container_python_image: python:3.11-slim-bookworm
 python_container_apt_mirror: ""

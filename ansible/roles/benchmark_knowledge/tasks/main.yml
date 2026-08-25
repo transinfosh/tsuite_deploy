@@ -15,7 +15,7 @@
 - name: 写入 Benchmark Knowledge 初始化脚本
   ansible.builtin.template:
     src: bootstrap_knowledge.py.j2
-    dest: /opt/tsuie-deploy/bootstrap-benchmark-knowledge.py
+    dest: /opt/tsuite-deploy/bootstrap-benchmark-knowledge.py
     owner: root
     group: root
     mode: "0644"
@@ -50,7 +50,7 @@
     argv:
       - docker
       - cp
-      - /opt/tsuie-deploy/bootstrap-benchmark-knowledge.py
+      - /opt/tsuite-deploy/bootstrap-benchmark-knowledge.py
       - "{{ benchmark_tai_service_container.stdout }}:/tmp/bootstrap-benchmark-knowledge.py"
   changed_when: false
 

@@ -77,7 +77,6 @@
               if (customer_control_client_secret | default(vault_tai_control_client_secret) | length > 0)
               else ''
             }}
-          tai_auth_mode: Hybrid
     - role: python_container
       vars:
         python_container_name: tbi-engine

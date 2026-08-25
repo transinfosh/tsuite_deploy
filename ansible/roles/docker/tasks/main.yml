@@ -1,4 +1,37 @@
 ---
+- name: 检查旧版 Docker 代理配置
+  ansible.builtin.stat:
+    path: /etc/systemd/system/docker.service.d/tsuie-deploy-proxy.conf
+  register: legacy_docker_proxy
+
+- name: 检查新版 Docker 代理配置
+  ansible.builtin.stat:
+    path: /etc/systemd/system/docker.service.d/tsuite-deploy-proxy.conf
+  register: tsuite_docker_proxy
+
+- name: 拒绝冲突的 Docker 代理配置
+  ansible.builtin.assert:
+    that:
+      - not (legacy_docker_proxy.stat.exists and tsuite_docker_proxy.stat.exists)
+    fail_msg: >-
+      旧版和新版 Docker 代理配置同时存在，无法安全自动迁移；请先人工确认。
+
+- name: 迁移旧版 Docker 代理配置
+  ansible.builtin.command:
+    argv:
+      - mv
+      - /etc/systemd/system/docker.service.d/tsuie-deploy-proxy.conf
+      - /etc/systemd/system/docker.service.d/tsuite-deploy-proxy.conf
+  when: legacy_docker_proxy.stat.exists
+  register: migrate_legacy_docker_proxy
+
+- name: 应用已迁移的 Docker 代理配置
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+    name: docker
+    state: restarted
+  when: migrate_legacy_docker_proxy is changed
+
 - name: 安装 Docker 与 Compose
   ansible.builtin.apt:
     name:
@@ -30,8 +63,9 @@
     dest: /etc/systemd/system/docker.service.d/http-proxy.conf
     owner: root
     group: root
-    mode: "0644"
+    mode: "0600"
   notify: 重启 Docker
+  no_log: true
 
 - name: 创建 Root Docker Client 配置目录
   ansible.builtin.file:
@@ -48,6 +82,26 @@
     owner: root
     group: root
     mode: "0600"
+  when: deployment_proxy_propagate_to_containers | default(false) | bool
+  no_log: true
+
+- name: 移除 Docker Client 配置中的旧代理
+  ansible.builtin.shell:
+    cmd: |
+      set -eu
+      config=/root/.docker/config.json
+      test -f "$config" || exit 0
+      jq -e 'has("proxies")' "$config" >/dev/null || exit 0
+      temporary_config="$(mktemp /root/.docker/config.json.XXXXXX)"
+      trap 'rm -f "$temporary_config"' EXIT
+      jq 'del(.proxies)' "$config" > "$temporary_config"
+      chmod 0600 "$temporary_config"
+      mv "$temporary_config" "$config"
+      printf '%s\n' removed
+    executable: /bin/bash
+  when: not (deployment_proxy_propagate_to_containers | default(false) | bool)
+  register: docker_client_proxy_cleanup
+  changed_when: docker_client_proxy_cleanup.stdout == 'removed'
 
 - name: 应用 Docker Daemon 代理
   ansible.builtin.meta: flush_handlers

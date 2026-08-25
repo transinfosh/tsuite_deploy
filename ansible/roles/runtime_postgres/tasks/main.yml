@@ -1,7 +1,7 @@
 ---
 - name: 创建 Runtime PostgreSQL 目录
   ansible.builtin.file:
-    path: /opt/tsuie-deploy/runtime-postgres
+    path: /opt/tsuite-deploy/runtime-postgres
     state: directory
     owner: root
     group: root
@@ -10,7 +10,7 @@
 - name: 写入 Runtime PostgreSQL 环境
   ansible.builtin.copy:
     content: "POSTGRES_PASSWORD={{ vault_runtime_db_admin_password }}\n"
-    dest: /opt/tsuie-deploy/runtime-postgres/.env
+    dest: /opt/tsuite-deploy/runtime-postgres/.env
     owner: root
     group: root
     mode: "0600"
@@ -19,22 +19,22 @@
 - name: 写入 Runtime PostgreSQL Compose
   ansible.builtin.template:
     src: compose.yml.j2
-    dest: /opt/tsuie-deploy/runtime-postgres/compose.yml
+    dest: /opt/tsuite-deploy/runtime-postgres/compose.yml
     owner: root
     group: root
     mode: "0640"
 
 - name: 启动 Runtime PostgreSQL
   ansible.builtin.command: >-
-    docker compose --env-file /opt/tsuie-deploy/runtime-postgres/.env
-    -p tai-runtime-db -f /opt/tsuie-deploy/runtime-postgres/compose.yml up -d
+    docker compose --env-file /opt/tsuite-deploy/runtime-postgres/.env
+    -p tai-runtime-db -f /opt/tsuite-deploy/runtime-postgres/compose.yml up -d
   register: runtime_db_up
   changed_when: "'Started' in runtime_db_up.stdout or 'Created' in runtime_db_up.stderr"
 
 - name: 等待 Runtime PostgreSQL
   ansible.builtin.command: >-
-    docker compose --env-file /opt/tsuie-deploy/runtime-postgres/.env
-    -p tai-runtime-db -f /opt/tsuie-deploy/runtime-postgres/compose.yml
+    docker compose --env-file /opt/tsuite-deploy/runtime-postgres/.env
+    -p tai-runtime-db -f /opt/tsuite-deploy/runtime-postgres/compose.yml
     exec -T db pg_isready -U postgres
   register: runtime_db_ready
   retries: 30
@@ -45,7 +45,7 @@
 - name: 写入 Runtime PostgreSQL 初始化 SQL
   ansible.builtin.template:
     src: initialize.sql.j2
-    dest: /opt/tsuie-deploy/runtime-postgres/initialize.sql
+    dest: /opt/tsuite-deploy/runtime-postgres/initialize.sql
     owner: root
     group: root
     mode: "0600"
@@ -53,7 +53,7 @@
 
 - name: 复制初始化 SQL 到容器
   ansible.builtin.command: >-
-    docker cp /opt/tsuie-deploy/runtime-postgres/initialize.sql
+    docker cp /opt/tsuite-deploy/runtime-postgres/initialize.sql
     tai-runtime-postgres:/tmp/initialize.sql
   changed_when: false
 

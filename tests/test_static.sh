@@ -79,7 +79,8 @@ assert "else 'tai-runtime-postgres'" in runtime_playbook
 assert "/{{ runtime_database_name }}" in runtime_playbook
 assert "@host.docker.internal:{{ runtime_database_port }}/" not in runtime_playbook
 assert "role: embedding" not in runtime_playbook
-assert "qwen_api_key:" in runtime_playbook
+assert "TAI_RUNTIME_WORKER_DATABASE_URL" in runtime_playbook
+assert "python_container_worker_command:" in runtime_playbook
 
 inventory_vars = (
     pathlib.Path(sys.argv[1])
@@ -99,22 +100,86 @@ assert "customer_database_name: tai" in ruisu_inventory_vars
 assert "customer_database_user: tai_app" in ruisu_inventory_vars
 assert 'customer_control_client_id: ""' in ruisu_inventory_vars
 assert 'customer_control_client_secret: ""' in ruisu_inventory_vars
+assert 'deployment_http_proxy: "{{ vault_external_deployment_http_proxy | default(\'\') }}"' in ruisu_inventory_vars
+assert "deployment_proxy_propagate_to_containers: false" in ruisu_inventory_vars
+ruisu_vault_example = (
+    pathlib.Path(sys.argv[1])
+    / "inventories/ruisu-customer/vault.example.yml"
+).read_text(encoding="utf-8")
+assert 'vault_external_deployment_http_proxy: ""' in ruisu_vault_example
+
+internal_inventory_vars = (
+    pathlib.Path(sys.argv[1])
+    / "inventories/internal-demo/group_vars/all.yml"
+).read_text(encoding="utf-8")
+assert "deployment_http_proxy: http://192.168.2.254:1082" in internal_inventory_vars
+assert "deployment_proxy_propagate_to_containers: false" in internal_inventory_vars
+
+docker_tasks = yaml.safe_load(
+    (pathlib.Path(sys.argv[1]) / "roles/docker/tasks/main.yml").read_text(encoding="utf-8")
+)
+daemon_proxy_task = next(task for task in docker_tasks if task["name"] == "写入 Docker Daemon 代理")
+assert daemon_proxy_task["ansible.builtin.template"]["mode"] == "0600"
+assert daemon_proxy_task["no_log"] is True
+container_proxy_task = next(task for task in docker_tasks if task["name"] == "写入 Docker Build 与容器代理")
+assert container_proxy_task["when"] == "deployment_proxy_propagate_to_containers | default(false) | bool"
+assert container_proxy_task["no_log"] is True
+remove_legacy_proxy_task = next(task for task in docker_tasks if task["name"] == "移除 Docker Client 配置中的旧代理")
+assert "jq 'del(.proxies)'" in remove_legacy_proxy_task["ansible.builtin.shell"]["cmd"]
+assert remove_legacy_proxy_task["changed_when"] == "docker_client_proxy_cleanup.stdout == 'removed'"
 
 tai_service_config = (
     pathlib.Path(sys.argv[1])
     / "roles/tai_service_config/templates/config.json.j2"
 ).read_text(encoding="utf-8")
-assert '"baseUrl": {{ embedding_base_url | to_json }}' in tai_service_config
-assert '"credentialRef": "file:/run/secrets/qwen_api_key"' in tai_service_config
-assert '"timeoutSeconds": {{ embedding_timeout_seconds }}' in tai_service_config
-assert '"modelRoutingPolicy": {' in tai_service_config
-assert '"provider_key": "openai"' in tai_service_config
-assert '"model_key": "deepseek-v4-flash"' in tai_service_config
-assert '"capabilities": ["tool_calling", "structured_output"]' in tai_service_config
+assert '"executionMode"' not in tai_service_config
 assert '"runtimeStoreUrl": "{{ control_internal_base_url }}/' in tai_service_config
 assert '"issuer": "https://{{ control_site_name }}"' in tai_service_config
 assert '"collectorEndpoint": "{{ phoenix_internal_base_url }}/v1/traces"' in tai_service_config
 assert "python_container_extra_hosts:" in runtime_playbook
+
+python_container_compose = (
+    pathlib.Path(sys.argv[1])
+    / "roles/python_container/templates/compose.yml.j2"
+).read_text(encoding="utf-8")
+assert "python_container_worker_command" in python_container_compose
+assert "  worker:" in python_container_compose
+assert "      - .env.worker" in python_container_compose
+assert "TAI_RUNTIME_WORKER_DATABASE_URL" not in runtime_playbook.split(
+    "python_container_worker_environment:", 1
+)[0]
+assert "TAI_RUNTIME_WORKER_DATABASE_URL" in runtime_playbook.split(
+    "python_container_worker_environment:", 1
+)[1]
+assert "tai_service.durable_cutover --expire-overdue" in runtime_playbook
+assert "TAI_RUNTIME_MIGRATION_DATABASE_URL" in runtime_playbook
+worker_env_template = (
+    pathlib.Path(sys.argv[1])
+    / "roles/python_container/templates/worker-env.j2"
+).read_text(encoding="utf-8")
+assert "python_container_worker_environment.items()" in worker_env_template
+python_container_tasks = (
+    pathlib.Path(sys.argv[1]) / "roles/python_container/tasks/main.yml"
+).read_text(encoding="utf-8")
+assert "执行 Python 容器迁移前门禁" in python_container_tasks
+assert "python_container_pre_migrate_environment" in python_container_tasks
+assert "run --rm -e TAI_RUNTIME_MIGRATION_DATABASE_URL service" in python_container_tasks
+
+preflight_tasks = yaml.safe_load(
+    (
+        pathlib.Path(sys.argv[1]) / "roles/preflight/tasks/main.yml"
+    ).read_text(encoding="utf-8")
+)
+locked_runtime_release = next(
+    task
+    for task in preflight_tasks
+    if task["name"] == "校验已锁定的 TAI Service 正式版本"
+)
+locked_runtime_checks = locked_runtime_release["ansible.builtin.assert"]["that"]
+assert "tai_service_release_version is match('^[0-9]+\\\\.[0-9]+\\\\.[0-9]+$')" in locked_runtime_checks
+assert "tai_service_source_commit is match('^[0-9a-f]{40}$')" in locked_runtime_checks
+assert any("tai-service@sha256" in check for check in locked_runtime_checks)
+assert "tai_service_release_lock | default(false) | bool" in locked_runtime_release["when"]
 
 runtime_bootstrap_tasks = yaml.safe_load(
     (
@@ -176,6 +241,8 @@ customer_playbook = (playbook_dir / "customer.yml").read_text(encoding="utf-8")
 assert "'/run/secrets/tai_control_client_secret'" in customer_playbook
 assert "customer_control_client_id | default(vault_tai_control_client_id)" in customer_playbook
 assert "customer_control_client_secret | default(vault_tai_control_client_secret)" in customer_playbook
+assert 'tai_auth_url: "https://{{ auth_public_hostname }}"' in customer_playbook
+assert "tai_auth_mode" not in customer_playbook
 assert "python_container_install_mssql_driver: true" in customer_playbook
 assert 'tbi_engine_base_url: "http://tbi-engine:{{ tbi_engine_port }}"' in customer_playbook
 assert "python_container_network_aliases:" in customer_playbook
@@ -190,6 +257,8 @@ benchmark_project_script = (
 assert "import_project_mdl" in benchmark_project_script
 assert "publish_project" in benchmark_project_script
 assert 'service_url + "/v1/projects/register"' in benchmark_project_script
+assert "settings.auth_edge_url = auth_url" in benchmark_project_script
+assert "settings.auth_mode" not in benchmark_project_script
 assert "tai_control.api.auth.register_project" not in benchmark_project_script
 assert "initialize_tenant_binding" in benchmark_project_script
 assert "benchmark_project_members" in benchmark_project_script
@@ -256,6 +325,9 @@ assert registry_source_sync["environment"] == {
     "http_proxy": "{{ deployment_http_proxy | default('') }}",
     "https_proxy": "{{ deployment_http_proxy | default('') }}",
     "no_proxy": "{{ deployment_no_proxy | default('') }}",
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "http.proxyAuthMethod",
+    "GIT_CONFIG_VALUE_0": "basic",
 }
 
 frappe_stack_handlers = (
@@ -335,9 +407,29 @@ python_container_compose = (
     / "roles/python_container/templates/compose.yml.j2"
 ).read_text(encoding="utf-8")
 assert "python_container_network_aliases" in python_container_compose
+
+deploy_script = (pathlib.Path(sys.argv[1]).parent / "deploy.sh").read_text(encoding="utf-8")
+install_script = (pathlib.Path(sys.argv[1]).parent / "install.sh").read_text(encoding="utf-8")
+assert 'DEFAULT_DEPLOY_DIR="/opt/tsuite-deploy"' in deploy_script
+assert 'LEGACY_DEPLOY_DIR="/opt/tsuie-deploy"' in deploy_script
+assert "migrate_legacy_deployment" in deploy_script
+assert 'mv "$LEGACY_DEPLOY_DIR" "$DEFAULT_DEPLOY_DIR"' in deploy_script
+assert "旧部署目录和新部署目录同时存在" in deploy_script
+assert "BEGIN tsuie_deploy" in deploy_script
+assert "BEGIN tsuite_deploy" in deploy_script
+assert 'TSUITE_DEPLOY_REF:-${TSUIE_DEPLOY_REF:-$DEFAULT_REF}' in install_script
+assert 'DEFAULT_INSTALL_PATH="/usr/local/sbin/tsuite-deploy"' in install_script
+
+common_tasks = yaml.safe_load(
+    (pathlib.Path(sys.argv[1]) / "roles/common/tasks/main.yml").read_text(encoding="utf-8")
+)
+assert any(task["name"] == "迁移旧版部署目录" for task in common_tasks)
+assert any(task["name"] == "迁移旧版 APT 代理配置" for task in common_tasks)
+
+assert any(task["name"] == "迁移旧版 Docker 代理配置" for task in docker_tasks)
 PY
 
-fixture_dir="$(mktemp -d /tmp/tsuie-deploy-test.XXXXXX)"
+fixture_dir="$(mktemp -d /tmp/tsuite-deploy-test.XXXXXX)"
 trap 'rm -rf -- "$fixture_dir"' EXIT
 
 # 载入函数但不执行脚本入口，验证生成文件可以被 YAML 解析。

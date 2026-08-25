@@ -1,4 +1,54 @@
 ---
+- name: 检查旧版部署目录
+  ansible.builtin.stat:
+    path: /opt/tsuie-deploy
+  register: legacy_deployment_root
+
+- name: 检查新版部署目录
+  ansible.builtin.stat:
+    path: /opt/tsuite-deploy
+  register: tsuite_deployment_root
+
+- name: 拒绝冲突的部署目录
+  ansible.builtin.assert:
+    that:
+      - not (legacy_deployment_root.stat.exists and tsuite_deployment_root.stat.exists)
+    fail_msg: >-
+      /opt/tsuie-deploy 与 /opt/tsuite-deploy 同时存在，无法安全自动迁移；
+      请先确认两边数据后再继续。
+
+- name: 迁移旧版部署目录
+  ansible.builtin.command:
+    argv:
+      - mv
+      - /opt/tsuie-deploy
+      - /opt/tsuite-deploy
+  when: legacy_deployment_root.stat.exists
+
+- name: 检查旧版 APT 代理配置
+  ansible.builtin.stat:
+    path: /etc/apt/apt.conf.d/90-tsuie-deploy-proxy
+  register: legacy_apt_proxy
+
+- name: 检查新版 APT 代理配置
+  ansible.builtin.stat:
+    path: /etc/apt/apt.conf.d/90-tsuite-deploy-proxy
+  register: tsuite_apt_proxy
+
+- name: 拒绝冲突的 APT 代理配置
+  ansible.builtin.assert:
+    that:
+      - not (legacy_apt_proxy.stat.exists and tsuite_apt_proxy.stat.exists)
+    fail_msg: 旧版和新版 APT 代理配置同时存在，无法安全自动迁移；请先人工确认。
+
+- name: 迁移旧版 APT 代理配置
+  ansible.builtin.command:
+    argv:
+      - mv
+      - /etc/apt/apt.conf.d/90-tsuie-deploy-proxy
+      - /etc/apt/apt.conf.d/90-tsuite-deploy-proxy
+  when: legacy_apt_proxy.stat.exists
+
 - name: 安装通用系统包
   ansible.builtin.apt:
     name: "{{ common_apt_packages }}"
@@ -42,7 +92,7 @@
     group: root
     mode: "{{ item.mode }}"
   loop:
-    - path: /opt/tsuie-deploy
+    - path: /opt/tsuite-deploy
       mode: "0755"
     - path: "{{ secrets_root }}"
       mode: "0700"

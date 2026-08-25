@@ -48,9 +48,8 @@ service_token = Path(service_token_file).read_text(encoding="utf-8").strip()
 settings = frappe.get_single("TAI Settings")
 settings.enabled = 1
 settings.service_url = service_url
-settings.control_plane_url = auth_url
+settings.auth_edge_url = auth_url
 settings.control_client_id = control_client_id
-settings.auth_mode = str(frappe.conf.get("tai_auth_mode") or "Hybrid")
 settings.save(ignore_permissions=True)
 
 try:

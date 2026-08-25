@@ -1,6 +1,6 @@
 ---
 frappe_local_image_name: ""
 frappe_local_apps: []
-frappe_local_build_root: "/opt/tsuie-deploy/frappe-build/{{ deployment_snapshot_id }}"
+frappe_local_build_root: "/opt/tsuite-deploy/frappe-build/{{ deployment_snapshot_id }}"
 frappe_local_image_prefix: ghcr.io/frappe
 frappe_local_branch: version-16

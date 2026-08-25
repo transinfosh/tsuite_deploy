@@ -10,7 +10,7 @@
 - name: 写入 Benchmark 项目初始化脚本
   ansible.builtin.template:
     src: bootstrap_project.py.j2
-    dest: /opt/tsuie-deploy/bootstrap-benchmark-project.py
+    dest: /opt/tsuite-deploy/bootstrap-benchmark-project.py
     owner: root
     group: root
     mode: "0644"
@@ -42,7 +42,7 @@
     argv:
       - docker
       - cp
-      - /opt/tsuie-deploy/bootstrap-benchmark-project.py
+      - /opt/tsuite-deploy/bootstrap-benchmark-project.py
       - frappe-customer-backend-1:/tmp/bootstrap-benchmark-project.py
   changed_when: false
 

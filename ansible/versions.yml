@@ -1,5 +1,7 @@
 ---
 # 这是版本接口，不是当前正式 Release。当前内部演示允许可变引用。
+# 正式发布时，每个镜像均须填写 source_commit，并将 reference 与 digest 组合成
+# `reference@digest` 写入目标 inventory；不得仅依赖可变 Tag。
 lock_state: unlocked-internal-demo
 resolved_at: null
 frappe_docker:
@@ -9,18 +11,23 @@ images:
   customer_frappe:
     reference: ghcr.io/transinfosh/tai-customer:internal-demo
     digest: null
+    source_commit: null
   control_frappe:
     reference: ghcr.io/transinfosh/tai-control:internal-demo
     digest: null
+    source_commit: null
   tai_service:
     reference: ghcr.io/transinfosh/tai-service:internal-demo
     digest: null
+    source_commit: null
   tbi_engine:
     reference: ghcr.io/transinfosh/tbi-engine:internal-demo
     digest: null
+    source_commit: null
   tai_auth:
     reference: ghcr.io/transinfosh/tai-auth:internal-demo
     digest: null
+    source_commit: null
 source_bundle:
   sha256: null
 

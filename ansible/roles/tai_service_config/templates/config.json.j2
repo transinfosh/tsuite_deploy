@@ -6,37 +6,16 @@
   "runtime": {
     "globalRequestConcurrency": 16,
     "perSiteConcurrency": 8,
-    "perProjectConcurrency": 4
-  },
-  "modelRoutingPolicy": {
-    "kind": "model_routing_policy",
-    "version": 1,
-    "routes": [
-      {
-        "provider_key": "openai",
-        "model_key": "deepseek-v4-flash",
-        "capabilities": ["tool_calling", "structured_output"]
-      }
-    ]
-  },
-  "modelProviders": {
-    "openai": {
-      "label": "DeepSeek",
-      "adapter": "openai",
-      "baseUrl": "https://api.deepseek.com/v1",
-      "credentialRef": "env:DEEPSEEK_API_KEY"
-    },
-    {{ embedding_provider_key | to_json }}: {
-      "label": "阿里云百炼（北京）",
-      "adapter": "alibaba",
-      "baseUrl": {{ embedding_base_url | to_json }},
-      "credentialRef": "file:/run/secrets/qwen_api_key"
-    }
+    "perProjectConcurrency": 4,
+    "recoveryRetentionDays": {{ tai_runtime_recovery_retention_days | default(7) }},
+    "retentionCleanupIntervalSeconds": {{ tai_runtime_retention_cleanup_interval_seconds | default(3600) }}
   },
   "devConsole": {"enabled": false},
   "serviceTokenFile": "/run/secrets/tai_service_token",
   "controlPlane": {
     "baseUrl": "{{ control_internal_base_url }}",
+    "serviceId": {{ tai_control_service_id | to_json }},
+    "serviceSecretFile": "/run/secrets/tai_control_service_secret",
     "authMode": "hybrid",
     "issuer": "https://{{ control_site_name }}",
     "audience": "tai-service",
@@ -56,23 +35,5 @@
     "projectName": "tai-service",
     "batch": true,
     "includeContent": false
-  },
-  "llm": {
-    "provider": "openai",
-    "model": "deepseek-v4-flash",
-    "baseUrl": "https://api.deepseek.com/v1",
-    "apiKey": "env:DEEPSEEK_API_KEY",
-    "temperature": 0,
-    "maxTokens": 4096,
-    "contextWindowTokens": 64000,
-    "topP": 1
-  },
-  "embedding": {
-    "model": {{ embedding_model | to_json }},
-    "baseUrl": {{ embedding_base_url | to_json }},
-    "apiKey": "file:/run/secrets/qwen_api_key",
-    "dimensions": {{ embedding_dimensions }},
-    "timeoutSeconds": {{ embedding_timeout_seconds }},
-    "backfillBatchSize": {{ embedding_backfill_batch_size }}
   }
 }

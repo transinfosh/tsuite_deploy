@@ -55,6 +55,11 @@
     http_proxy: "{{ deployment_http_proxy | default('') }}"
     https_proxy: "{{ deployment_http_proxy | default('') }}"
     no_proxy: "{{ deployment_no_proxy | default('') }}"
+    # 部分带认证 HTTP 代理会在 Git 自动协商认证时中断 CONNECT；显式 Basic
+    # 仅作用于本次命令，不写入远端全局 Git 配置。
+    GIT_CONFIG_COUNT: "1"
+    GIT_CONFIG_KEY_0: http.proxyAuthMethod
+    GIT_CONFIG_VALUE_0: basic
   when: image_delivery_mode == 'registry'
   register: frappe_docker_sync
   retries: 3

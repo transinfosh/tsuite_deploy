@@ -9,12 +9,16 @@ deployment_registry: ghcr.io
 deployment_registry_username: "{{ vault_ghcr_username | default('') }}"
 deployment_registry_token: "{{ vault_ghcr_token | default('') }}"
 deployment_image_tag: v0.1.0-internal-demo.2
-customer_image_tag: v0.1.0-internal-demo.5
+customer_image_tag: 0.0.10
 customer_frappe_image: "ghcr.io/transinfosh/tai-customer:{{ customer_image_tag }}"
-control_image_tag: v0.1.0-internal-demo.5
+control_image_tag: 0.0.13
 control_frappe_image: "ghcr.io/transinfosh/tai-control:{{ control_image_tag }}"
-tai_service_image_tag: v0.1.0-internal-demo.5
-tai_service_image: "ghcr.io/transinfosh/tai-service:{{ tai_service_image_tag }}"
+# Runtime database migrations rely on SECURITY DEFINER ownership. Pin this
+# service independently so a later full deployment cannot roll it back.
+tai_service_release_lock: true
+tai_service_release_version: 0.1.8
+tai_service_source_commit: d73048bbd621f9955d03740093b426d6b02e025a
+tai_service_image: "ghcr.io/transinfosh/tai-service@sha256:efef04d64faa712bf6d195968e0538239c45c1687d16068969994116f437e696"
 tbi_engine_image: "ghcr.io/transinfosh/tbi-engine:{{ deployment_image_tag }}"
 tai_auth_image: "ghcr.io/transinfosh/tai-auth:{{ deployment_image_tag }}"
 frappe_docker_repo: https://github.com/transinfosh/frappe_docker.git
@@ -24,13 +28,18 @@ customer_site_name: tai.trinfo.net
 runtime_public_hostname: api.trinfo.net
 control_site_name: control.trinfo.net
 auth_public_hostname: auth.trinfo.net
+portal_site_name: portal.trinfo.net
 
 # cloudflare 或 frp。业务域名保持不变时，切换入口不需要修改应用配置。
 ingress_provider: frp
 cloudflared_download_url: https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
 
-# 内部演示环境通过局域网代理加速公共镜像与构建依赖下载。
-deployment_http_proxy: http://192.168.2.252:7897
+# 内部节点通过局域网 PassWall HTTP 代理拉取镜像。
+# 该地址不含认证信息，可安全保留在 inventory 中。
+deployment_http_proxy: http://192.168.2.254:1082
+# 正式镜像由 GitHub Actions 构建；部署节点只需让 Docker daemon 经代理拉取，
+# 不应将代理地址传入业务容器或写入容器 inspect 信息。
+deployment_proxy_propagate_to_containers: false
 deployment_no_proxy: >-
   localhost,127.0.0.1,::1,host.docker.internal,
   192.168.2.0/24,10.0.0.0/8,172.16.0.0/12,
@@ -52,6 +61,7 @@ frp_public_hostnames:
   - "{{ customer_site_name }}"
   - "{{ runtime_public_hostname }}"
   - "{{ auth_public_hostname }}"
+  - "{{ portal_site_name }}"
 
 source_mode: local_bundle
 source_bundle_path: "{{ playbook_dir }}/../artifacts/tai-source-current.tar.gz"
@@ -89,6 +99,7 @@ tai_service_port: 8765
 tai_auth_port: 8780
 tbi_engine_port: 8770
 tai_service_workers: 2
+tai_control_service_id: "{{ inventory_hostname }}"
 tbi_engine_workers: 2
 
 embedding_provider_key: bailian-beijing
@@ -124,6 +135,7 @@ benchmark_knowledge_container_path: >-
 enable_phoenix: true
 phoenix_port: 6006
 phoenix_image: arizephoenix/phoenix:latest
+phoenix_retention_days: 30
 phoenix_postgres_image: postgres:16
 phoenix_manage_postgres: "{{ not external_database_enabled }}"
 phoenix_database_host: "{{ external_database_host }}"

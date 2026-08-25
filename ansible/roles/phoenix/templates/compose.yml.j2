@@ -27,6 +27,7 @@ services:
       PHOENIX_SQL_DATABASE_URL: postgresql://phoenix:${PHOENIX_DB_PASSWORD}@{{ phoenix_database_host | default('db') }}:{{ phoenix_database_port | default(5432) }}/phoenix
       PHOENIX_ENABLE_AUTH: "true"
       PHOENIX_SECRET: ${PHOENIX_SECRET}
+      PHOENIX_DEFAULT_RETENTION_POLICY_DAYS: "{{ phoenix_retention_days | default(30) }}"
     ports:
 {% for address in phoenix_bind_addresses %}
       - "{{ address }}:{{ phoenix_port }}:6006"

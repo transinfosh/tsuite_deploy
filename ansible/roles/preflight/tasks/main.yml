@@ -62,6 +62,19 @@
       - image_delivery_mode != 'registry' or tbi_engine_image is match('^ghcr\\.io/')
       - image_delivery_mode != 'registry' or tai_auth_image is match('^ghcr\\.io/')
 
+- name: 校验已锁定的 TAI Service 正式版本
+  ansible.builtin.assert:
+    that:
+      - tai_service_release_version is match('^[0-9]+\\.[0-9]+\\.[0-9]+$')
+      - tai_service_source_commit is match('^[0-9a-f]{40}$')
+      - tai_service_image is match('^ghcr\\.io/transinfosh/tai-service@sha256:[0-9a-f]{64}$')
+    fail_msg: >-
+      锁定 TAI Service Release 必须提供语义版本、40 位源码提交和 GHCR sha256 digest，
+      不能只部署镜像 Tag。
+  when:
+    - image_delivery_mode == 'registry'
+    - tai_service_release_lock | default(false) | bool
+
 - name: 校验部署代理
   ansible.builtin.assert:
     that:
@@ -119,14 +132,18 @@
     - source_mode == 'local_bundle'
     - "'relay_nodes' not in group_names"
 
-- name: 校验客户节点控制面凭据
+- name: 校验客户节点显式注入的控制面凭据
   ansible.builtin.assert:
     that:
-      - vault_tai_control_client_id | length >= 16
-      - vault_tai_control_client_secret | length >= 32
-      - vault_tai_control_client_id != 'replace-me'
-      - vault_tai_control_client_secret != 'replace-me'
-  when: "'customer_nodes' in group_names"
+      - customer_control_client_id | length >= 16
+      - customer_control_client_secret | length >= 32
+      - customer_control_client_id != 'replace-me'
+      - customer_control_client_secret != 'replace-me'
+  when:
+    - "'customer_nodes' in group_names"
+    - >-
+      (customer_control_client_id | default('') | length > 0)
+      or (customer_control_client_secret | default('') | length > 0)
   no_log: true
 
 - name: 校验客户节点 Benchmark 数据库配置

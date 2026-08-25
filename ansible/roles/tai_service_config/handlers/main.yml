@@ -1,7 +1,7 @@
 ---
 - name: 重启 TAI Service
   ansible.builtin.command: >-
-    docker compose --env-file /opt/tsuie-deploy/tai-service/.env
-    -p tai-tai-service -f /opt/tsuie-deploy/tai-service/compose.yml restart
+    docker compose --env-file /opt/tsuite-deploy/tai-service/.env
+    -p tai-tai-service -f /opt/tsuite-deploy/tai-service/compose.yml restart
   when: not ansible_check_mode
   changed_when: true

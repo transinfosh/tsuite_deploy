@@ -8,11 +8,11 @@ deployment_registry: ghcr.io
 deployment_registry_username: "{{ vault_ghcr_username | default('') }}"
 deployment_registry_token: "{{ vault_ghcr_token | default('') }}"
 deployment_image_tag: v0.1.0-internal-demo.2
-customer_image_tag: v0.1.0-internal-demo.5
+customer_image_tag: 0.0.10
 customer_frappe_image: "ghcr.io/transinfosh/tai-customer:{{ customer_image_tag }}"
 control_frappe_image: "ghcr.io/transinfosh/tai-control:{{ deployment_image_tag }}"
 tai_service_image: "ghcr.io/transinfosh/tai-service:{{ deployment_image_tag }}"
-tbi_engine_image: "ghcr.io/transinfosh/tbi-engine:{{ deployment_image_tag }}"
+tbi_engine_image: "ghcr.io/transinfosh/tbi-engine:v0.1.4"
 tai_auth_image: "ghcr.io/transinfosh/tai-auth:{{ deployment_image_tag }}"
 frappe_docker_repo: https://github.com/transinfosh/frappe_docker.git
 frappe_docker_ref: main
@@ -31,7 +31,12 @@ auth_public_hostname: auth.trinfo.net
 
 ingress_provider: direct
 direct_caddy_email: adam.wu@trinfo.net
-deployment_http_proxy: ""
+# 公网节点使用带认证的 PassWall 服务端代理。完整 URL（含经 URL 编码的
+# 用户名和密码）只保存在 inventory 的 Ansible Vault 中，不能写入此文件。
+deployment_http_proxy: "{{ vault_external_deployment_http_proxy | default('') }}"
+# 正式镜像由 GitHub Actions 构建；部署节点只需让 Docker daemon 经代理拉取，
+# 不应将代理凭据传入业务容器或写入容器 inspect 信息。
+deployment_proxy_propagate_to_containers: false
 deployment_no_proxy: >-
   localhost,127.0.0.1,::1,host.docker.internal,
   10.0.0.0/8,172.16.0.0/12,
