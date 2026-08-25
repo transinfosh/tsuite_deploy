@@ -1228,7 +1228,7 @@ login_and_pull_image() {
 	fi
 
 	prompt registry_user "GHCR 用户名" "${SUDO_USER:-${USER:-}}"
-	prompt_secret registry_token "GHCR Token（至少需要 read:packages）"
+	prompt_secret registry_token "GHCR Personal access token (classic，至少需要 read:packages)"
 	[[ -n "$registry_token" ]] || die "GHCR Token 不能为空"
 	if ! printf '%s' "$registry_token" | docker login ghcr.io -u "$registry_user" --password-stdin; then
 		unset registry_token

@@ -104,8 +104,9 @@ sudo tsuite-deploy
 
 ## 私有镜像和私有源码
 
-部署脚本只需要拉取已经构建完成的镜像。私有 GHCR 镜像需要 fine-grained Token
-或 classic PAT，至少具有 `read:packages` 权限。Token 只传给 `docker login`，
+部署脚本只需要拉取已经构建完成的镜像。私有 GHCR 镜像需要 **Personal access token (classic)**，
+至少具有 `read:packages` 权限；GitHub Container Registry 不接受 fine-grained Token。输入的
+用户名必须是该 Token 所属的个人 GitHub 用户名，并且该账号必须具有镜像包的读取权限。Token 只传给 `docker login`，
 不会写入 Compose 配置或 `deployment.inputs`。首次登录成功后，脚本会将用户名和 Token
 保存到部署目录的 `.ghcr-credentials`（执行部署的 root 用户所有、权限 `0600`）；下次拉取先使用该凭据，
 只有登录失败时才重新询问并覆盖保存。该文件不会输出到日志或写进容器环境变量；如同数据库
