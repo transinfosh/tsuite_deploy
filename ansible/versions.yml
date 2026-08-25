@@ -7,9 +7,9 @@ frappe_docker:
   resolved_sha: null
 images:
   customer_frappe:
-    reference: ghcr.io/transinfosh/tai-customer:0.0.13
-    digest: sha256:5afce0cea39f9377a46e410220ebe2f9f96914be626fca9be82d0c5c20ef7843
-    source_commit: 978b95c2fa7033411797824d3aa74aa85dc675a0
+    reference: ghcr.io/transinfosh/tai-customer:0.0.15
+    digest: sha256:fe51c1a3e7f9377b58ac975184d1f233fef3797ae2a1fae0760b38407e8710ea
+    source_commit: 621d29ad673a8cb954c4567886fdf970fcc92ff7
   control_frappe:
     reference: ghcr.io/transinfosh/tai-control:0.0.15
     digest: sha256:46fe330cf806d016b28b9d8efac8d4438229561bba04e54821057a27f9f4562f
