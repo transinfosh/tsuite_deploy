@@ -1,0 +1,22 @@
+---
+- name: 重启 Frappe Stack
+  ansible.builtin.command: >-
+    docker compose --env-file {{ frappe_stack_root }}/.env
+    -p frappe-{{ frappe_stack_name }}
+    -f {{ frappe_stack_root }}/frappe_docker/compose.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.redis.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.postgres.yaml
+    -f {{ frappe_stack_root }}/compose.generated.yml restart
+  when: not ansible_check_mode
+  changed_when: true
+
+- name: 刷新 Frappe frontend 上游解析
+  ansible.builtin.command: >-
+    docker compose --env-file {{ frappe_stack_root }}/.env
+    -p frappe-{{ frappe_stack_name }}
+    -f {{ frappe_stack_root }}/frappe_docker/compose.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.redis.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.postgres.yaml
+    -f {{ frappe_stack_root }}/compose.generated.yml restart frontend
+  when: not ansible_check_mode
+  changed_when: true

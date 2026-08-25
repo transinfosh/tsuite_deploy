@@ -1,0 +1,35 @@
+FROM {{ python_container_python_image }}
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_PROJECT_ENVIRONMENT=/app/.venv \
+    PATH=/app/.venv/bin:$PATH
+
+{% if python_container_apt_mirror %}
+RUN sed -i 's|http://deb.debian.org|{{ python_container_apt_mirror }}|g' \
+        /etc/apt/sources.list.d/debian.sources
+{% endif %}
+
+RUN apt-get update && apt-get install --no-install-recommends -y \
+    ca-certificates curl build-essential libpq5 libgomp1 unixodbc \
+    && pip install --no-cache-dir uv \
+    && rm -rf /var/lib/apt/lists/*
+
+{% if python_container_install_mssql_driver %}
+RUN curl -sSL -o /tmp/packages-microsoft-prod.deb \
+        https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb \
+    && dpkg -i /tmp/packages-microsoft-prod.deb \
+    && rm /tmp/packages-microsoft-prod.deb \
+    && apt-get update \
+    && ACCEPT_EULA=Y apt-get install --no-install-recommends -y \
+        msodbcsql18 libgssapi-krb5-2 \
+    && rm -rf /var/lib/apt/lists/*
+{% endif %}
+
+WORKDIR /app
+COPY . /app
+RUN uv sync --frozen --no-dev{% for extra in python_container_extras %} --extra {{ extra }}{% endfor %}
+
+RUN useradd --system --uid 10001 --home-dir /app --shell /usr/sbin/nologin tai \
+    && chown -R tai:tai /app
+USER tai

@@ -1,0 +1,208 @@
+import hashlib
+import json
+from pathlib import Path
+
+import frappe
+import requests
+
+from tai.tai.doctype.tai_settings.tai_settings import initialize_tenant_binding
+from tbi.semantic.deployment import publish_project
+from tbi.semantic.importer import import_project_mdl
+from tbi.tbi.doctype.tbi_connection.tbi_connection import (
+    build_wren_profile,
+    redact_secrets,
+    request_engine_connection_test,
+)
+
+
+connection_name = {{ benchmark_connection_name | to_json }}
+project_name = {{ benchmark_project_name | to_json }}
+benchmark_project_members = [
+    str(member).strip()
+    for member in {{ benchmark_project_members | default([]) | to_json }}
+    if str(member).strip()
+]
+password = Path({{ benchmark_mssql_password_file | to_json }}).read_text(
+    encoding="utf-8"
+).strip()
+mdl = json.loads(Path({{ benchmark_mdl_container_path | to_json }}).read_text(encoding="utf-8"))
+
+frappe.set_user("Administrator")
+
+auth_url = str(frappe.conf.get("tai_auth_url") or "").rstrip("/")
+control_client_id = str(frappe.conf.get("tai_control_client_id") or "").strip()
+control_secret_file = str(frappe.conf.get("tai_control_client_secret_file") or "").strip()
+service_url = str(frappe.conf.get("tai_service_url") or "").rstrip("/")
+service_token_file = str(frappe.conf.get("tai_service_token_file") or "").strip()
+if not (
+    auth_url
+    and control_client_id
+    and control_secret_file
+    and service_url
+    and service_token_file
+):
+    raise RuntimeError("benchmark_control_binding_not_configured")
+control_client_secret = Path(control_secret_file).read_text(encoding="utf-8").strip()
+service_token = Path(service_token_file).read_text(encoding="utf-8").strip()
+
+settings = frappe.get_single("TAI Settings")
+settings.enabled = 1
+settings.service_url = service_url
+settings.auth_edge_url = auth_url
+settings.control_client_id = control_client_id
+settings.save(ignore_permissions=True)
+
+try:
+    registration_response = requests.post(
+        service_url + "/v1/projects/register",
+        json={
+            "client_id": control_client_id,
+            "client_secret": control_client_secret,
+            "project": project_name,
+            "title": "SAP Business One Benchmark",
+        },
+        headers={"Authorization": f"Bearer {service_token}"},
+        timeout=min(int(settings.service_timeout or 120), 30),
+    )
+    registration_response.raise_for_status()
+    registration_payload = registration_response.json()
+except (requests.RequestException, ValueError) as error:
+    status_code = getattr(getattr(error, "response", None), "status_code", None)
+    raise RuntimeError(
+        "benchmark_control_project_registration_failed:"
+        + str(status_code or "unavailable")
+    ) from error
+
+registration = (
+    registration_payload.get("message")
+    if isinstance(registration_payload, dict)
+    else None
+)
+tenant_id = str(registration.get("tenant") if isinstance(registration, dict) else "").strip()
+if not tenant_id:
+    raise RuntimeError("benchmark_control_project_registration_invalid_response")
+
+bound_tenant_id = str(settings.tenant_id or "").strip()
+if bound_tenant_id and bound_tenant_id != tenant_id:
+    raise RuntimeError("benchmark_site_tenant_binding_conflict")
+if not bound_tenant_id:
+    initialize_tenant_binding(tenant_id)
+frappe.db.commit()
+
+# Issuer 或凭据配置调整后不能复用先前缓存的访问令牌。
+actor_key = hashlib.sha256(str(frappe.session.user).encode()).hexdigest()[:20]
+frappe.cache.delete_value(
+    f"tai-control-token:{project_name}:{control_client_id}:{actor_key}"
+)
+
+if frappe.db.exists("TBI Connection", connection_name):
+    connection = frappe.get_doc("TBI Connection", connection_name)
+    connection_is_new = False
+else:
+    connection = frappe.get_doc(
+        {
+            "doctype": "TBI Connection",
+            "name": connection_name,
+        }
+    )
+    connection_is_new = True
+
+connection.update(
+    {
+        "title": "SAP Business One Benchmark SQL Server",
+        "data_source": "mssql",
+        "enabled": 1,
+        "host": {{ benchmark_mssql_host | to_json }},
+        "port": {{ benchmark_mssql_port | int }},
+        "database_name": {{ benchmark_mssql_database | to_json }},
+        "default_schema": "dbo",
+        "username": {{ benchmark_mssql_username | to_json }},
+        "password": password,
+        "connection_timeout": 30,
+        "mssql_encrypt": 1,
+        "mssql_trust_server_certificate": 1,
+    }
+)
+if connection_is_new:
+    connection.insert(ignore_permissions=True)
+else:
+    connection.save(ignore_permissions=True)
+
+connection.password = password
+connection_test = request_engine_connection_test(build_wren_profile(connection))
+if not connection_test.get("ok"):
+    connection_error = redact_secrets(connection_test.get("message"), password)
+    raise RuntimeError(
+        "benchmark_connection_test_failed:"
+        + (connection_error or "unknown")
+    )
+
+if frappe.db.exists("TBI Project", project_name):
+    project = frappe.get_doc("TBI Project", project_name)
+    project_is_new = False
+else:
+    project = frappe.get_doc(
+        {
+            "doctype": "TBI Project",
+            "name": project_name,
+        }
+    )
+    project_is_new = True
+
+project.update(
+    {
+        "title": "SAP Business One Benchmark",
+        "enabled": 1,
+        "connection": connection_name,
+        "catalog": "wren",
+        "schema": "dbo",
+        "mdl_version": "3",
+        "description": (
+            "SAP Business One 经营分析演示项目。回答必须基于已发布语义模型与项目 Knowledge，"
+            "遵循单据状态、截止日期、币种及业务粒度规则。"
+        ),
+    }
+)
+missing_members = [
+    member
+    for member in benchmark_project_members
+    if not frappe.db.exists("User", member)
+]
+if missing_members:
+    raise RuntimeError(
+        "benchmark_project_members_not_found:" + ",".join(missing_members)
+    )
+existing_members = {str(row.user) for row in project.members if row.user}
+for member in benchmark_project_members:
+    if member not in existing_members:
+        project.append("members", {"user": member})
+        existing_members.add(member)
+if project_is_new:
+    project.insert(ignore_permissions=True)
+else:
+    project.save(ignore_permissions=True)
+frappe.db.commit()
+
+import_result = import_project_mdl(project_name, mdl)
+frappe.db.commit()
+publish_result = publish_project(project_name)
+if not publish_result.get("ok"):
+    raise RuntimeError(
+        "benchmark_semantic_publish_failed:" + str(publish_result.get("status") or "unknown")
+    )
+
+print(
+    "TAI_BENCHMARK_BOOTSTRAP="
+    + json.dumps(
+        {
+            "project": project_name,
+            "models": import_result.get("models"),
+            "relationships": import_result.get("relationships"),
+            "deployment": publish_result.get("deployment"),
+            "version": publish_result.get("version"),
+            "status": publish_result.get("status"),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+)

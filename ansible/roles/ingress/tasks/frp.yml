@@ -1,0 +1,65 @@
+---
+- name: 确定 FRP 架构
+  ansible.builtin.set_fact:
+    frp_arch: "{{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }}"
+
+- name: 分发 FRP Client 安装包
+  ansible.builtin.copy:
+    src: "{{ frp_server_archive_path }}"
+    dest: "/tmp/frp-{{ frp_version }}.tar.gz"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: 解压 FRP Client
+  ansible.builtin.unarchive:
+    src: "/tmp/frp-{{ frp_version }}.tar.gz"
+    dest: /opt
+    remote_src: true
+    creates: "/opt/frp_{{ frp_version }}_linux_{{ frp_arch }}/frpc"
+
+- name: 安装 FRP Client
+  ansible.builtin.copy:
+    src: "/opt/frp_{{ frp_version }}_linux_{{ frp_arch }}/frpc"
+    dest: /usr/local/bin/frpc
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  notify: 重启 FRP Client
+
+- name: 创建 FRP 配置目录
+  ansible.builtin.file:
+    path: /etc/frp
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: 写入 FRP Client 配置
+  ansible.builtin.template:
+    src: frpc.toml.j2
+    dest: /etc/frp/frpc.toml
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: 重启 FRP Client
+
+- name: 写入 FRP Client Systemd 服务
+  ansible.builtin.template:
+    src: frpc.service.j2
+    dest: /etc/systemd/system/tai-frpc.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - 重载入口 Systemd
+    - 重启 FRP Client
+
+- name: 启用 FRP Client
+  ansible.builtin.systemd_service:
+    name: tai-frpc
+    enabled: true
+    state: started
+    daemon_reload: true

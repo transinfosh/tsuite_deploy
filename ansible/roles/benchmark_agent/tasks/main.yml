@@ -1,0 +1,38 @@
+---
+- name: 写入 Benchmark Agent 初始化脚本
+  ansible.builtin.template:
+    src: bootstrap_agent.py.j2
+    dest: /opt/tsuite-deploy/bootstrap-benchmark-agent.py
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: 复制 Benchmark Agent 初始化脚本到控制面
+  ansible.builtin.command:
+    argv:
+      - docker
+      - cp
+      - /opt/tsuite-deploy/bootstrap-benchmark-agent.py
+      - frappe-control-backend-1:/tmp/bootstrap-benchmark-agent.py
+  changed_when: false
+
+- name: 发布并激活 Benchmark Agent
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - frappe-control-backend-1
+      - bench
+      - --site
+      - "{{ control_site_name }}"
+      - execute
+      - "(__import__('runpy').run_path('/tmp/bootstrap-benchmark-agent.py'), None)[1]"
+  register: benchmark_agent_bootstrap
+  changed_when: "'\"changed\": true' in benchmark_agent_bootstrap.stdout"
+
+- name: 校验 Benchmark Agent 发布结果
+  ansible.builtin.assert:
+    that:
+      - "'\"active\": true' in benchmark_agent_bootstrap.stdout"
+      - "'\"schema_version\": 2' in benchmark_agent_bootstrap.stdout"
+    fail_msg: Benchmark Agent 没有成功发布并激活。

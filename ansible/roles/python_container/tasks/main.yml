@@ -1,0 +1,139 @@
+---
+- name: 校验 Python 容器参数
+  ansible.builtin.assert:
+    that:
+      - python_container_name | length > 0
+      - python_container_image | length > 0 or python_container_source | length > 0
+      - python_container_command | length > 0
+      - python_container_port | int > 0
+
+- name: 创建 Python 容器目录
+  ansible.builtin.file:
+    path: "{{ python_container_root }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: 创建 Python 容器数据目录
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ python_container_data_owner }}"
+    group: "{{ python_container_data_group }}"
+    mode: "0750"
+  loop: "{{ python_container_data_dirs }}"
+
+- name: 保存 Python 容器 Secret
+  ansible.builtin.copy:
+    content: "{{ item.value }}\n"
+    dest: "{{ secrets_root }}/{{ item.key }}"
+    owner: root
+    group: root
+    mode: "0444"
+  loop: "{{ python_container_secrets | dict2items }}"
+  no_log: true
+
+- name: 写入 Python 容器 Dockerfile
+  ansible.builtin.template:
+    src: Dockerfile.j2
+    dest: "{{ python_container_source }}/.tai-deploy.Dockerfile"
+    owner: root
+    group: root
+    mode: "0644"
+  when: not python_container_image
+
+- name: 写入 Python 容器环境
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ python_container_root }}/.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: 写入 Python Worker 环境
+  ansible.builtin.template:
+    src: worker-env.j2
+    dest: "{{ python_container_root }}/.env.worker"
+    owner: root
+    group: root
+    mode: "0600"
+  when: python_container_worker_command | length > 0
+  no_log: true
+
+- name: 写入 Python 容器 Compose
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ python_container_root }}/compose.yml"
+    owner: root
+    group: root
+    mode: "0640"
+
+- name: 构建 Python 容器
+  ansible.builtin.command: >-
+    docker compose --env-file {{ python_container_root }}/.env
+    -p tai-{{ python_container_name }} -f {{ python_container_root }}/compose.yml build
+  environment:
+    HTTP_PROXY: "{{ deployment_http_proxy }}"
+    HTTPS_PROXY: "{{ deployment_http_proxy }}"
+    NO_PROXY: "{{ deployment_no_proxy | replace('\n', '') | replace(' ', '') }}"
+    http_proxy: "{{ deployment_http_proxy }}"
+    https_proxy: "{{ deployment_http_proxy }}"
+    no_proxy: "{{ deployment_no_proxy | replace('\n', '') | replace(' ', '') }}"
+  register: python_container_build
+  when: not python_container_image
+  changed_when: "'exporting to image' in python_container_build.stdout or 'exporting to image' in python_container_build.stderr"
+
+- name: 拉取预构建 Python 容器
+  ansible.builtin.command:
+    argv:
+      - docker
+      - pull
+      - "{{ python_container_image }}"
+  register: python_container_pull
+  when: python_container_image | length > 0
+  changed_when: "'Downloaded newer image' in python_container_pull.stdout"
+
+- name: 停止迁移前的 Python 服务
+  ansible.builtin.command: >-
+    docker compose --env-file {{ python_container_root }}/.env
+    -p tai-{{ python_container_name }} -f {{ python_container_root }}/compose.yml stop
+  when: python_container_pre_migrate_command | length > 0
+  changed_when: false
+
+- name: 执行 Python 容器迁移前门禁
+  ansible.builtin.command: >-
+    docker compose --env-file {{ python_container_root }}/.env
+    -p tai-{{ python_container_name }} -f {{ python_container_root }}/compose.yml
+    run --rm -e TAI_RUNTIME_MIGRATION_DATABASE_URL service
+    {{ python_container_pre_migrate_command }}
+  environment: "{{ python_container_pre_migrate_environment }}"
+  when: python_container_pre_migrate_command | length > 0
+  no_log: true
+  changed_when: false
+
+- name: 执行 Python 容器数据库迁移
+  ansible.builtin.command: >-
+    docker compose --env-file {{ python_container_root }}/.env
+    -p tai-{{ python_container_name }} -f {{ python_container_root }}/compose.yml
+    run --rm service {{ python_container_migrate_command }}
+  when: python_container_migrate_command | length > 0
+  no_log: true
+  changed_when: false
+
+- name: 启动 Python 容器
+  ansible.builtin.command: >-
+    docker compose --env-file {{ python_container_root }}/.env
+    -p tai-{{ python_container_name }} -f {{ python_container_root }}/compose.yml up -d
+  register: python_container_up
+  changed_when: "'Started' in python_container_up.stdout or 'Created' in python_container_up.stderr"
+
+- name: 验证 Python 容器 SQL Server ODBC Driver
+  ansible.builtin.command: >-
+    docker compose --env-file {{ python_container_root }}/.env
+    -p tai-{{ python_container_name }} -f {{ python_container_root }}/compose.yml
+    exec -T service python -c
+    "import pyodbc; assert 'ODBC Driver 18 for SQL Server' in pyodbc.drivers()"
+  when: python_container_install_mssql_driver | bool
+  changed_when: false

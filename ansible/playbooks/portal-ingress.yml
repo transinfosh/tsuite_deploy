@@ -1,0 +1,95 @@
+---
+- name: 部署内部管理门户公网入口
+  hosts: portal_nodes
+  gather_facts: true
+  become: false
+  vars_files:
+    - "{{ inventory_dir }}/vault.yml"
+  vars:
+    portal_frpc_dir: /home/adam/gitops/portal-frpc
+    ingress_routes:
+      - hostname: "{{ portal_site_name }}"
+        local_port: 8080
+    ingress_stcp_routes: []
+  tasks:
+    - name: 校验门户 FRP 架构
+      ansible.builtin.assert:
+        that:
+          - ansible_architecture == 'x86_64'
+        fail_msg: "门户 FRPC 容器暂不支持该架构：{{ ansible_architecture }}"
+
+    - name: 创建门户 FRPC 部署目录
+      ansible.builtin.file:
+        path: "{{ portal_frpc_dir }}"
+        state: directory
+        mode: "0700"
+
+    - name: 解压 FRP Client
+      ansible.builtin.unarchive:
+        src: "{{ frp_server_archive_path }}"
+        dest: "{{ portal_frpc_dir }}"
+        extra_opts:
+          - --strip-components=1
+
+    - name: 写入门户 FRPC 配置
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/ingress/templates/frpc.toml.j2"
+        dest: "{{ portal_frpc_dir }}/frpc.toml"
+        mode: "0600"
+      no_log: true
+
+    - name: 写入门户 FRPC 镜像定义
+      ansible.builtin.copy:
+        dest: "{{ portal_frpc_dir }}/Containerfile"
+        mode: "0600"
+        content: |
+          FROM scratch
+          COPY frpc /usr/local/bin/frpc
+          ENTRYPOINT ["/usr/local/bin/frpc"]
+
+    - name: 写入门户 FRPC Compose 配置
+      ansible.builtin.copy:
+        dest: "{{ portal_frpc_dir }}/compose.yml"
+        mode: "0600"
+        content: |
+          services:
+            frpc:
+              build:
+                context: .
+                dockerfile: Containerfile
+              image: local/frpc:{{ frp_version }}
+              command: ["-c", "/etc/frp/frpc.toml"]
+              network_mode: host
+              restart: unless-stopped
+              volumes:
+                - ./frpc.toml:/etc/frp/frpc.toml:ro
+
+    - name: 校验门户 FRPC Compose 配置
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - "{{ portal_frpc_dir }}/compose.yml"
+          - config
+          - --quiet
+      changed_when: false
+
+    - name: 启动门户 FRPC 容器
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -p
+          - portal-frpc
+          - -f
+          - "{{ portal_frpc_dir }}/compose.yml"
+          - up
+          - -d
+          - --build
+          - --force-recreate
+      register: portal_frpc_up
+      changed_when: >-
+        'Created' in portal_frpc_up.stderr
+        or 'Recreated' in portal_frpc_up.stderr
+        or 'Started' in portal_frpc_up.stderr

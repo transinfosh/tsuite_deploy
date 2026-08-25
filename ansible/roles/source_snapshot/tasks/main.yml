@@ -1,0 +1,64 @@
+---
+- name: 当前仅允许本地源码快照
+  ansible.builtin.assert:
+    that:
+      - source_mode == 'local_bundle'
+    fail_msg: 当前第一版只实现 local_bundle；正式制品阶段再启用 Git/OCI 来源。
+
+- name: 读取源码快照校验和
+  ansible.builtin.set_fact:
+    deployment_snapshot_id: >-
+      {{ lookup('ansible.builtin.file', source_bundle_checksum_path).split()[0] }}
+
+- name: 校验源码快照标识
+  ansible.builtin.assert:
+    that:
+      - deployment_snapshot_id is match('^[0-9a-f]{64}$')
+
+- name: 上传源码快照
+  ansible.builtin.copy:
+    src: "{{ source_bundle_path }}"
+    dest: "/opt/tsuite-deploy/{{ deployment_snapshot_id }}.tar.gz"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: 计算远端源码快照校验和
+  ansible.builtin.command: "sha256sum /opt/tsuite-deploy/{{ deployment_snapshot_id }}.tar.gz"
+  register: remote_source_checksum
+  changed_when: false
+
+- name: 校验远端源码快照
+  ansible.builtin.assert:
+    that:
+      - remote_source_checksum.stdout.split()[0] == deployment_snapshot_id
+
+- name: 创建源码版本目录
+  ansible.builtin.file:
+    path: "/opt/tai-source/releases/{{ deployment_snapshot_id }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: 解压源码快照
+  ansible.builtin.unarchive:
+    src: "/opt/tsuite-deploy/{{ deployment_snapshot_id }}.tar.gz"
+    dest: "/opt/tai-source/releases/{{ deployment_snapshot_id }}"
+    remote_src: true
+    creates: "/opt/tai-source/releases/{{ deployment_snapshot_id }}/.snapshot-complete"
+
+- name: 标记源码快照完整
+  ansible.builtin.copy:
+    content: "{{ deployment_snapshot_id }}\n"
+    dest: "/opt/tai-source/releases/{{ deployment_snapshot_id }}/.snapshot-complete"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: 激活统一源码快照
+  ansible.builtin.file:
+    src: "/opt/tai-source/releases/{{ deployment_snapshot_id }}"
+    dest: "{{ source_root }}"
+    state: link
+    force: true

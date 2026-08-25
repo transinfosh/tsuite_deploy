@@ -1,0 +1,98 @@
+---
+- name: 检查旧版部署目录
+  ansible.builtin.stat:
+    path: /opt/tsuie-deploy
+  register: legacy_deployment_root
+
+- name: 检查新版部署目录
+  ansible.builtin.stat:
+    path: /opt/tsuite-deploy
+  register: tsuite_deployment_root
+
+- name: 拒绝冲突的部署目录
+  ansible.builtin.assert:
+    that:
+      - not (legacy_deployment_root.stat.exists and tsuite_deployment_root.stat.exists)
+    fail_msg: >-
+      /opt/tsuie-deploy 与 /opt/tsuite-deploy 同时存在，无法安全自动迁移；
+      请先确认两边数据后再继续。
+
+- name: 迁移旧版部署目录
+  ansible.builtin.command:
+    argv:
+      - mv
+      - /opt/tsuie-deploy
+      - /opt/tsuite-deploy
+  when: legacy_deployment_root.stat.exists
+
+- name: 检查旧版 APT 代理配置
+  ansible.builtin.stat:
+    path: /etc/apt/apt.conf.d/90-tsuie-deploy-proxy
+  register: legacy_apt_proxy
+
+- name: 检查新版 APT 代理配置
+  ansible.builtin.stat:
+    path: /etc/apt/apt.conf.d/90-tsuite-deploy-proxy
+  register: tsuite_apt_proxy
+
+- name: 拒绝冲突的 APT 代理配置
+  ansible.builtin.assert:
+    that:
+      - not (legacy_apt_proxy.stat.exists and tsuite_apt_proxy.stat.exists)
+    fail_msg: 旧版和新版 APT 代理配置同时存在，无法安全自动迁移；请先人工确认。
+
+- name: 迁移旧版 APT 代理配置
+  ansible.builtin.command:
+    argv:
+      - mv
+      - /etc/apt/apt.conf.d/90-tsuie-deploy-proxy
+      - /etc/apt/apt.conf.d/90-tsuite-deploy-proxy
+  when: legacy_apt_proxy.stat.exists
+
+- name: 安装通用系统包
+  ansible.builtin.apt:
+    name: "{{ common_apt_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    lock_timeout: 300
+
+- name: 读取当前时区
+  ansible.builtin.command: timedatectl show --property=Timezone --value
+  register: common_current_timezone
+  changed_when: false
+
+- name: 设置时区
+  ansible.builtin.command: "timedatectl set-timezone {{ common_timezone }}"
+  when: common_current_timezone.stdout != common_timezone
+  changed_when: true
+
+- name: 收集时间同步服务信息
+  ansible.builtin.service_facts:
+
+- name: 启用系统时间同步
+  ansible.builtin.systemd_service:
+    name: >-
+      {{
+        'chrony.service'
+        if 'chrony.service' in ansible_facts.services
+        else 'systemd-timesyncd.service'
+      }}
+    enabled: true
+    state: started
+  when: >-
+    'chrony.service' in ansible_facts.services or
+    'systemd-timesyncd.service' in ansible_facts.services
+
+- name: 创建部署与 Secret 目录
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - path: /opt/tsuite-deploy
+      mode: "0755"
+    - path: "{{ secrets_root }}"
+      mode: "0700"

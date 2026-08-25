@@ -1,0 +1,6 @@
+---
+- name: 部署宿主机 PostgreSQL
+  hosts: database_nodes
+  gather_facts: true
+  roles:
+    - role: postgresql_host

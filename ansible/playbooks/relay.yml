@@ -1,0 +1,9 @@
+---
+- name: 部署 FRP 公网中转入口
+  hosts: relay_nodes
+  gather_facts: true
+  vars_files:
+    - "{{ inventory_dir }}/vault.yml"
+  roles:
+    - role: common
+    - role: frp_server

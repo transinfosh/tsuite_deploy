@@ -1,0 +1,128 @@
+---
+- name: 校验本地 Frappe 镜像参数
+  ansible.builtin.assert:
+    that:
+      - deployment_snapshot_id is match('^[0-9a-f]{64}$')
+      - frappe_local_image_name | length > 0
+      - frappe_local_apps | length > 0
+      - "'frappe' not in frappe_local_apps"
+
+- name: 设置本地 Frappe 镜像引用
+  ansible.builtin.set_fact:
+    frappe_local_image_reference: >-
+      {{ frappe_local_image_name }}:{{ deployment_snapshot_id }}
+    frappe_local_image_expected_apps: "{{ frappe_local_apps | join(',') }}"
+
+- name: 检查本地 Frappe 镜像
+  ansible.builtin.command:
+    argv:
+      - docker
+      - image
+      - inspect
+      - "{{ frappe_local_image_reference }}"
+  register: frappe_local_image_inspect
+  changed_when: false
+  failed_when: false
+
+- name: 读取本地 Frappe 镜像构建应用清单
+  ansible.builtin.set_fact:
+    frappe_local_image_current_apps: >-
+      {{
+        (
+          (frappe_local_image_inspect.stdout | from_json)[0].Config.Labels
+          | default({})
+        ).get('tai.local-apps', '')
+        if frappe_local_image_inspect.rc == 0
+        else ''
+      }}
+
+- name: 判断本地 Frappe 镜像是否需要重建
+  ansible.builtin.set_fact:
+    frappe_local_image_requires_build: >-
+      {{
+        frappe_local_image_inspect.rc != 0
+        or frappe_local_image_current_apps != frappe_local_image_expected_apps
+      }}
+
+- name: 重建本地 Frappe 构建上下文
+  ansible.builtin.file:
+    path: "{{ frappe_local_build_root }}"
+    state: absent
+  when: frappe_local_image_requires_build | bool
+
+- name: 创建本地 Frappe 构建目录
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ frappe_stack_root }}"
+    - "{{ frappe_local_build_root }}"
+    - "{{ frappe_local_build_root }}/apps"
+  when: frappe_local_image_requires_build | bool
+
+- name: 复制 Frappe 与业务应用源码
+  ansible.builtin.command:
+    argv:
+      - cp
+      - -a
+      - "{{ source_root }}/apps/{{ item }}"
+      - "{{ frappe_local_build_root }}/apps/{{ item }}"
+  loop: "{{ ['frappe'] + frappe_local_apps }}"
+  when: frappe_local_image_requires_build | bool
+  changed_when: true
+
+- name: 复制共享前端包
+  ansible.builtin.command:
+    argv:
+      - cp
+      - -a
+      - "{{ source_root }}/packages"
+      - "{{ frappe_local_build_root }}/packages"
+  when: frappe_local_image_requires_build | bool
+  changed_when: true
+
+- name: 复制 Frappe Docker 运行资源
+  ansible.builtin.command:
+    argv:
+      - cp
+      - -a
+      - "{{ source_root }}/frappe_docker/resources"
+      - "{{ frappe_local_build_root }}/resources"
+  when: frappe_local_image_requires_build | bool
+  changed_when: true
+
+- name: 写入本地源码镜像定义
+  ansible.builtin.template:
+    src: Containerfile.j2
+    dest: "{{ frappe_local_build_root }}/Containerfile"
+    owner: root
+    group: root
+    mode: "0644"
+  when: frappe_local_image_requires_build | bool
+
+- name: 从统一源码快照构建 Frappe 镜像
+  ansible.builtin.command:
+    argv:
+      - docker
+      - build
+      - --build-arg
+      - "FRAPPE_BRANCH={{ frappe_local_branch }}"
+      - --build-arg
+      - "FRAPPE_IMAGE_PREFIX={{ frappe_local_image_prefix }}"
+      - --build-arg
+      - "LOCAL_APPS={{ frappe_local_apps | join(' ') }}"
+      - --label
+      - "org.opencontainers.image.revision={{ deployment_snapshot_id }}"
+      - --label
+      - "tai.local-apps={{ frappe_local_image_expected_apps }}"
+      - --tag
+      - "{{ frappe_local_image_reference }}"
+      - --file
+      - "{{ frappe_local_build_root }}/Containerfile"
+      - "{{ frappe_local_build_root }}"
+  register: frappe_local_image_build
+  when: frappe_local_image_requires_build | bool
+  changed_when: true

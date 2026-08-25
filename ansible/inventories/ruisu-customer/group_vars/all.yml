@@ -1,0 +1,67 @@
+---
+deployment_environment: ruisu-customer
+release_lock_state: locked
+allow_unlocked_revisions: false
+
+image_delivery_mode: registry
+deployment_registry: ghcr.io
+deployment_registry_username: "{{ vault_ghcr_username | default('') }}"
+deployment_registry_token: "{{ vault_ghcr_token | default('') }}"
+deployment_image_tag: v0.1.0-internal-demo.2
+customer_image_tag: 0.0.15
+customer_source_commit: 621d29ad673a8cb954c4567886fdf970fcc92ff7
+customer_frappe_image: "ghcr.io/transinfosh/tai-customer@sha256:fe51c1a3e7f9377b58ac975184d1f233fef3797ae2a1fae0760b38407e8710ea"
+control_frappe_image: "ghcr.io/transinfosh/tai-control:{{ deployment_image_tag }}"
+tai_service_image: "ghcr.io/transinfosh/tai-service:{{ deployment_image_tag }}"
+tbi_engine_release_version: 0.1.5
+tbi_engine_source_commit: a99648b2dcc4baa7d25173f59837d776a96dbdd8
+tbi_engine_image: "ghcr.io/transinfosh/tbi-engine@sha256:728ee0f3ec4518030a7e29c08990463a3da6a47408cc86598c99f945772ea3ad"
+tai_auth_image: "ghcr.io/transinfosh/tai-auth:{{ deployment_image_tag }}"
+frappe_docker_repo: https://github.com/transinfosh/frappe_docker.git
+frappe_docker_ref: main
+customer_postgres_image: docker.m.daocloud.io/library/postgres:16
+customer_redis_image: docker.m.daocloud.io/library/redis:8.6-alpine
+
+customer_site_name: tai.ruisu.cn
+customer_database_name: tai
+customer_database_user: tai_app
+# 外部客户在本站 TAI Settings 中维护 Control Client 凭据，部署不得覆盖。
+customer_control_client_id: ""
+customer_control_client_secret: ""
+runtime_public_hostname: api.trinfo.net
+control_site_name: control.trinfo.net
+auth_public_hostname: auth.trinfo.net
+
+ingress_provider: direct
+direct_caddy_email: adam.wu@trinfo.net
+# 公网节点使用带认证的 PassWall 服务端代理。完整 URL（含经 URL 编码的
+# 用户名和密码）只保存在 inventory 的 Ansible Vault 中，不能写入此文件。
+deployment_http_proxy: "{{ vault_external_deployment_http_proxy | default('') }}"
+# 正式镜像由 GitHub Actions 构建；部署节点只需让 Docker daemon 经代理拉取，
+# 不应将代理凭据传入业务容器或写入容器 inspect 信息。
+deployment_proxy_propagate_to_containers: false
+deployment_no_proxy: >-
+  localhost,127.0.0.1,::1,host.docker.internal,
+  10.0.0.0/8,172.16.0.0/12,
+  db,redis-cache,redis-queue,websocket,frontend,tbi-engine
+
+source_mode: registry
+source_root: /opt/tai-source/current
+secrets_root: /etc/tai-deploy/secrets
+python_container_apt_mirror: https://mirrors.aliyun.com
+tbi_engine_port: 8770
+tbi_engine_workers: 2
+
+# 公网客户节点无法访问内部 Benchmark SQL Server；仅部署空白客户站点。
+enable_benchmark: false
+
+common_timezone: Asia/Shanghai
+common_apt_packages:
+  - ca-certificates
+  - curl
+  - git
+  - jq
+  - openssl
+  - rsync
+  - tar
+  - unzip

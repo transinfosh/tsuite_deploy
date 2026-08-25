@@ -1,0 +1,13 @@
+serverAddr = "{{ frp_server_addr }}"
+serverPort = {{ frp_server_port }}
+auth.method = "token"
+auth.token = "{{ vault_frp_auth_token }}"
+transport.tls.enable = true
+
+[[visitors]]
+name = "{{ frp_control_stcp_proxy_name }}-visitor"
+type = "stcp"
+serverName = "{{ frp_control_stcp_proxy_name }}"
+secretKey = "{{ vault_control_stcp_secret }}"
+bindAddr = "127.0.0.1"
+bindPort = 18080

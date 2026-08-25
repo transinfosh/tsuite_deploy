@@ -1,0 +1,139 @@
+---
+- name: 检查旧版 Docker 代理配置
+  ansible.builtin.stat:
+    path: /etc/systemd/system/docker.service.d/tsuie-deploy-proxy.conf
+  register: legacy_docker_proxy
+
+- name: 检查新版 Docker 代理配置
+  ansible.builtin.stat:
+    path: /etc/systemd/system/docker.service.d/tsuite-deploy-proxy.conf
+  register: tsuite_docker_proxy
+
+- name: 拒绝冲突的 Docker 代理配置
+  ansible.builtin.assert:
+    that:
+      - not (legacy_docker_proxy.stat.exists and tsuite_docker_proxy.stat.exists)
+    fail_msg: >-
+      旧版和新版 Docker 代理配置同时存在，无法安全自动迁移；请先人工确认。
+
+- name: 迁移旧版 Docker 代理配置
+  ansible.builtin.command:
+    argv:
+      - mv
+      - /etc/systemd/system/docker.service.d/tsuie-deploy-proxy.conf
+      - /etc/systemd/system/docker.service.d/tsuite-deploy-proxy.conf
+  when: legacy_docker_proxy.stat.exists
+  register: migrate_legacy_docker_proxy
+
+- name: 应用已迁移的 Docker 代理配置
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+    name: docker
+    state: restarted
+  when: migrate_legacy_docker_proxy is changed
+
+- name: 安装 Docker 与 Compose
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-buildx
+      - docker-compose-v2
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    lock_timeout: 300
+
+- name: 校验 Docker 代理参数
+  ansible.builtin.assert:
+    that:
+      - deployment_http_proxy | length == 0 or deployment_http_proxy is match('^https?://[^/]+')
+      - deployment_no_proxy | length > 0
+
+- name: 创建 Docker Systemd 配置目录
+  ansible.builtin.file:
+    path: /etc/systemd/system/docker.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: 写入 Docker Daemon 代理
+  ansible.builtin.template:
+    src: http-proxy.conf.j2
+    dest: /etc/systemd/system/docker.service.d/http-proxy.conf
+    owner: root
+    group: root
+    mode: "0600"
+  notify: 重启 Docker
+  no_log: true
+
+- name: 创建 Root Docker Client 配置目录
+  ansible.builtin.file:
+    path: /root/.docker
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: 写入 Docker Build 与容器代理
+  ansible.builtin.template:
+    src: config.json.j2
+    dest: /root/.docker/config.json
+    owner: root
+    group: root
+    mode: "0600"
+  when: deployment_proxy_propagate_to_containers | default(false) | bool
+  no_log: true
+
+- name: 移除 Docker Client 配置中的旧代理
+  ansible.builtin.shell:
+    cmd: |
+      set -eu
+      config=/root/.docker/config.json
+      test -f "$config" || exit 0
+      jq -e 'has("proxies")' "$config" >/dev/null || exit 0
+      temporary_config="$(mktemp /root/.docker/config.json.XXXXXX)"
+      trap 'rm -f "$temporary_config"' EXIT
+      jq 'del(.proxies)' "$config" > "$temporary_config"
+      chmod 0600 "$temporary_config"
+      mv "$temporary_config" "$config"
+      printf '%s\n' removed
+    executable: /bin/bash
+  when: not (deployment_proxy_propagate_to_containers | default(false) | bool)
+  register: docker_client_proxy_cleanup
+  changed_when: docker_client_proxy_cleanup.stdout == 'removed'
+
+- name: 应用 Docker Daemon 代理
+  ansible.builtin.meta: flush_handlers
+
+- name: 启用 Docker
+  ansible.builtin.systemd_service:
+    name: docker
+    enabled: true
+    state: started
+
+- name: 读取 Docker Compose 版本
+  ansible.builtin.command: docker compose version
+  changed_when: false
+
+- name: 读取 Docker Buildx 版本
+  ansible.builtin.command: docker buildx version
+  changed_when: false
+
+- name: 登录部署镜像仓库
+  ansible.builtin.command:
+    argv:
+      - docker
+      - login
+      - "{{ deployment_registry }}"
+      - --username
+      - "{{ deployment_registry_username }}"
+      - --password-stdin
+    stdin: "{{ deployment_registry_token }}"
+    stdin_add_newline: true
+  when:
+    - image_delivery_mode == 'registry'
+    - deployment_registry_username | length > 0
+    - deployment_registry_token | length > 0
+  changed_when: false
+  no_log: true

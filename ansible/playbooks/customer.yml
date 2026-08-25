@@ -1,0 +1,127 @@
+---
+- name: 部署客户数据面
+  hosts: customer_nodes
+  gather_facts: true
+  vars_files:
+    - "{{ inventory_dir }}/vault.yml"
+  roles:
+    - role: common
+    - role: docker
+    - role: source_snapshot
+      when: image_delivery_mode == 'local_bundle'
+    - role: frappe_local_image
+      when: image_delivery_mode == 'local_bundle'
+      vars:
+        frappe_stack_name: customer
+        frappe_local_image_name: tai-customer
+        frappe_local_apps:
+          - frappe_ext
+          - tbi
+          - tai
+    - role: frappe_stack
+      vars:
+        frappe_stack_name: customer
+        frappe_site_name: "{{ customer_site_name }}"
+        frappe_image: >-
+          {{ frappe_local_image_reference
+             if image_delivery_mode == 'local_bundle'
+             else customer_frappe_image }}
+        frappe_pull_policy: "{{ 'never' if image_delivery_mode == 'local_bundle' else 'always' }}"
+        frappe_apps:
+          - frappe_ext
+          - tbi
+          - tai
+        frappe_db_password: "{{ vault_customer_db_password }}"
+        frappe_db_root_password: "{{ vault_runtime_db_admin_password if (external_database_enabled | default(false) | bool) else vault_customer_db_password }}"
+        frappe_db_host: "{{ external_database_host if (external_database_enabled | default(false) | bool) else 'db' }}"
+        frappe_db_port: "{{ external_database_port if (external_database_enabled | default(false) | bool) else 5432 }}"
+        frappe_db_name: "{{ customer_database_name | default('') }}"
+        frappe_db_user: "{{ customer_database_user | default('') }}"
+        frappe_manage_postgres: "{{ not (external_database_enabled | default(false) | bool) }}"
+        frappe_admin_password: "{{ vault_customer_admin_password }}"
+        frappe_postgres_image: "{{ customer_postgres_image | default('postgres:16') }}"
+        frappe_redis_image: "{{ customer_redis_image | default('redis:8.6-alpine') }}"
+        frappe_http_port: 8080
+        frappe_docker_subnet: 172.31.10.0/24
+        frappe_secret_files: >-
+          {{
+            {
+              'tbi_engine_token': vault_tbi_engine_token,
+              'tai_service_token': vault_tai_service_token
+            }
+            | combine(
+                {
+                  'tai_control_client_secret':
+                    customer_control_client_secret | default(vault_tai_control_client_secret)
+                }
+                if (customer_control_client_secret | default(vault_tai_control_client_secret) | length > 0)
+                else {}
+              )
+            | combine(
+                {'benchmark_mssql_password': vault_benchmark_mssql_password | default('')}
+                if enable_benchmark | default(false) | bool else {}
+              )
+          }}
+        frappe_site_config:
+          tbi_engine_base_url: "http://tbi-engine:{{ tbi_engine_port }}"
+          tbi_engine_token_file: /run/secrets/tbi_engine_token
+          tai_service_url: "https://{{ runtime_public_hostname }}"
+          tai_service_token_file: /run/secrets/tai_service_token
+          # 客户节点只能访问窄 tai-auth 服务，不能直接访问控制面。
+          tai_auth_url: "https://{{ auth_public_hostname }}"
+          tai_control_client_id: >-
+            {{ customer_control_client_id | default(vault_tai_control_client_id) }}
+          tai_control_client_secret_file: >-
+            {{
+              '/run/secrets/tai_control_client_secret'
+              if (customer_control_client_secret | default(vault_tai_control_client_secret) | length > 0)
+              else ''
+            }}
+    - role: python_container
+      vars:
+        python_container_name: tbi-engine
+        python_container_source: "{{ source_root }}/services/tbi-engine"
+        python_container_image: "{{ tbi_engine_image if image_delivery_mode == 'registry' else '' }}"
+        python_container_extras: []
+        python_container_install_mssql_driver: true
+        python_container_command: >-
+          python -m uvicorn tbi_engine.server:app
+          --host 0.0.0.0 --port {{ tbi_engine_port }} --workers {{ tbi_engine_workers }}
+        python_container_port: "{{ tbi_engine_port }}"
+        python_container_networks:
+          - frappe-customer_default
+        python_container_network_aliases:
+          - tbi-engine
+        python_container_environment:
+          TBI_ENGINE_DATA_ROOT: /var/lib/tbi-engine
+          TBI_ENGINE_TOKEN_FILE: /run/secrets/tbi_engine_token
+          TBI_ENGINE_FAULT_LOG: /var/log/tbi-engine/fault.log
+        python_container_secrets:
+          tbi_engine_token: "{{ vault_tbi_engine_token }}"
+        python_container_data_dirs:
+          - /var/lib/tbi-engine
+          - /var/log/tbi-engine
+    - role: benchmark_project
+      when: enable_benchmark | default(false) | bool
+    - role: ingress
+      vars:
+        ingress_hostname: "{{ customer_site_name }}"
+        ingress_local_url: http://127.0.0.1:8080
+
+- name: 发布内部演示项目 Knowledge
+  hosts: runtime_nodes
+  gather_facts: false
+  vars_files:
+    - "{{ inventory_dir }}/vault.yml"
+  roles:
+    - role: benchmark_knowledge
+      when: enable_benchmark | default(false) | bool
+
+- name: 发布内部演示 Data Agent
+  hosts: control_nodes
+  gather_facts: false
+  vars_files:
+    - "{{ inventory_dir }}/vault.yml"
+  roles:
+    - role: benchmark_agent
+      when: enable_benchmark | default(false) | bool

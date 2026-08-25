@@ -1,0 +1,36 @@
+---
+- name: 停止未使用的 Cloudflare Tunnel
+  ansible.builtin.systemd_service:
+    name: tai-cloudflared
+    enabled: false
+    state: stopped
+  failed_when: false
+  when: ingress_provider != 'cloudflare'
+
+- name: 停止未使用的 FRP Client
+  ansible.builtin.systemd_service:
+    name: tai-frpc
+    enabled: false
+    state: stopped
+  failed_when: false
+  when: ingress_provider != 'frp'
+
+- name: 停止未使用的直连 Caddy
+  ansible.builtin.systemd_service:
+    name: caddy
+    enabled: false
+    state: stopped
+  failed_when: false
+  when: ingress_provider != 'direct'
+
+- name: 配置 Cloudflare Tunnel
+  ansible.builtin.include_tasks: cloudflare.yml
+  when: ingress_provider == 'cloudflare'
+
+- name: 配置 FRP Client
+  ansible.builtin.include_tasks: frp.yml
+  when: ingress_provider == 'frp'
+
+- name: 配置直连 HTTPS
+  ansible.builtin.include_tasks: direct.yml
+  when: ingress_provider == 'direct'

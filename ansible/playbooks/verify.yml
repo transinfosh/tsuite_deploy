@@ -1,0 +1,161 @@
+---
+- name: 验证公网中转入口
+  hosts: relay_nodes
+  gather_facts: false
+  vars_files:
+    - "{{ inventory_dir }}/vault.yml"
+  tasks:
+    - name: 验证 FRP Server 服务状态
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - --quiet
+          - tai-frps
+      changed_when: false
+
+    - name: 验证 Caddy 服务状态
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - --quiet
+          - caddy
+      changed_when: false
+
+    - name: 验证客户 Frappe 已通过 FRP 注册公网路由
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ frp_vhost_http_port }}/api/method/ping"
+        headers:
+          Host: "{{ customer_site_name }}"
+        status_code: 200
+
+- name: 验证客户节点
+  hosts: customer_nodes
+  gather_facts: false
+  vars_files:
+    - "{{ inventory_dir }}/vault.yml"
+  tasks:
+    - name: 验证客户 Frappe
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/api/method/ping
+        headers:
+          Host: "{{ customer_site_name }}"
+        status_code: 200
+    - name: 验证 tBI Engine
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ tbi_engine_port }}/readyz"
+        headers:
+          Authorization: "Bearer {{ vault_tbi_engine_token }}"
+        status_code: 200
+      no_log: true
+    - name: 验证客户 Frappe 到 tBI Engine 的容器网络
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - frappe-customer-backend-1
+          - python
+          - -c
+          - >-
+            import json;
+            from pathlib import Path;
+            from urllib.request import Request, urlopen;
+            token = Path('/run/secrets/tbi_engine_token').read_text(encoding='utf-8').strip();
+            request = Request(
+              'http://tbi-engine:{{ tbi_engine_port }}/readyz',
+              headers={'Authorization': 'Bearer ' + token}
+            );
+            response = urlopen(request, timeout=10);
+            assert response.status == 200;
+            payload = json.loads(response.read());
+            assert payload.get('status') == 'ready'
+      changed_when: false
+      no_log: true
+
+- name: 验证控制节点
+  hosts: control_nodes
+  gather_facts: false
+  vars_files:
+    - "{{ inventory_dir }}/vault.yml"
+    - "{{ inventory_dir }}/control_private.yml"
+  tasks:
+    - name: 验证控制面 Frappe
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/api/method/ping
+        headers:
+          Host: "{{ control_site_name }}"
+        status_code: 200
+
+    - name: 验证 TAI Control FRP 私有隧道
+      ansible.builtin.shell: |
+        set -eu
+        config_path=$(mktemp)
+        log_path=$(mktemp)
+        cleanup() {
+          kill "$visitor_pid" 2>/dev/null || true
+          wait "$visitor_pid" 2>/dev/null || true
+          rm -f "$config_path" "$log_path"
+        }
+        trap cleanup EXIT
+        cat > "$config_path" <<'EOF'
+        serverAddr = "{{ frp_server_addr }}"
+        serverPort = {{ frp_server_port }}
+        auth.method = "token"
+        auth.token = "{{ vault_frp_auth_token }}"
+        transport.tls.enable = true
+
+        [[visitors]]
+        name = "{{ frp_control_stcp_proxy_name }}-verify"
+        type = "stcp"
+        serverName = "{{ frp_control_stcp_proxy_name }}"
+        secretKey = "{{ vault_control_stcp_secret }}"
+        bindAddr = "127.0.0.1"
+        bindPort = 18080
+        EOF
+        /usr/local/bin/frpc -c "$config_path" > "$log_path" 2>&1 &
+        visitor_pid=$!
+        for attempt in $(seq 1 20); do
+          if curl --fail --silent --show-error \
+            --header "Host: {{ control_site_name }}" \
+            http://127.0.0.1:18080/api/method/ping > /dev/null; then
+            exit 0
+          fi
+          sleep 1
+        done
+        cat "$log_path" >&2
+        exit 1
+      changed_when: false
+      no_log: true
+
+- name: 验证运行节点
+  hosts: runtime_nodes
+  gather_facts: false
+  vars_files:
+    - "{{ inventory_dir }}/vault.yml"
+  tasks:
+    - name: 验证 Embedding
+      ansible.builtin.uri:
+        url: "{{ embedding_base_url }}/embeddings"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ vault_qwen_api_key }}"
+        body_format: json
+        body:
+          model: "{{ embedding_model }}"
+          input:
+            - 销售发票未收金额
+        status_code: 200
+        return_content: true
+      register: embedding_verify
+      no_log: true
+    - name: 验证 Embedding 维度
+      ansible.builtin.assert:
+        that:
+          - embedding_verify.json.data | length == 1
+          - embedding_verify.json.data[0].embedding | length == embedding_dimensions | int
+      no_log: true
+    - name: 验证 TAI Service
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ tai_service_port }}/readyz"
+        status_code: 200

@@ -1,0 +1,16 @@
+---
+- name: 生成 TAI Control 私有隧道 Visitor 配置
+  hosts: control_nodes
+  gather_facts: false
+  vars_files:
+    - "{{ inventory_dir }}/vault.yml"
+    - "{{ inventory_dir }}/control_private.yml"
+  tasks:
+    - name: 写入仅本机使用的 Visitor 配置
+      ansible.builtin.template:
+        src: ../roles/ingress/templates/frpc.stcp-visitor.toml.j2
+        dest: "{{ playbook_dir }}/../artifacts/tai-control-visitor.toml"
+        mode: "0600"
+      delegate_to: localhost
+      run_once: true
+      no_log: true

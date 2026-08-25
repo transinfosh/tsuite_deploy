@@ -1,0 +1,126 @@
+import json
+
+import frappe
+
+from tai_control.api.agent import (
+    activate_agent_release,
+    get_agent_console,
+    publish_agent_draft,
+    save_agent_draft,
+)
+
+
+tenant_key = {{ bootstrap_tenant_key | to_json }}
+project_id = {{ benchmark_project_name | to_json }}
+actor = "system:internal-demo-bootstrap"
+spec = {
+    "schema_version": 2,
+    "agent_key": "data_qa",
+    "instructions": {
+        "system": (
+            "你是通用数据分析 Agent。必须基于已发布的语义层、项目 Knowledge 和查询证据回答；"
+            "不得编造数据或业务口径，无法取得充分证据时应明确说明。"
+        )
+    },
+    "orchestration": {
+        "kind": "ask_router",
+        "version": 1,
+        "config": {"max_steps": 8, "run_timeout_seconds": 300},
+    },
+    "routing": {
+        "contract": "ask_route@1",
+        "allowed_routes": [
+            "data_query",
+            "direct",
+            "out_of_scope",
+            "asset_catalog",
+            "asset_detail",
+            "historical_presentation",
+        ],
+    },
+    "tools": [
+        {
+            "name": "semantic_query",
+            "version": 1,
+            "timeout_seconds": 60,
+            "max_requested_rows": 200,
+            "contract": "semantic_query@1",
+        }
+    ],
+    "model_requirements": {
+        "schema_version": 1,
+        "capabilities": ["tool_calling", "structured_output"],
+        "generation_constraints": {
+            "temperature_milli": 0,
+            "max_output_tokens": 4096,
+            "tool_choice": "auto",
+        },
+    },
+    "output_contract": {"kind": "answer_result", "version": 2},
+}
+
+
+def canonical(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+frappe.set_user("Administrator")
+tenant = frappe.db.get_value("TAI Tenant", {"tenant_key": tenant_key}, "name")
+if not tenant:
+    raise RuntimeError("benchmark_agent_tenant_not_found")
+project = frappe.db.get_value(
+    "TAI Project",
+    {"tenant": tenant, "project_id": project_id},
+    "name",
+)
+if not project:
+    raise RuntimeError("benchmark_agent_project_not_found")
+
+console = get_agent_console(project)
+head = console.get("head")
+releases = (console.get("releases") or {}).get("items") or []
+head_release = next(
+    (
+        release
+        for release in releases
+        if head and release.get("release_id") == head.get("release_id")
+    ),
+    None,
+)
+changed = not head_release or canonical(head_release.get("spec_json")) != canonical(spec)
+
+if changed:
+    draft = console.get("draft")
+    if not draft or canonical(draft.get("spec_json")) != canonical(spec):
+        draft = save_agent_draft(
+            project,
+            expected_revision=draft.get("draft_revision") if draft else None,
+            spec=spec,
+        )
+    release = publish_agent_draft(
+        project,
+        expected_draft_revision=int(draft["draft_revision"]),
+    )
+    head = activate_agent_release(
+        project,
+        release_id=release["release_id"],
+        expected_head_revision=head.get("head_revision") if head else None,
+    )
+    head_release = release
+
+print(
+    "TAI_BENCHMARK_AGENT="
+    + json.dumps(
+        {
+            "active": bool(head),
+            "changed": changed,
+            "project": project_id,
+            "release_id": head.get("release_id") if head else None,
+            "schema_version": (
+                head_release.get("spec_schema_version") if head_release else None
+            ),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+)

@@ -1,0 +1,39 @@
+services:
+{% if phoenix_manage_postgres | default(true) | bool %}
+  db:
+    image: {{ phoenix_postgres_image | to_json }}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: phoenix
+      POSTGRES_PASSWORD: ${PHOENIX_DB_PASSWORD}
+      POSTGRES_DB: phoenix
+    volumes:
+      - phoenix-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U phoenix"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+{% endif %}
+  phoenix:
+    image: {{ phoenix_image | to_json }}
+    restart: unless-stopped
+{% if phoenix_manage_postgres | default(true) | bool %}
+    depends_on:
+      db:
+        condition: service_healthy
+{% endif %}
+    environment:
+      PHOENIX_SQL_DATABASE_URL: postgresql://phoenix:${PHOENIX_DB_PASSWORD}@{{ phoenix_database_host | default('db') }}:{{ phoenix_database_port | default(5432) }}/phoenix
+      PHOENIX_ENABLE_AUTH: "true"
+      PHOENIX_SECRET: ${PHOENIX_SECRET}
+      PHOENIX_DEFAULT_RETENTION_POLICY_DAYS: "{{ phoenix_retention_days | default(30) }}"
+    ports:
+{% for address in phoenix_bind_addresses %}
+      - "{{ address }}:{{ phoenix_port }}:6006"
+{% endfor %}
+
+{% if phoenix_manage_postgres | default(true) | bool %}
+volumes:
+  phoenix-postgres-data:
+{% endif %}

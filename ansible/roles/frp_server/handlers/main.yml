@@ -1,0 +1,12 @@
+---
+- name: 重启 FRP Server
+  ansible.builtin.systemd_service:
+    name: tai-frps
+    state: restarted
+  when: not ansible_check_mode
+
+- name: 重载 Caddy
+  ansible.builtin.systemd_service:
+    name: caddy
+    state: reloaded
+  when: not ansible_check_mode

@@ -1,0 +1,51 @@
+---
+- name: 下载 cloudflared
+  ansible.builtin.get_url:
+    url: "{{ cloudflared_download_url }}"
+    dest: /tmp/cloudflared.deb
+    owner: root
+    group: root
+    mode: "0644"
+    timeout: 120
+  environment:
+    HTTPS_PROXY: "{{ deployment_http_proxy }}"
+    https_proxy: "{{ deployment_http_proxy }}"
+
+- name: 安装 cloudflared
+  ansible.builtin.apt:
+    deb: /tmp/cloudflared.deb
+    state: present
+    lock_timeout: 300
+
+- name: 写入 Cloudflare Tunnel Token
+  ansible.builtin.copy:
+    content: "{{ vault_cloudflare_tunnel_tokens[inventory_hostname] }}\n"
+    dest: /etc/tai-cloudflared.token
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: 重启 Cloudflare Tunnel
+
+- name: 删除旧 Cloudflare Tunnel 环境文件
+  ansible.builtin.file:
+    path: /etc/tai-cloudflared.env
+    state: absent
+
+- name: 写入 Cloudflare Tunnel Systemd 服务
+  ansible.builtin.template:
+    src: cloudflared.service.j2
+    dest: /etc/systemd/system/tai-cloudflared.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - 重载入口 Systemd
+    - 重启 Cloudflare Tunnel
+
+- name: 启用 Cloudflare Tunnel
+  ansible.builtin.systemd_service:
+    name: tai-cloudflared
+    enabled: true
+    state: started
+    daemon_reload: true

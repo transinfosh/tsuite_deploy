@@ -1,0 +1,32 @@
+---
+# 2026-08-25 BI/AI 正式发布锁；目标 inventory 必须使用 reference@digest。
+lock_state: locked
+resolved_at: "2026-08-25T03:00:00Z"
+frappe_docker:
+  ref: main
+  resolved_sha: null
+images:
+  customer_frappe:
+    reference: ghcr.io/transinfosh/tai-customer:0.0.15
+    digest: sha256:fe51c1a3e7f9377b58ac975184d1f233fef3797ae2a1fae0760b38407e8710ea
+    source_commit: 621d29ad673a8cb954c4567886fdf970fcc92ff7
+  control_frappe:
+    reference: ghcr.io/transinfosh/tai-control:0.0.15
+    digest: sha256:46fe330cf806d016b28b9d8efac8d4438229561bba04e54821057a27f9f4562f
+    source_commit: 2fb6737fdc9a89f4fee8bf056858b95cbd8055e9
+  tai_service:
+    reference: ghcr.io/transinfosh/tai-service:v0.1.13
+    digest: sha256:57d0b04cc4edd0c44f3085836295d8208c4bfba7c21006e21d2f791cc2dd9d83
+    source_commit: 92cfdbef0a7b552293be7841d2e350c16d3af258
+  tbi_engine:
+    reference: ghcr.io/transinfosh/tbi-engine:v0.1.5
+    digest: sha256:728ee0f3ec4518030a7e29c08990463a3da6a47408cc86598c99f945772ea3ad
+    source_commit: a99648b2dcc4baa7d25173f59837d776a96dbdd8
+  tai_auth:
+    reference: ghcr.io/transinfosh/tai-auth:internal-demo
+    digest: null
+    source_commit: null
+source_bundle:
+  sha256: null
+
+# 正式发布时应补齐：镜像 digest、源码 commit、OS/数据库/Redis/cloudflared 版本及构建时间。

@@ -1,0 +1,24 @@
+serverAddr = "{{ frp_server_addr }}"
+serverPort = {{ frp_server_port }}
+auth.method = "token"
+auth.token = "{{ vault_frp_auth_token }}"
+transport.tls.enable = true
+
+{% for route in ingress_routes %}
+[[proxies]]
+name = "{{ inventory_hostname }}-{{ loop.index }}"
+type = "http"
+localIP = "127.0.0.1"
+localPort = {{ route.local_port }}
+customDomains = ["{{ route.hostname }}"]
+
+{% endfor %}
+{% for route in ingress_stcp_routes %}
+[[proxies]]
+name = "{{ route.name }}"
+type = "stcp"
+secretKey = "{{ route.secret_key }}"
+localIP = "{{ route.local_ip | default('127.0.0.1') }}"
+localPort = {{ route.local_port }}
+
+{% endfor %}

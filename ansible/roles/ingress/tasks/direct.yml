@@ -1,0 +1,24 @@
+---
+- name: 安装直连 Caddy
+  ansible.builtin.apt:
+    name: caddy
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    lock_timeout: 300
+
+- name: 写入直连 Caddy 配置
+  ansible.builtin.template:
+    src: direct.Caddyfile.j2
+    dest: /etc/caddy/Caddyfile
+    owner: root
+    group: root
+    mode: "0644"
+    validate: caddy validate --config %s --adapter caddyfile
+  notify: 重启直连 Caddy
+
+- name: 启用直连 Caddy
+  ansible.builtin.systemd_service:
+    name: caddy
+    enabled: true
+    state: started

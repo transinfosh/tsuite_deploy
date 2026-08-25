@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 # 可按团队环境修改这些默认值，运行时仍会逐项询问。
-DEFAULT_DEPLOY_DIR="/opt/tsuie-deploy"
+DEFAULT_DEPLOY_DIR="/opt/tsuite-deploy"
 DEFAULT_FRAPPE_DOCKER_REPO="https://github.com/transinfosh/frappe_docker.git"
 DEFAULT_FRAPPE_DOCKER_REF="main"
 DEFAULT_IMAGE="ghcr.io/transinfosh/project_management:0.0.2"
@@ -17,6 +17,9 @@ DEFAULT_DOCKER_SUBNET="172.30.0.0/24"
 DEFAULT_HTTP_PROXY="${HTTP_PROXY:-${http_proxy:-}}"
 DEFAULT_HTTPS_PROXY="${HTTPS_PROXY:-${https_proxy:-$DEFAULT_HTTP_PROXY}}"
 DEFAULT_NO_PROXY="${NO_PROXY:-${no_proxy:-localhost,127.0.0.1,::1,host.docker.internal,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,db,redis-cache,redis-queue,configurator,backend,frontend,websocket,queue-short,queue-long,scheduler}}"
+LEGACY_DEPLOY_DIR="/opt/tsuie-deploy"
+LEGACY_APT_PROXY_FILE="/etc/apt/apt.conf.d/90-tsuie-deploy-proxy"
+LEGACY_DOCKER_PROXY_FILE="/etc/systemd/system/docker.service.d/tsuie-deploy-proxy.conf"
 
 SCRIPT_NAME="$(basename "$0")"
 DRY_RUN=false
@@ -108,6 +111,43 @@ run() {
 		return 0
 	fi
 	"$@"
+}
+
+migrate_legacy_deployment() {
+	local legacy_command="/usr/local/sbin/tsuie-deploy"
+	local canonical_command="/usr/local/sbin/tsuite-deploy"
+	local moved_docker_proxy=false
+
+	if [[ -e "$LEGACY_DEPLOY_DIR" && -e "$DEFAULT_DEPLOY_DIR" ]]; then
+		die "旧部署目录和新部署目录同时存在，请先人工确认：$LEGACY_DEPLOY_DIR、$DEFAULT_DEPLOY_DIR"
+	fi
+	if [[ -e "$LEGACY_DEPLOY_DIR" ]]; then
+		log "迁移旧部署目录到 $DEFAULT_DEPLOY_DIR"
+		run mv "$LEGACY_DEPLOY_DIR" "$DEFAULT_DEPLOY_DIR"
+	fi
+
+	if [[ -e "$LEGACY_APT_PROXY_FILE" && -e "/etc/apt/apt.conf.d/90-tsuite-deploy-proxy" ]]; then
+		die "旧版和新版 APT 代理配置同时存在，请先人工确认"
+	fi
+	[[ ! -e "$LEGACY_APT_PROXY_FILE" ]] ||
+		run mv "$LEGACY_APT_PROXY_FILE" "/etc/apt/apt.conf.d/90-tsuite-deploy-proxy"
+
+	if [[ -e "$LEGACY_DOCKER_PROXY_FILE" && -e "/etc/systemd/system/docker.service.d/tsuite-deploy-proxy.conf" ]]; then
+		die "旧版和新版 Docker 代理配置同时存在，请先人工确认"
+	fi
+	if [[ -e "$LEGACY_DOCKER_PROXY_FILE" ]]; then
+		run mv "$LEGACY_DOCKER_PROXY_FILE" "/etc/systemd/system/docker.service.d/tsuite-deploy-proxy.conf"
+		moved_docker_proxy=true
+	fi
+
+	if "$moved_docker_proxy" && ! "$DRY_RUN"; then
+		systemctl daemon-reload
+		systemctl restart docker
+	fi
+
+	if [[ -e "$legacy_command" && ! -e "$canonical_command" ]]; then
+		warn "旧命令将由安装器迁移为 $canonical_command；本次仍可继续执行。"
+	fi
 }
 
 usage() {
@@ -535,7 +575,7 @@ write_deployment_inputs() {
 prepare_dry_run_workspace() {
 	TARGET_DEPLOY_DIR="$DEPLOY_DIR"
 	"$DRY_RUN" || return 0
-	DEPLOY_DIR="$(mktemp -d /tmp/tsuie-deploy-dry-run.XXXXXX)"
+	DEPLOY_DIR="$(mktemp -d /tmp/tsuite-deploy-dry-run.XXXXXX)"
 	log "dry-run 配置文件将写入 $DEPLOY_DIR"
 }
 
@@ -568,7 +608,7 @@ show_summary() {
 }
 
 apply_apt_proxy() {
-	local proxy_file="/etc/apt/apt.conf.d/90-tsuie-deploy-proxy"
+	local proxy_file="/etc/apt/apt.conf.d/90-tsuite-deploy-proxy"
 	if ! "$PROXY_ENABLED"; then
 		run rm -f "$proxy_file"
 		return
@@ -601,7 +641,7 @@ systemd_escape() {
 
 apply_docker_proxy() {
 	local dropin_dir="/etc/systemd/system/docker.service.d"
-	local dropin="$dropin_dir/tsuie-deploy-proxy.conf"
+	local dropin="$dropin_dir/tsuite-deploy-proxy.conf"
 	if ! "$PROXY_ENABLED"; then
 		if [[ -f "$dropin" ]]; then
 			run rm -f "$dropin"
@@ -616,7 +656,7 @@ apply_docker_proxy() {
 	fi
 	install -d -m 0755 "$dropin_dir"
 	local desired_dropin
-	desired_dropin="$(mktemp /tmp/tsuie-deploy-docker-proxy.XXXXXX)"
+	desired_dropin="$(mktemp /tmp/tsuite-deploy-docker-proxy.XXXXXX)"
 	{
 		printf '[Service]\n'
 		[[ -z "$HTTP_PROXY_VALUE" ]] ||
@@ -722,13 +762,77 @@ backup_existing_site() {
 			return
 		fi
 		log "升级前备份站点 ${EXISTING_SITE_NAME:-$SITE_NAME}"
-		run docker compose "${COMPOSE_ARGS[@]}" exec -T backend \
-			bench --site "${EXISTING_SITE_NAME:-$SITE_NAME}" backup --with-files
+		backup_running_site "${EXISTING_SITE_NAME:-$SITE_NAME}"
 	else
 		log "后端当前未运行，使用一次性容器备份站点 ${EXISTING_SITE_NAME:-$SITE_NAME}"
 		run docker compose "${COMPOSE_ARGS[@]}" run --rm backend \
 			bench --site "${EXISTING_SITE_NAME:-$SITE_NAME}" backup --with-files
 	fi
+}
+
+backup_running_site() {
+	local site_name="$1" site_config db_type db_name db_user db_password db_host db_port
+	local server_version_num server_major pg_dump_version pg_dump_major
+	site_config="$(docker compose "${COMPOSE_ARGS[@]}" exec -T backend cat "/home/frappe/frappe-bench/sites/$site_name/site_config.json")"
+	db_type="$(jq -r '.db_type // "postgres"' <<<"$site_config")"
+	if [[ "$db_type" != "postgres" ]]; then
+		run docker compose "${COMPOSE_ARGS[@]}" exec -T backend bench --site "$site_name" backup --with-files
+		return
+	fi
+	db_name="$(jq -er '.db_name' <<<"$site_config")"
+	db_user="$(jq -r '.db_user // .db_name' <<<"$site_config")"
+	db_password="$(jq -er '.db_password' <<<"$site_config")"
+	db_host="$(jq -r '.db_host // "db"' <<<"$site_config")"
+	db_port="$(jq -r '.db_port // 5432' <<<"$site_config")"
+	server_version_num="$(docker compose "${COMPOSE_ARGS[@]}" exec -T -e "PGPASSWORD=$db_password" backend \
+		psql --no-password --tuples-only --no-align --host "$db_host" --port "$db_port" \
+			--username "$db_user" --dbname "$db_name" --command 'SHOW server_version_num;')"
+	[[ "$server_version_num" =~ ^[0-9]+$ ]] || die "无法读取 PostgreSQL 服务端版本，升级前备份已中止"
+	server_major=$((server_version_num / 10000))
+	((server_major >= 10)) || die "不支持自动适配 PostgreSQL $server_version_num 的备份客户端"
+	pg_dump_version="$(docker compose "${COMPOSE_ARGS[@]}" exec -T backend pg_dump --version)"
+	pg_dump_major="$(sed -nE 's/.* ([0-9]+)(\.[0-9]+)?.*/\1/p' <<<"$pg_dump_version")"
+	[[ "$pg_dump_major" =~ ^[0-9]+$ ]] || die "无法识别 backend 中 pg_dump 的版本：$pg_dump_version"
+	if ((pg_dump_major >= server_major)); then
+		run docker compose "${COMPOSE_ARGS[@]}" exec -T backend bench --site "$site_name" backup --with-files
+		return
+	fi
+	warn "backend 的 pg_dump 为 $pg_dump_major，低于 PostgreSQL $server_major；改用 postgres:$server_major 客户端备份"
+	backup_postgres_with_compatible_client "$site_name" "$db_name" "$db_user" "$db_password" "$db_host" "$db_port" "$server_major"
+}
+
+backup_postgres_with_compatible_client() {
+	local site_name="$1" db_name="$2" db_user="$3" db_password="$4" db_host="$5" db_port="$6" server_major="$7"
+	local backend_id backend_uid backend_gid site_path backup_dir site_slug timestamp backup_database backup_config backup_files backup_private_files
+	backend_id="$(docker compose "${COMPOSE_ARGS[@]}" ps --quiet backend)"
+	[[ -n "$backend_id" ]] || die "无法确定 backend 容器，升级前备份已中止"
+	backend_uid="$(docker compose "${COMPOSE_ARGS[@]}" exec -T backend id -u)"
+	backend_gid="$(docker compose "${COMPOSE_ARGS[@]}" exec -T backend id -g)"
+	[[ "$backend_uid" =~ ^[0-9]+$ && "$backend_gid" =~ ^[0-9]+$ ]] || die "无法读取 backend 容器用户，升级前备份已中止"
+	site_path="/home/frappe/frappe-bench/sites/$site_name"
+	backup_dir="$site_path/private/backups"
+	site_slug="${site_name//./_}"
+	timestamp="$(date -u +%Y%m%d_%H%M%S)"
+	backup_database="$backup_dir/$timestamp-$site_slug-database.sql.gz"
+	backup_config="$backup_dir/$timestamp-$site_slug-site_config_backup.json"
+	backup_files="$backup_dir/$timestamp-$site_slug-files.tar"
+	backup_private_files="$backup_dir/$timestamp-$site_slug-private-files.tar"
+	docker compose "${COMPOSE_ARGS[@]}" exec -T -e "BACKUP_DIR=$backup_dir" -e "BACKUP_DATABASE=$backup_database" backend \
+		bash -o pipefail -ceu 'mkdir -p "$BACKUP_DIR"; printf "%s\\n" "-- begin frappe metadata" "-- [frappe]" "-- version = compatible-pg-client" "-- branch = N/A" "-- end frappe metadata" "--" | gzip >"$BACKUP_DATABASE"'
+	if ! docker run --rm --network "container:$backend_id" --add-host "host.docker.internal:host-gateway" \
+		--volumes-from "$backend_id" --user "$backend_uid:$backend_gid" -e "PGPASSWORD=$db_password" \
+		-e "PGHOST=$db_host" -e "PGPORT=$db_port" -e "PGUSER=$db_user" -e "PGDATABASE=$db_name" \
+		-e "BACKUP_DATABASE=$backup_database" "postgres:$server_major" \
+		bash -o pipefail -ceu 'pg_dump --no-password | gzip >>"$BACKUP_DATABASE"'; then
+		docker compose "${COMPOSE_ARGS[@]}" exec -T -e "BACKUP_DATABASE=$backup_database" backend bash -ceu 'rm -f "$BACKUP_DATABASE"'
+		die "兼容 PostgreSQL 客户端的数据库备份失败，升级已中止"
+	fi
+	docker compose "${COMPOSE_ARGS[@]}" exec -T -e "BACKUP_CONFIG=$backup_config" -e "BACKUP_FILES=$backup_files" \
+		-e "BACKUP_PRIVATE_FILES=$backup_private_files" -e "SITE_PATH=$site_path" backend bash -o pipefail -ceu '
+			cp "$SITE_PATH/site_config.json" "$BACKUP_CONFIG"
+			tar -cf "$BACKUP_FILES" "$SITE_PATH/public/files"
+			tar -cf "$BACKUP_PRIVATE_FILES" "$SITE_PATH/private/files"
+		'
 }
 
 create_upgrade_snapshot() {
@@ -834,10 +938,11 @@ ALTER SYSTEM SET listen_addresses = '*';
 SQL
 	hba_file="$(runuser -u postgres -- psql -Atqc 'SHOW hba_file;')"
 	sed -i '/^# BEGIN tsuie_deploy$/,/^# END tsuie_deploy$/d' "$hba_file"
+	sed -i '/^# BEGIN tsuite_deploy$/,/^# END tsuite_deploy$/d' "$hba_file"
 	{
-		printf '\n# BEGIN tsuie_deploy\n'
+		printf '\n# BEGIN tsuite_deploy\n'
 		printf 'host all all %s scram-sha-256\n' "$DOCKER_SUBNET"
-		printf '# END tsuie_deploy\n'
+		printf '# END tsuite_deploy\n'
 	} >>"$hba_file"
 	systemctl restart postgresql
 }
@@ -1219,6 +1324,7 @@ main() {
 
 	require_root
 	require_ubuntu
+	migrate_legacy_deployment
 	collect_proxy_settings
 	collect_deployment_settings
 	validate_inputs

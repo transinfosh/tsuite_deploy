@@ -1,0 +1,22 @@
+DO $do$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{{ runtime_database_owner }}') THEN
+        CREATE ROLE {{ runtime_database_owner }} NOLOGIN;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{{ runtime_database_user }}') THEN
+        CREATE ROLE {{ runtime_database_user }} LOGIN;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'tai_runtime_worker') THEN
+        CREATE ROLE tai_runtime_worker LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOBYPASSRLS;
+    END IF;
+END
+$do$;
+ALTER ROLE {{ runtime_database_user }} PASSWORD '{{ vault_runtime_db_app_password | replace("'", "''") }}';
+ALTER ROLE tai_runtime_worker PASSWORD '{{ vault_runtime_db_worker_password | replace("'", "''") }}';
+GRANT {{ runtime_database_owner }} TO postgres;
+GRANT {{ runtime_database_user }} TO {{ runtime_database_owner }};
+GRANT {{ runtime_database_user }} TO tai_runtime_worker;
+
+SELECT format('CREATE DATABASE %I OWNER %I', '{{ runtime_database_name }}', '{{ runtime_database_owner }}')
+WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '{{ runtime_database_name }}')
+\gexec

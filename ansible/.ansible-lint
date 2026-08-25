@@ -1,0 +1,6 @@
+---
+profile: basic
+skip_list:
+  # 角色接口变量由 playbook 显式传入，保留跨角色可读的领域名称。
+  - var-naming[no-role-prefix]
+  - yaml[line-length]

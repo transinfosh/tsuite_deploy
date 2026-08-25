@@ -1,0 +1,152 @@
+---
+- name: 校验 PostgreSQL 宿主机
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == "Ubuntu"
+      - ansible_distribution_version is version('24.04', '>=')
+      - ansible_architecture in ['x86_64', 'aarch64']
+
+- name: 安装 PostgreSQL 仓库依赖
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - postgresql-common
+      - python3-debian
+    state: present
+    update_cache: true
+
+- name: 创建 PostgreSQL 仓库密钥目录
+  ansible.builtin.file:
+    path: /usr/share/postgresql-common/pgdg
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: 安装 PostgreSQL 官方仓库密钥
+  ansible.builtin.get_url:
+    url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+    dest: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: 配置 PostgreSQL 官方仓库
+  ansible.builtin.deb822_repository:
+    name: pgdg
+    types:
+      - deb
+    uris:
+      - https://apt.postgresql.org/pub/repos/apt
+    suites:
+      - "{{ ansible_distribution_release }}-pgdg"
+    components:
+      - main
+    signed_by: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+    state: present
+
+- name: 更新 PostgreSQL 软件包索引
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: 安装 PostgreSQL 与 pgvector
+  ansible.builtin.apt:
+    name:
+      - "postgresql-{{ postgresql_host_version }}"
+      - "postgresql-client-{{ postgresql_host_version }}"
+      - "postgresql-{{ postgresql_host_version }}-pgvector"
+    state: present
+
+- name: 限制 PostgreSQL 监听地址
+  ansible.builtin.lineinfile:
+    path: "/etc/postgresql/{{ postgresql_host_version }}/main/postgresql.conf"
+    regexp: '^\s*#?\s*listen_addresses\s*='
+    line: "listen_addresses = '{{ postgresql_host_listen_addresses }}'"
+  notify: 重启宿主机 PostgreSQL
+
+- name: 设置 PostgreSQL 端口
+  ansible.builtin.lineinfile:
+    path: "/etc/postgresql/{{ postgresql_host_version }}/main/postgresql.conf"
+    regexp: '^\s*#?\s*port\s*='
+    line: "port = {{ postgresql_host_port }}"
+  notify: 重启宿主机 PostgreSQL
+
+- name: 强制 PostgreSQL 使用 SCRAM 密码
+  ansible.builtin.lineinfile:
+    path: "/etc/postgresql/{{ postgresql_host_version }}/main/postgresql.conf"
+    regexp: '^\s*#?\s*password_encryption\s*='
+    line: "password_encryption = 'scram-sha-256'"
+  notify: 重启宿主机 PostgreSQL
+
+- name: 配置 PostgreSQL 内存与连接参数
+  ansible.builtin.lineinfile:
+    path: "/etc/postgresql/{{ postgresql_host_version }}/main/postgresql.conf"
+    regexp: "^\\s*#?\\s*{{ item.key }}\\s*="
+    line: "{{ item.key }} = {{ item.value }}"
+  loop:
+    - key: shared_buffers
+      value: "{{ postgresql_host_shared_buffers }}"
+    - key: effective_cache_size
+      value: "{{ postgresql_host_effective_cache_size }}"
+    - key: maintenance_work_mem
+      value: "{{ postgresql_host_maintenance_work_mem }}"
+    - key: work_mem
+      value: "{{ postgresql_host_work_mem }}"
+    - key: max_connections
+      value: "{{ postgresql_host_max_connections }}"
+  notify: 重启宿主机 PostgreSQL
+
+- name: 允许应用节点通过 SCRAM 连接 PostgreSQL
+  ansible.builtin.blockinfile:
+    path: "/etc/postgresql/{{ postgresql_host_version }}/main/pg_hba.conf"
+    marker: "# {mark} TAI MANAGED APPLICATION NODES"
+    block: |
+      {% for cidr in postgresql_host_allowed_cidrs %}
+      host    all    all    {{ cidr }}    scram-sha-256
+      {% endfor %}
+  notify: 重启宿主机 PostgreSQL
+
+- name: 应用 PostgreSQL 配置
+  ansible.builtin.meta: flush_handlers
+
+- name: 启用 PostgreSQL
+  ansible.builtin.service:
+    name: postgresql
+    state: started
+    enabled: true
+
+- name: 等待 PostgreSQL 可用
+  ansible.builtin.command:
+    argv:
+      - "/usr/lib/postgresql/{{ postgresql_host_version }}/bin/pg_isready"
+      - --host
+      - "{{ postgresql_host_listen_addresses }}"
+      - --port
+      - "{{ postgresql_host_port | string }}"
+  register: postgresql_host_readiness
+  retries: 15
+  delay: 2
+  until: postgresql_host_readiness.rc == 0
+  changed_when: false
+
+- name: 读取 PostgreSQL 与 pgvector 版本
+  become_user: postgres
+  ansible.builtin.command:
+    argv:
+      - "/usr/lib/postgresql/{{ postgresql_host_version }}/bin/psql"
+      - --no-psqlrc
+      - --tuples-only
+      - --no-align
+      - --command
+      - >-
+        SELECT current_setting('server_version'), default_version
+        FROM pg_available_extensions WHERE name = 'vector';
+  register: postgresql_host_versions
+  changed_when: false
+
+- name: 校验 PostgreSQL 与 pgvector 可用
+  ansible.builtin.assert:
+    that:
+      - postgresql_host_versions.stdout is match('^' ~ postgresql_host_version ~ '\\.')
+      - "'|' in postgresql_host_versions.stdout"

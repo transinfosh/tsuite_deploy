@@ -1,0 +1,9 @@
+bindAddr = "0.0.0.0"
+bindPort = {{ frp_server_port }}
+proxyBindAddr = "127.0.0.1"
+vhostHTTPPort = {{ frp_vhost_http_port }}
+
+auth.method = "token"
+auth.token = "{{ vault_frp_auth_token }}"
+
+transport.tls.force = true

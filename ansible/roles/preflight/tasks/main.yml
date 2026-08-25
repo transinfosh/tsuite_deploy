@@ -1,0 +1,182 @@
+---
+- name: 校验操作系统
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == "Ubuntu"
+      - ansible_distribution_version is version('24.04', '>=')
+    fail_msg: 当前部署工程只验证 Ubuntu 24.04 及以上版本。
+
+- name: 校验部署状态不会误用于生产
+  ansible.builtin.assert:
+    that:
+      - release_lock_state in ['unlocked-internal-demo', 'locked']
+      - deployment_environment != 'production' or release_lock_state == 'locked'
+      - deployment_environment != 'production' or not allow_unlocked_revisions | bool
+    fail_msg: production inventory 必须使用 locked Release，不能使用可变分支或标签。
+
+- name: 校验每台服务器只承担一个节点角色
+  ansible.builtin.assert:
+    that:
+      - >-
+        ((('customer_nodes' in group_names) | ternary(1, 0)) +
+         (('runtime_nodes' in group_names) | ternary(1, 0)) +
+         (('control_nodes' in group_names) | ternary(1, 0)) +
+         (('relay_nodes' in group_names) | ternary(1, 0))) == 1
+    fail_msg: 每台服务器必须且只能属于 customer_nodes、runtime_nodes、control_nodes、relay_nodes 之一。
+
+- name: 校验基础容量
+  ansible.builtin.assert:
+    that:
+      - ansible_memtotal_mb >= 3500
+      - ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute='size_available') | first >= 15000000000
+    fail_msg: 每个节点至少需要约 4GB 内存和 15GB 根分区可用空间。
+  when: "'relay_nodes' not in group_names"
+
+- name: 校验中转机基础容量
+  ansible.builtin.assert:
+    that:
+      - ansible_memtotal_mb >= 900
+      - ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute='size_available') | first >= 5000000000
+    fail_msg: FRP 中转机至少需要约 1GB 内存和 5GB 根分区可用空间。
+  when: "'relay_nodes' in group_names"
+
+- name: 校验入口类型
+  ansible.builtin.assert:
+    that:
+      - ingress_provider in ['cloudflare', 'frp', 'direct']
+
+- name: 校验直连 HTTPS 配置
+  ansible.builtin.assert:
+    that:
+      - direct_caddy_email is match('^[^@\s]+@[^@\s]+\.[^@\s]+$')
+  when: ingress_provider == 'direct'
+
+- name: 校验镜像交付模式
+  ansible.builtin.assert:
+    that:
+      - image_delivery_mode in ['registry', 'local_bundle']
+      - image_delivery_mode != 'registry' or deployment_image_tag is match('^[a-zA-Z0-9._-]+$')
+      - image_delivery_mode != 'registry' or customer_frappe_image is match('^ghcr\\.io/')
+      - image_delivery_mode != 'registry' or control_frappe_image is match('^ghcr\\.io/')
+      - image_delivery_mode != 'registry' or tai_service_image is match('^ghcr\\.io/')
+      - image_delivery_mode != 'registry' or tbi_engine_image is match('^ghcr\\.io/')
+      - image_delivery_mode != 'registry' or tai_auth_image is match('^ghcr\\.io/')
+
+- name: 校验已锁定的 TAI Service 正式版本
+  ansible.builtin.assert:
+    that:
+      - tai_service_release_version is match('^[0-9]+\\.[0-9]+\\.[0-9]+$')
+      - tai_service_source_commit is match('^[0-9a-f]{40}$')
+      - tai_service_image is match('^ghcr\\.io/transinfosh/tai-service@sha256:[0-9a-f]{64}$')
+    fail_msg: >-
+      锁定 TAI Service Release 必须提供语义版本、40 位源码提交和 GHCR sha256 digest，
+      不能只部署镜像 Tag。
+  when:
+    - image_delivery_mode == 'registry'
+    - tai_service_release_lock | default(false) | bool
+
+- name: 校验部署代理
+  ansible.builtin.assert:
+    that:
+      - deployment_http_proxy | length == 0 or deployment_http_proxy is match('^https?://[^/]+')
+      - deployment_no_proxy | length > 0
+
+- name: 校验在线 Embedding 配置
+  ansible.builtin.assert:
+    that:
+      - embedding_provider_key | length > 0
+      - embedding_base_url is match('^https://')
+      - embedding_model | length > 0
+      - embedding_dimensions | int > 0
+      - vault_qwen_api_key | length > 20
+      - vault_qwen_api_key != 'replace-me'
+  when: "'runtime_nodes' in group_names"
+  no_log: true
+
+- name: 校验 Cloudflare Tunnel Token
+  ansible.builtin.assert:
+    that:
+      - vault_cloudflare_tunnel_tokens[inventory_hostname] is defined
+      - vault_cloudflare_tunnel_tokens[inventory_hostname] | length > 20
+      - vault_cloudflare_tunnel_tokens[inventory_hostname] != 'replace-me'
+  when: ingress_provider == 'cloudflare' and 'relay_nodes' not in group_names
+  no_log: true
+
+- name: 校验 FRP 配置
+  ansible.builtin.assert:
+    that:
+      - frp_server_addr | length > 0
+      - vault_frp_auth_token | length > 20
+      - vault_frp_auth_token != 'replace-me'
+  when: ingress_provider == 'frp'
+  no_log: true
+
+- name: 校验 FRP 中转机配置
+  ansible.builtin.assert:
+    that:
+      - frp_caddy_email is match('^[^@\s]+@[^@\s]+\.[^@\s]+$')
+      - frp_vhost_http_port | int > 1023
+      - frp_public_hostnames | length > 0
+    fail_msg: relay_nodes 需要配置可接收 ACME 通知的 frp_caddy_email、非特权 frp_vhost_http_port 和至少一个公网域名。
+  when:
+    - ingress_provider == 'frp'
+    - "'relay_nodes' in group_names"
+
+- name: 校验本地源码快照存在
+  ansible.builtin.stat:
+    path: "{{ source_bundle_path }}"
+  delegate_to: localhost
+  become: false
+  register: source_bundle_stat
+  when:
+    - source_mode == 'local_bundle'
+    - "'relay_nodes' not in group_names"
+
+- name: 校验客户节点显式注入的控制面凭据
+  ansible.builtin.assert:
+    that:
+      - customer_control_client_id | length >= 16
+      - customer_control_client_secret | length >= 32
+      - customer_control_client_id != 'replace-me'
+      - customer_control_client_secret != 'replace-me'
+  when:
+    - "'customer_nodes' in group_names"
+    - >-
+      (customer_control_client_id | default('') | length > 0)
+      or (customer_control_client_secret | default('') | length > 0)
+  no_log: true
+
+- name: 校验客户节点 Benchmark 数据库配置
+  ansible.builtin.assert:
+    that:
+      - benchmark_mssql_host | length > 0
+      - benchmark_mssql_port | int > 0
+      - benchmark_mssql_database | length > 0
+      - benchmark_mssql_username | length > 0
+      - vault_benchmark_mssql_password | length >= 8
+      - vault_benchmark_mssql_password != 'change-me'
+  when:
+    - "'customer_nodes' in group_names"
+    - enable_benchmark | default(false) | bool
+  no_log: true
+
+- name: 校验控制节点 bootstrap 凭据
+  ansible.builtin.assert:
+    that:
+      - vault_tai_control_client_id | length >= 16
+      - vault_tai_control_client_secret | length >= 32
+      - bootstrap_tenant_key | length > 0
+      - bootstrap_tenant_title | length > 0
+      - bootstrap_credential_label | length > 0
+  when: "'control_nodes' in group_names"
+  no_log: true
+
+- name: 拒绝缺失的源码快照
+  ansible.builtin.assert:
+    that:
+      - source_bundle_stat.stat.exists
+    fail_msg: >-
+      缺少 {{ source_bundle_path }}。先在部署仓库执行 tools/create-source-bundle.sh。
+  when:
+    - source_mode == 'local_bundle'
+    - "'relay_nodes' not in group_names"
