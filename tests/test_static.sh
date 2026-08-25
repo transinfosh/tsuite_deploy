@@ -3,16 +3,18 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-bash -n "$repo_root/deploy.sh"
+bash -n "$repo_root/single-node/deploy.sh"
 bash -n "$repo_root/install.sh"
-bash -n "$repo_root/tools/create-source-bundle.sh"
-"$repo_root/deploy.sh" --help | grep -q -- "--dry-run"
+bash -n "$repo_root/multi-node/tools/create-source-bundle.sh"
+"$repo_root/single-node/deploy.sh" --help | grep -q -- "--dry-run"
+grep -q "single-node/deploy.sh" "$repo_root/install.sh"
+grep -q "github.workflow_sha" "$repo_root/.github/workflows/build-images.yml"
 
 if command -v shellcheck >/dev/null 2>&1; then
-	shellcheck "$repo_root/deploy.sh" "$repo_root/install.sh" "$repo_root/tools/create-source-bundle.sh"
+	shellcheck "$repo_root/single-node/deploy.sh" "$repo_root/install.sh" "$repo_root/multi-node/tools/create-source-bundle.sh"
 fi
 
-python3 - "$repo_root/ansible" <<'PY'
+python3 - "$repo_root/multi-node/ansible" "$repo_root/single-node/deploy.sh" "$repo_root/install.sh" <<'PY'
 import pathlib
 import sys
 
@@ -415,8 +417,8 @@ python_container_compose = (
 ).read_text(encoding="utf-8")
 assert "python_container_network_aliases" in python_container_compose
 
-deploy_script = (pathlib.Path(sys.argv[1]).parent / "deploy.sh").read_text(encoding="utf-8")
-install_script = (pathlib.Path(sys.argv[1]).parent / "install.sh").read_text(encoding="utf-8")
+deploy_script = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
+install_script = pathlib.Path(sys.argv[3]).read_text(encoding="utf-8")
 assert 'DEFAULT_DEPLOY_DIR="/opt/tsuite-deploy"' in deploy_script
 assert 'LEGACY_DEPLOY_DIR="/opt/tsuie-deploy"' in deploy_script
 assert "migrate_legacy_deployment" in deploy_script
@@ -445,7 +447,7 @@ trap 'rm -rf -- "$fixture_dir"' EXIT
 
 # 载入函数但不执行脚本入口，验证生成文件可以被 YAML 解析。
 # shellcheck disable=SC1090
-source <(sed '$d' "$repo_root/deploy.sh")
+source <(sed '$d' "$repo_root/single-node/deploy.sh")
 export DEPLOY_DIR="$fixture_dir"
 export IMAGE_REPOSITORY="ghcr.io/transinfosh/project_management"
 export IMAGE_TAG="test"

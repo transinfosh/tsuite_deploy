@@ -176,7 +176,7 @@
     that:
       - source_bundle_stat.stat.exists
     fail_msg: >-
-      缺少 {{ source_bundle_path }}。先在部署仓库执行 tools/create-source-bundle.sh。
+      缺少 {{ source_bundle_path }}。先在部署仓库执行 multi-node/tools/create-source-bundle.sh。
   when:
     - source_mode == 'local_bundle'
     - "'relay_nodes' not in group_names"

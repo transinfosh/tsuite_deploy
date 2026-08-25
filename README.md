@@ -4,6 +4,14 @@ TSuite 平台部署仓库；其中包含面向 Ubuntu 单机服务器的交互�
 `frappe_docker`，安装缺失的软件，生成部署配置，并完成站点创建、应用安装和迁移。
 本仓库不复制或跟踪 `frappe_docker` 的文件，两者可以独立升级。
 
+## 部署模块
+
+- [single-node](single-node/README.md)：单台 Ubuntu 上的交互式 Docker Compose 部署，覆盖新安装、已有站点更新和旧 Compose 接管。
+- [multi-node](multi-node/README.md)：以 Ansible 编排 Control、Runtime、Customer 及可选数据库/入口节点。
+- [shared/contracts](shared/contracts/README.md)：两种部署形态共同遵循的发布、备份与健康检查约定；该目录不参与运行时部署。
+
+根目录的 [install.sh](install.sh) 是单机部署的兼容安装入口，既有的 `curl … | sudo bash` 命令保持有效。
+
 ## 功能
 
 - 检测并通过 Docker 官方 apt 仓库安装 Docker Engine、Buildx 和 Compose 插件；
@@ -160,9 +168,9 @@ sudo tsuite-deploy
 - 自动备份仍保存在站点 volume 内，应另行配置异地备份；
 - 数据库从容器迁移到本机或反向迁移不属于自动升级范围。
 
-## tAI 三节点部署工程
+## 多节点部署工程
 
-`ansible/` 提供内部准生产环境的三应用节点加独立数据库节点部署骨架，与上面的单机交互式工具相互独立：
+`multi-node/ansible/` 提供内部准生产环境的三应用节点加独立数据库节点部署骨架，与上面的单机交互式工具相互独立：
 
 ```text
 customer_nodes  Frappe + frappe_ext/tbi/tai + tbi-engine
@@ -187,7 +195,7 @@ Frappe、Redis、tbi-engine、tai-service 和 Phoenix 以 Docker/Compose 运行�
 再单独执行：
 
 ```bash
-cd ansible
+cd multi-node/ansible
 ansible-playbook -i inventories/internal-demo/hosts.yml playbooks/database.yml
 ```
 
@@ -224,7 +232,7 @@ Docker daemon 代理拉取 GHCR 镜像；部署时只执行 `docker pull`、迁�
 例如首次配置 `ruisu-customer`：
 
 ```bash
-cd ansible
+cd multi-node/ansible
 cp inventories/ruisu-customer/vault.example.yml inventories/ruisu-customer/vault.yml
 ansible-vault encrypt inventories/ruisu-customer/vault.yml
 ansible-vault edit inventories/ruisu-customer/vault.yml
@@ -241,7 +249,7 @@ Docker daemon 的代理 Systemd 文件权限为 `0600`，且部署默认不会�
 
 ### 独立公网 Customer 节点
 
-`ansible/inventories/ruisu-customer/` 用于域名直接解析到服务器的独立 Customer 节点。该 inventory
+`multi-node/ansible/inventories/ruisu-customer/` 用于域名直接解析到服务器的独立 Customer 节点。该 inventory
 固定使用数据库 `tai` 和登录角色 `tai_app`，数据库密码读取
 `vault_customer_db_password`。
 使用本机 Caddy 自动申请 HTTPS 证书，不经过内部 FRP；部署前需放行 TCP 80/443。当前节点无法访问
@@ -252,7 +260,7 @@ Docker daemon 的代理 Systemd 文件权限为 `0600`，且部署默认不会�
 将对应覆盖值留空，不得使用内部演示租户凭据覆盖客户设置：
 
 ```bash
-cd ansible
+cd multi-node/ansible
 ansible-playbook -i inventories/ruisu-customer/hosts.yml playbooks/preflight.yml \
   -e @inventories/internal-demo/vault.yml --vault-password-file ../.vault-pass
 ansible-playbook -i inventories/ruisu-customer/hosts.yml playbooks/customer.yml \
@@ -288,7 +296,7 @@ ansible-playbook -i inventories/ruisu-customer/hosts.yml playbooks/customer.yml 
 镜像构建完成后，把 inventory 的 `deployment_image_tag` 改为同一个 Tag，再执行部署：
 
 ```bash
-cd ansible
+cd multi-node/ansible
 ansible-playbook playbooks/preflight.yml --vault-password-file ../.vault-pass
 ansible-playbook playbooks/deploy-all.yml --vault-password-file ../.vault-pass
 ```
@@ -327,7 +335,7 @@ ansible-playbook playbooks/deploy-all.yml --vault-password-file ../.vault-pass
    执行 `deploy-all.yml` 和 `verify.yml`：
 
    ```bash
-   cd ansible
+   cd multi-node/ansible
    ansible-playbook playbooks/preflight.yml --vault-password-file ../.vault-pass
    ansible-playbook playbooks/deploy-all.yml --vault-password-file ../.vault-pass
    ansible-playbook playbooks/verify.yml --vault-password-file ../.vault-pass
@@ -362,11 +370,11 @@ allow_unlocked_revisions: true
 
 这表示内部演示暂时允许使用 Tag，而不强制锁定镜像 digest。默认的 `registry` 模式直接拉取
 同一个 `deployment_image_tag` 对应的五个 GHCR 镜像；`local_bundle` 仅作为故障恢复路径，启用时
-才需要运行 `tools/create-source-bundle.sh` 生成带 SHA256 的统一源码快照。
+才需要运行 `multi-node/tools/create-source-bundle.sh` 生成带 SHA256 的统一源码快照。
 `production` inventory 会拒绝 `unlocked` 状态。
 
 正式 Release 时无需修改部署角色，但必须将发布工作流摘要中的实际源码 commit 和镜像 digest
-写入 `ansible/versions.yml`，并在目标 inventory 使用 digest 引用。例如对 tai-service：
+写入 `multi-node/ansible/versions.yml`，并在目标 inventory 使用 digest 引用。例如对 tai-service：
 
 ```yaml
 tai_service_release_lock: true
@@ -392,12 +400,12 @@ Tag 和 digest 均已发布前，不应把运行 inventory 改成猜测的版本
 - 准备业务模型 Key、阿里云百炼 Embedding Key 及各类数据库、服务 Token。
 
 所有参与聚合构建的业务应用必须先推送同名发布 Tag。内部演示可按 Tag 部署；正式发布还应在
-`ansible/versions.yml` 中记录构建后的镜像 digest。
+`multi-node/ansible/versions.yml` 中记录构建后的镜像 digest。
 
 ### 初始化
 
 ```bash
-cd ansible
+cd multi-node/ansible
 ansible-galaxy collection install -r requirements.yml
 cp inventories/internal-demo/hosts.example.yml inventories/internal-demo/hosts.yml
 cp inventories/internal-demo/vault.example.yml inventories/internal-demo/vault.yml

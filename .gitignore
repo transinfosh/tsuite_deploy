@@ -11,3 +11,8 @@ ansible/inventories/*/vault.yml
 ansible/inventories/*/control_private.yml
 ansible/artifacts/*
 !ansible/artifacts/.gitkeep
+multi-node/ansible/inventories/*/hosts.yml
+multi-node/ansible/inventories/*/vault.yml
+multi-node/ansible/inventories/*/control_private.yml
+multi-node/ansible/artifacts/*
+!multi-node/ansible/artifacts/.gitkeep

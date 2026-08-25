@@ -2,10 +2,11 @@
 set -Eeuo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "$script_dir/.." && pwd)"
+multi_node_root="$(cd "$script_dir/.." && pwd)"
+repo_root="$(cd "$multi_node_root/.." && pwd)"
 bench_root="${TAI_BENCH_ROOT:-$repo_root/../frappe-bench}"
 frappe_docker_root="${TAI_FRAPPE_DOCKER_ROOT:-$repo_root/../frappe-develop-docker}"
-artifact_dir="$repo_root/ansible/artifacts"
+artifact_dir="$multi_node_root/ansible/artifacts"
 artifact_path="$artifact_dir/tai-source-current.tar.gz"
 checksum_path="$artifact_path.sha256"
 

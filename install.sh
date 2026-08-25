@@ -31,8 +31,12 @@ curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
 	"$REPOSITORY_ARCHIVE_URL/$REF?cache_buster=$cache_buster" \
 	--output "$temporary_archive"
 tar -xzf "$temporary_archive" -C "$temporary_dir"
-temporary_script="$(find "$temporary_dir" -mindepth 2 -maxdepth 2 -type f -name deploy.sh -print -quit)"
-[[ -f "$temporary_script" ]] || die "下载的源码归档不包含 deploy.sh"
+temporary_script="$(find "$temporary_dir" -type f -path '*/single-node/deploy.sh' -print -quit)"
+if [[ ! -f "$temporary_script" ]]; then
+	# 兼容 TSUITE_DEPLOY_REF 指向目录调整前的历史 Tag 或提交。
+	temporary_script="$(find "$temporary_dir" -mindepth 2 -maxdepth 2 -type f -name deploy.sh -print -quit)"
+fi
+[[ -f "$temporary_script" ]] || die "下载的源码归档不包含单机部署脚本"
 
 bash -n "$temporary_script" || die "下载的部署脚本未通过 Bash 语法检查"
 install -D -m 0755 "$temporary_script" "$INSTALL_PATH"

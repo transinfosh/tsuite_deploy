@@ -82,7 +82,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: transinfosh/tsuite_deploy
-          ref: develop
+          ref: ${{ github.workflow_sha }}
           token: ${{ env.SOURCE_TOKEN }}
           path: .ci-deploy
 
