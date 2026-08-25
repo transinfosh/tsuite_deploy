@@ -79,5 +79,5 @@
 - name: 校验 Benchmark Knowledge 发布结果
   ansible.builtin.assert:
     that:
-      - "'postgres_hybrid_pgvector' in benchmark_knowledge_bootstrap.stdout"
-    fail_msg: Benchmark Knowledge 未完成 pgvector 检索验证。
+      - "'documents:postgres_lexical_frozen,sql:postgres_lexical_frozen' in benchmark_knowledge_bootstrap.stdout"
+    fail_msg: Benchmark Knowledge 未完成冻结版本检索验证。

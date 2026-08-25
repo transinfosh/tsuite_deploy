@@ -73,8 +73,8 @@ context = retrieve_runtime_knowledge_context(
     datasource="mssql",
     knowledge_release_id=release["release_id"],
 )
-if "pgvector" not in context.get("strategy", ""):
-    raise RuntimeError("benchmark_knowledge_pgvector_not_ready")
+if context.get("strategy") != "documents:postgres_lexical_frozen,sql:postgres_lexical_frozen":
+    raise RuntimeError("benchmark_knowledge_frozen_retrieval_not_ready")
 
 print(
     "TAI_BENCHMARK_KNOWLEDGE="
