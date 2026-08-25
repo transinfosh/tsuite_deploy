@@ -15,8 +15,8 @@ images:
     digest: sha256:46fe330cf806d016b28b9d8efac8d4438229561bba04e54821057a27f9f4562f
     source_commit: 2fb6737fdc9a89f4fee8bf056858b95cbd8055e9
   tai_service:
-    reference: ghcr.io/transinfosh/tai-service:v0.1.12
-    digest: sha256:6615ed7cb0a4d712dfef3190e60dd64dce724a3b10acaad4c0962944aebc7cf8
+    reference: ghcr.io/transinfosh/tai-service:v0.1.13
+    digest: sha256:57d0b04cc4edd0c44f3085836295d8208c4bfba7c21006e21d2f791cc2dd9d83
     source_commit: 7cce6a4ddfc35104b63bf070408fe12ef4f0020b
   tbi_engine:
     reference: ghcr.io/transinfosh/tbi-engine:v0.1.5
