@@ -9,9 +9,9 @@ deployment_registry: ghcr.io
 deployment_registry_username: "{{ vault_ghcr_username | default('') }}"
 deployment_registry_token: "{{ vault_ghcr_token | default('') }}"
 deployment_image_tag: v0.1.0-internal-demo.2
-customer_image_tag: 0.0.12
-customer_source_commit: 02e75515bcfdb199a9ea2644c03dec8f4c3a630f
-customer_frappe_image: "ghcr.io/transinfosh/tai-customer@sha256:e0a954667dbdec37bbcbf2a60b8e5754def67d793eb0528e26c31ed47c34cb59"
+customer_image_tag: 0.0.13
+customer_source_commit: 978b95c2fa7033411797824d3aa74aa85dc675a0
+customer_frappe_image: "ghcr.io/transinfosh/tai-customer@sha256:5afce0cea39f9377a46e410220ebe2f9f96914be626fca9be82d0c5c20ef7843"
 control_image_tag: 0.0.15
 control_source_commit: 2fb6737fdc9a89f4fee8bf056858b95cbd8055e9
 control_frappe_image: "ghcr.io/transinfosh/tai-control@sha256:46fe330cf806d016b28b9d8efac8d4438229561bba04e54821057a27f9f4562f"
