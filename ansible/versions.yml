@@ -1,29 +1,27 @@
 ---
-# 这是版本接口，不是当前正式 Release。当前内部演示允许可变引用。
-# 正式发布时，每个镜像均须填写 source_commit，并将 reference 与 digest 组合成
-# `reference@digest` 写入目标 inventory；不得仅依赖可变 Tag。
-lock_state: unlocked-internal-demo
-resolved_at: null
+# 2026-08-25 BI/AI 正式发布锁；目标 inventory 必须使用 reference@digest。
+lock_state: locked
+resolved_at: "2026-08-25T01:42:00Z"
 frappe_docker:
   ref: main
   resolved_sha: null
 images:
   customer_frappe:
-    reference: ghcr.io/transinfosh/tai-customer:internal-demo
-    digest: null
-    source_commit: null
+    reference: ghcr.io/transinfosh/tai-customer:0.0.11
+    digest: sha256:3d99924165ea81218c6d15f3afacb967e0b750f259dd5bc90cd265efac5152f4
+    source_commit: 8e9d2058a2ab33f1f981b1e274b5b7f28fbf2096
   control_frappe:
-    reference: ghcr.io/transinfosh/tai-control:internal-demo
-    digest: null
-    source_commit: null
+    reference: ghcr.io/transinfosh/tai-control:0.0.14
+    digest: sha256:1ce3aed3741fbacb7934eecec3537d31e303a633b11314a91e534e9ee24b7ab0
+    source_commit: bedb3f60d6e1e97f5d144003aa526e7f2f3dd3d8
   tai_service:
-    reference: ghcr.io/transinfosh/tai-service:internal-demo
-    digest: null
-    source_commit: null
+    reference: ghcr.io/transinfosh/tai-service:v0.1.9
+    digest: sha256:1ea7dd6dc6bc4b90fdadc119d4d3cc19060a1e3e5da6519028cd4a5ab502e6be
+    source_commit: 62cb8f7b1960d7ef4cbe35ae446f40d41f54bf97
   tbi_engine:
-    reference: ghcr.io/transinfosh/tbi-engine:internal-demo
-    digest: null
-    source_commit: null
+    reference: ghcr.io/transinfosh/tbi-engine:v0.1.5
+    digest: sha256:728ee0f3ec4518030a7e29c08990463a3da6a47408cc86598c99f945772ea3ad
+    source_commit: a99648b2dcc4baa7d25173f59837d776a96dbdd8
   tai_auth:
     reference: ghcr.io/transinfosh/tai-auth:internal-demo
     digest: null
