@@ -48,6 +48,9 @@ SAVED_HTTP_PORT=""
 SAVED_FRAPPE_DOCKER_REPO=""
 SAVED_FRAPPE_DOCKER_REF=""
 SAVED_DOCKER_SUBNET=""
+SAVED_DB_MODE=""
+SAVED_DB_PORT=""
+SAVED_DB_ADMIN_USER=""
 SAVED_ADOPT_SOURCE_COMPOSE=""
 SAVED_ADOPT_SOURCE_VOLUME=""
 SAVED_ADOPT_TARGET_VOLUME=""
@@ -336,6 +339,9 @@ load_saved_deployment_inputs() {
 	SAVED_FRAPPE_DOCKER_REPO="$(read_config_value "$input_file" INPUT_FRAPPE_DOCKER_REPO)"
 	SAVED_FRAPPE_DOCKER_REF="$(read_config_value "$input_file" INPUT_FRAPPE_DOCKER_REF)"
 	SAVED_DOCKER_SUBNET="$(read_config_value "$input_file" INPUT_DOCKER_SUBNET)"
+	SAVED_DB_MODE="$(read_config_value "$input_file" INPUT_DB_MODE)"
+	SAVED_DB_PORT="$(read_config_value "$input_file" INPUT_DB_PORT)"
+	SAVED_DB_ADMIN_USER="$(read_config_value "$input_file" INPUT_DB_ADMIN_USER)"
 	SAVED_ADOPT_SOURCE_COMPOSE="$(read_config_value "$input_file" INPUT_ADOPT_SOURCE_COMPOSE)"
 	SAVED_ADOPT_SOURCE_VOLUME="$(read_config_value "$input_file" INPUT_ADOPT_SOURCE_VOLUME)"
 	SAVED_ADOPT_TARGET_VOLUME="$(read_config_value "$input_file" INPUT_ADOPT_TARGET_VOLUME)"
@@ -472,18 +478,18 @@ collect_deployment_settings() {
 	prompt DEPLOY_DIR "部署目录" "$DEFAULT_DEPLOY_DIR"
 	load_existing_deployment
 	load_saved_deployment_inputs
-	image_default="${PREVIOUS_IMAGE:-${SAVED_IMAGE:-$DEFAULT_IMAGE}}"
-	frappe_docker_ref_default="${PREVIOUS_FRAPPE_DOCKER_COMMIT:-${SAVED_FRAPPE_DOCKER_REF:-$DEFAULT_FRAPPE_DOCKER_REF}}"
+	image_default="${SAVED_IMAGE:-${PREVIOUS_IMAGE:-$DEFAULT_IMAGE}}"
+	frappe_docker_ref_default="${SAVED_FRAPPE_DOCKER_REF:-${PREVIOUS_FRAPPE_DOCKER_COMMIT:-$DEFAULT_FRAPPE_DOCKER_REF}}"
 
 	prompt IMAGE "应用镜像（修改标签即可升级）" "$image_default"
-	prompt APPS_INPUT "需要安装的应用，多个应用用逗号分隔" "${EXISTING_APPS:-${SAVED_APPS:-$DEFAULT_APPS}}"
-	prompt SITE_NAME "Frappe 站点名称（通常使用域名）" "${EXISTING_SITE_NAME:-${SAVED_SITE_NAME:-$DEFAULT_SITE_NAME}}"
+	prompt APPS_INPUT "需要安装的应用，多个应用用逗号分隔" "${SAVED_APPS:-${EXISTING_APPS:-$DEFAULT_APPS}}"
+	prompt SITE_NAME "Frappe 站点名称（通常使用域名）" "${SAVED_SITE_NAME:-${EXISTING_SITE_NAME:-$DEFAULT_SITE_NAME}}"
 	prompt BIND_ADDRESS "HTTP 监听地址；使用 0.0.0.0 可直接对外开放" \
-		"${EXISTING_BIND_ADDRESS:-${SAVED_BIND_ADDRESS:-$DEFAULT_BIND_ADDRESS}}"
-	prompt HTTP_PORT "HTTP 端口" "${EXISTING_HTTP_PORT:-${SAVED_HTTP_PORT:-$DEFAULT_HTTP_PORT}}"
+		"${SAVED_BIND_ADDRESS:-${EXISTING_BIND_ADDRESS:-$DEFAULT_BIND_ADDRESS}}"
+	prompt HTTP_PORT "HTTP 端口" "${SAVED_HTTP_PORT:-${EXISTING_HTTP_PORT:-$DEFAULT_HTTP_PORT}}"
 	prompt FRAPPE_DOCKER_REPO "frappe_docker 仓库地址" "${SAVED_FRAPPE_DOCKER_REPO:-$DEFAULT_FRAPPE_DOCKER_REPO}"
 	prompt FRAPPE_DOCKER_REF "frappe_docker 分支、标签或提交" "$frappe_docker_ref_default"
-	prompt DOCKER_SUBNET "部署专用 Docker 子网" "${EXISTING_DOCKER_SUBNET:-${SAVED_DOCKER_SUBNET:-$DEFAULT_DOCKER_SUBNET}}"
+	prompt DOCKER_SUBNET "部署专用 Docker 子网" "${SAVED_DOCKER_SUBNET:-${EXISTING_DOCKER_SUBNET:-$DEFAULT_DOCKER_SUBNET}}"
 
 	if "$ADOPT_EXISTING_SITE"; then
 		prompt ADOPT_SOURCE_COMPOSE "旧 frappe_docker Compose 文件" "${EXISTING_ADOPT_SOURCE_COMPOSE:-${SAVED_ADOPT_SOURCE_COMPOSE:-}}"
@@ -509,7 +515,7 @@ collect_deployment_settings() {
 		printf '\nPostgreSQL 部署方式：\n'
 		printf '  1) PostgreSQL 容器（推荐，迁移和备份更简单）\n'
 		printf '  2) 安装在 Ubuntu 本机\n'
-		if [[ "${EXISTING_DB_MODE:-$DEFAULT_DB_MODE}" == "local" ]]; then
+		if [[ "${SAVED_DB_MODE:-${EXISTING_DB_MODE:-$DEFAULT_DB_MODE}}" == "local" ]]; then
 			db_choice_default="2"
 		fi
 		read -r -p "请选择 [$db_choice_default]: " db_choice
@@ -520,10 +526,10 @@ collect_deployment_settings() {
 		esac
 	fi
 
-	prompt DB_PORT "PostgreSQL 端口" "${EXISTING_DB_PORT:-$DEFAULT_DB_PORT}"
+	prompt DB_PORT "PostgreSQL 端口" "${SAVED_DB_PORT:-${EXISTING_DB_PORT:-$DEFAULT_DB_PORT}}"
 	if [[ "$DB_MODE" == "local" ]]; then
 		prompt DB_ADMIN_USER "用于创建站点数据库的 PostgreSQL 管理用户" \
-			"${EXISTING_DB_ADMIN_USER:-$DEFAULT_DB_ADMIN_USER}"
+			"${SAVED_DB_ADMIN_USER:-${EXISTING_DB_ADMIN_USER:-$DEFAULT_DB_ADMIN_USER}}"
 	else
 		DB_ADMIN_USER="postgres"
 	fi
@@ -567,6 +573,9 @@ write_deployment_inputs() {
 		printf 'INPUT_FRAPPE_DOCKER_REPO=%s\n' "$FRAPPE_DOCKER_REPO"
 		printf 'INPUT_FRAPPE_DOCKER_REF=%s\n' "$FRAPPE_DOCKER_REF"
 		printf 'INPUT_DOCKER_SUBNET=%s\n' "$DOCKER_SUBNET"
+		printf 'INPUT_DB_MODE=%s\n' "$DB_MODE"
+		printf 'INPUT_DB_PORT=%s\n' "$DB_PORT"
+		printf 'INPUT_DB_ADMIN_USER=%s\n' "$DB_ADMIN_USER"
 		if "$ADOPT_EXISTING_SITE"; then
 			printf 'INPUT_ADOPT_SOURCE_COMPOSE=%s\n' "$ADOPT_SOURCE_COMPOSE"
 			printf 'INPUT_ADOPT_SOURCE_VOLUME=%s\n' "$ADOPT_SOURCE_VOLUME"

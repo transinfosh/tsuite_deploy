@@ -528,3 +528,42 @@ fi
 prompt_database_password RETRIED_PASSWORD "测试数据库密码" "" \
 	<<< $'\npostgres' >/dev/null 2>&1
 [[ "$RETRIED_PASSWORD" == "postgres" ]]
+
+# 已部署状态代表最后一次成功部署；deployment.inputs 代表上次确认但未完成的尝试。
+# 重试时后者必须优先作为交互默认值。
+IMAGE="ghcr.io/transinfosh/srm:0.1.8"
+APP_LIST=(srm)
+SITE_NAME="srm.dtaut.com"
+BIND_ADDRESS="0.0.0.0"
+HTTP_PORT="9080"
+FRAPPE_DOCKER_REPO="https://github.com/example/frappe_docker.git"
+FRAPPE_DOCKER_REF="release-candidate"
+DOCKER_SUBNET="172.31.0.0/24"
+DB_MODE="local"
+DB_PORT="5433"
+DB_ADMIN_USER="frappe_admin"
+write_deployment_inputs
+
+prompt() {
+	local variable_name="$1"
+	local default_value="${3:-}"
+	if [[ "$variable_name" == "DEPLOY_DIR" ]]; then
+		printf -v "$variable_name" '%s' "$fixture_dir"
+	else
+		printf -v "$variable_name" '%s' "$default_value"
+	fi
+}
+confirm() {
+	return 1
+}
+EXISTING_DEPLOYMENT=false
+collect_deployment_settings >/dev/null
+[[ "$IMAGE" == "ghcr.io/transinfosh/srm:0.1.8" ]]
+[[ "${APP_LIST[*]}" == "srm" ]]
+[[ "$SITE_NAME" == "srm.dtaut.com" ]]
+[[ "$BIND_ADDRESS" == "0.0.0.0" ]]
+[[ "$HTTP_PORT" == "9080" ]]
+[[ "$FRAPPE_DOCKER_REPO" == "https://github.com/example/frappe_docker.git" ]]
+[[ "$FRAPPE_DOCKER_REF" == "release-candidate" ]]
+[[ "$DOCKER_SUBNET" == "172.31.0.0/24" ]]
+[[ "$DB_MODE" == "container" ]]
