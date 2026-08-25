@@ -430,6 +430,9 @@ assert "backup_postgres_with_compatible_client" in deploy_script
 assert "SHOW server_version_num;" in deploy_script
 assert '"postgres:$server_major"' in deploy_script
 assert '--volumes-from "$backend_id"' in deploy_script
+assert 'backend_network="$(docker inspect' in deploy_script
+assert '--network "$backend_network"' in deploy_script
+assert '--network "container:$backend_id" --add-host' not in deploy_script
 assert 'TSUITE_DEPLOY_REF:-${TSUIE_DEPLOY_REF:-$DEFAULT_REF}' in install_script
 assert 'DEFAULT_INSTALL_PATH="/usr/local/sbin/tsuite-deploy"' in install_script
 

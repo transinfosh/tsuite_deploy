@@ -804,9 +804,11 @@ backup_running_site() {
 
 backup_postgres_with_compatible_client() {
 	local site_name="$1" db_name="$2" db_user="$3" db_password="$4" db_host="$5" db_port="$6" server_major="$7"
-	local backend_id backend_uid backend_gid site_path backup_dir site_slug timestamp backup_database backup_config backup_files backup_private_files
+	local backend_id backend_network backend_uid backend_gid site_path backup_dir site_slug timestamp backup_database backup_config backup_files backup_private_files
 	backend_id="$(docker compose "${COMPOSE_ARGS[@]}" ps --quiet backend)"
 	[[ -n "$backend_id" ]] || die "无法确定 backend 容器，升级前备份已中止"
+	backend_network="$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$backend_id" | sed -n '1p')"
+	[[ -n "$backend_network" ]] || die "无法确定 backend 所在 Docker 网络，升级前备份已中止"
 	backend_uid="$(docker compose "${COMPOSE_ARGS[@]}" exec -T backend id -u)"
 	backend_gid="$(docker compose "${COMPOSE_ARGS[@]}" exec -T backend id -g)"
 	[[ "$backend_uid" =~ ^[0-9]+$ && "$backend_gid" =~ ^[0-9]+$ ]] || die "无法读取 backend 容器用户，升级前备份已中止"
@@ -820,7 +822,7 @@ backup_postgres_with_compatible_client() {
 	backup_private_files="$backup_dir/$timestamp-$site_slug-private-files.tar"
 	docker compose "${COMPOSE_ARGS[@]}" exec -T -e "BACKUP_DIR=$backup_dir" -e "BACKUP_DATABASE=$backup_database" backend \
 		bash -o pipefail -ceu 'mkdir -p "$BACKUP_DIR"; printf "%s\\n" "-- begin frappe metadata" "-- [frappe]" "-- version = compatible-pg-client" "-- branch = N/A" "-- end frappe metadata" "--" | gzip >"$BACKUP_DATABASE"'
-	if ! docker run --rm --network "container:$backend_id" --add-host "host.docker.internal:host-gateway" \
+	if ! docker run --rm --network "$backend_network" --add-host "host.docker.internal:host-gateway" \
 		--volumes-from "$backend_id" --user "$backend_uid:$backend_gid" -e "PGPASSWORD=$db_password" \
 		-e "PGHOST=$db_host" -e "PGPORT=$db_port" -e "PGUSER=$db_user" -e "PGDATABASE=$db_name" \
 		-e "BACKUP_DATABASE=$backup_database" "postgres:$server_major" \
