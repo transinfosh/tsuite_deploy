@@ -192,10 +192,8 @@ runtime_bootstrap_tasks = yaml.safe_load(
     ).read_text(encoding="utf-8")
 )
 runtime_bootstrap_names = [task["name"] for task in runtime_bootstrap_tasks]
-wait_for_runtime = runtime_bootstrap_names.index("等待 TAI Service 就绪")
-initialize_runtime = runtime_bootstrap_names.index("初始化 TAI Service 运行时模型策略")
-assert wait_for_runtime < initialize_runtime
-runtime_readiness = runtime_bootstrap_tasks[wait_for_runtime]
+assert runtime_bootstrap_names == ["等待 TAI Service 就绪"]
+runtime_readiness = runtime_bootstrap_tasks[0]
 assert runtime_readiness["ansible.builtin.uri"]["url"] == (
     "http://127.0.0.1:{{ tai_service_port }}/readyz"
 )
