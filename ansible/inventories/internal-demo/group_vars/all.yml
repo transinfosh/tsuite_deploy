@@ -18,9 +18,9 @@ control_frappe_image: "ghcr.io/transinfosh/tai-control@sha256:46fe330cf806d016b2
 # Runtime database migrations rely on SECURITY DEFINER ownership. Pin this
 # service independently so a later full deployment cannot roll it back.
 tai_service_release_lock: true
-tai_service_release_version: 0.1.10
-tai_service_source_commit: fc93b50a38a55fce1ed06ccc2bdeed126b73f15d
-tai_service_image: "ghcr.io/transinfosh/tai-service@sha256:8202c232766504aac96b96f379551af1acc4e18f01abe893972740badf5422fd"
+tai_service_release_version: 0.1.11
+tai_service_source_commit: 33e10d43e9d35edc342f1a68ba8ce7dda1912b38
+tai_service_image: "ghcr.io/transinfosh/tai-service@sha256:1a7019397e2bfeb76d8c69d5290d3528c380abcec4a1a3103c8096902d539768"
 tbi_engine_release_version: 0.1.5
 tbi_engine_source_commit: a99648b2dcc4baa7d25173f59837d776a96dbdd8
 tbi_engine_image: "ghcr.io/transinfosh/tbi-engine@sha256:728ee0f3ec4518030a7e29c08990463a3da6a47408cc86598c99f945772ea3ad"
