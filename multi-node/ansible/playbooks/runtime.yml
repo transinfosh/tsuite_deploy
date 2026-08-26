@@ -37,10 +37,7 @@
           TAI_SERVICE_RUNTIME_LOG: /data/tai-service/tai-service-runtime.log
           TAI_RUNTIME_DATABASE_URL: "postgresql://{{ runtime_database_user }}:{{ vault_runtime_db_app_password | urlencode }}@{{ external_database_host if (external_database_enabled | default(false) | bool) else 'tai-runtime-postgres' }}:{{ external_database_port if (external_database_enabled | default(false) | bool) else 5432 }}/{{ runtime_database_name }}"
           WREN_ENGINE_VERSION: "0.13.2"
-          TAI_BUILD_GIT_SHA: >-
-            {{ deployment_image_tag
-               if image_delivery_mode == 'registry'
-               else deployment_snapshot_id }}
+          TAI_BUILD_GIT_SHA: "{{ tai_service_source_commit }}"
           NO_PROXY: "{{ deployment_no_proxy | replace('\n', '') | replace(' ', '') }}"
           no_proxy: "{{ deployment_no_proxy | replace('\n', '') | replace(' ', '') }}"
         python_container_worker_environment:
@@ -48,10 +45,7 @@
           TAI_SERVICE_RUNTIME_LOG: /data/tai-service/tai-service-runtime.log
           TAI_RUNTIME_WORKER_DATABASE_URL: "postgresql://tai_runtime_worker:{{ vault_runtime_db_worker_password | urlencode }}@{{ external_database_host if (external_database_enabled | default(false) | bool) else 'tai-runtime-postgres' }}:{{ external_database_port if (external_database_enabled | default(false) | bool) else 5432 }}/{{ runtime_database_name }}"
           WREN_ENGINE_VERSION: "0.13.2"
-          TAI_BUILD_GIT_SHA: >-
-            {{ deployment_image_tag
-               if image_delivery_mode == 'registry'
-               else deployment_snapshot_id }}
+          TAI_BUILD_GIT_SHA: "{{ tai_service_source_commit }}"
           NO_PROXY: "{{ deployment_no_proxy | replace('\n', '') | replace(' ', '') }}"
           no_proxy: "{{ deployment_no_proxy | replace('\n', '') | replace(' ', '') }}"
         python_container_migrate_command: >-
