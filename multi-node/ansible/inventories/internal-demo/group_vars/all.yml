@@ -9,18 +9,18 @@ deployment_registry: ghcr.io
 deployment_registry_username: "{{ vault_ghcr_username | default('') }}"
 deployment_registry_token: "{{ vault_ghcr_token | default('') }}"
 deployment_image_tag: v0.1.0-internal-demo.2
-customer_image_tag: 0.0.16
-customer_source_commit: 40efb0b7dd469d320488856f7bd273529b4309dd
-customer_frappe_image: "ghcr.io/transinfosh/tai-customer@sha256:23e767d06c09227a4f4718119f5453ceb3ed5c578b53dcb332984289268c170d"
-control_image_tag: 0.0.17
-control_source_commit: ae445857e681617367165ccaa32d54660aa4c573
-control_frappe_image: "ghcr.io/transinfosh/tai-control@sha256:bbcee8df196ff4fb29fb7ffbd846ed0397e31cecb177e554d64cbeb96c4a1787"
+customer_image_tag: 0.0.17
+customer_source_commit: 109130cc1eb3da8f4445434e950194c80c850513
+customer_frappe_image: "ghcr.io/transinfosh/tai-customer@sha256:04160c5c49a368589f62b742117c59983b9fee322a60a8246d67a29d9a25391e"
+control_image_tag: 0.0.18
+control_source_commit: e026daaee3044b77a001f1f84c9ac786fbf7973c
+control_frappe_image: "ghcr.io/transinfosh/tai-control@sha256:38a0de14f09a0f45f935fa9aa002f39fb27d3fde878d6562a3b0cc3ca9843669"
 # Runtime database migrations rely on SECURITY DEFINER ownership. Pin this
 # service independently so a later full deployment cannot roll it back.
 tai_service_release_lock: true
-tai_service_release_version: 0.1.15
-tai_service_source_commit: 936f586168a9cd79de0f291cb3d087a454a3b3ec
-tai_service_image: "ghcr.io/transinfosh/tai-service@sha256:a1a9bc234a93b29df106dacc68372ad432a529adad259248470c648165a6341d"
+tai_service_release_version: 0.1.16
+tai_service_source_commit: 06e1cd162c37a14556af857ae021931bbb1afad4
+tai_service_image: "ghcr.io/transinfosh/tai-service@sha256:602bbda3ee0128839cc547e91f36f9e3b0d377e5145f5b45075eb3bc906944a9"
 tbi_engine_release_version: 0.1.5
 tbi_engine_source_commit: a99648b2dcc4baa7d25173f59837d776a96dbdd8
 tbi_engine_image: "ghcr.io/transinfosh/tbi-engine@sha256:728ee0f3ec4518030a7e29c08990463a3da6a47408cc86598c99f945772ea3ad"

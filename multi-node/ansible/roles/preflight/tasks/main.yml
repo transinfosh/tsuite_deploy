@@ -21,8 +21,10 @@
         ((('customer_nodes' in group_names) | ternary(1, 0)) +
          (('runtime_nodes' in group_names) | ternary(1, 0)) +
          (('control_nodes' in group_names) | ternary(1, 0)) +
-         (('relay_nodes' in group_names) | ternary(1, 0))) == 1
-    fail_msg: 每台服务器必须且只能属于 customer_nodes、runtime_nodes、control_nodes、relay_nodes 之一。
+         (('relay_nodes' in group_names) | ternary(1, 0)) +
+         (('portal_nodes' in group_names) | ternary(1, 0)) +
+         (('database_nodes' in group_names) | ternary(1, 0))) == 1
+    fail_msg: 每台服务器必须且只能属于一个已定义的节点角色。
 
 - name: 校验基础容量
   ansible.builtin.assert:
