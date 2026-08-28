@@ -405,6 +405,36 @@ def enrollment_payload(session: dict[str, Any], settings: Settings) -> dict[str,
 	}
 
 
+def confirm_session_replacement(
+	store: SessionStore,
+	token: str,
+	new_session_id: str,
+	existing_session_id: str,
+) -> str:
+	"""Confirm that a local session residue belongs to a terminal edge session.
+
+	This deliberately does not consume the new enrollment token. The customer can
+	retry safely if local cleanup fails after the confirmation.
+	"""
+	now = int(time.time())
+	with store.locked():
+		new_session = store.load(new_session_id)
+		if not secrets.compare_digest(new_session.get("token_hash", ""), token_hash(token)):
+			raise SupportError("会话码无效")
+		if new_session["status"] != "issued":
+			raise SupportError("会话码已经被使用")
+		if now >= new_session["token_expires_at"]:
+			raise SupportError("会话码已过期")
+		if now >= new_session["expires_at"]:
+			raise SupportError("支持会话已过期")
+		if existing_session_id == new_session_id:
+			raise SupportError("本机登记的会话与新会话相同")
+		existing_session = store.load(existing_session_id)
+		if existing_session["status"] not in {"closed", "expired"}:
+			raise SupportError("本机登记的旧支持会话仍处于活动状态，请先关闭")
+	return existing_session_id
+
+
 def enroll(store: SessionStore, token: str, nonce: str, customer_host_key: str, session_id: str | None = None) -> dict[str, Any]:
 	if not NONCE_RE.fullmatch(nonce):
 		raise SupportError("enrollment nonce 无效")
@@ -492,16 +522,22 @@ def enroll_ssh(store: SessionStore, session_id: str) -> None:
 	if original_command == "bootstrap":
 		sys.stdout.write(store.settings.bootstrap_path.read_text(encoding="utf-8"))
 		return
-	if original_command != "enroll":
-		raise SupportError("仅允许 bootstrap 或 enroll")
+	if original_command not in {"reconcile", "enroll"}:
+		raise SupportError("仅允许 bootstrap、reconcile 或 enroll")
 	request = sys.stdin.buffer.readline(8193)
 	if not request or len(request) > 8192 or sys.stdin.buffer.read(1):
 		raise SupportError("enrollment 请求大小无效")
 	try:
 		body = json.loads(request)
-		payload = enroll(
-			store, body["token"], body["nonce"], body["customer_host_key"], session_id
-		)
+		if original_command == "reconcile":
+			existing_session_id = confirm_session_replacement(
+				store, body["token"], session_id, body["existing_session_id"]
+			)
+			payload = {"replace_existing_session": existing_session_id}
+		else:
+			payload = enroll(
+				store, body["token"], body["nonce"], body["customer_host_key"], session_id
+			)
 	except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
 		raise SupportError("enrollment 请求格式无效") from error
 	print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))

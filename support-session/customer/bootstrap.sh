@@ -12,6 +12,7 @@ ops_user=""
 session_id=""
 installation_complete=false
 installation_started=false
+existing_session_id=""
 
 die() {
 	printf '错误: %s\n' "$*" >&2
@@ -68,7 +69,35 @@ command -v systemctl >/dev/null 2>&1 || die "缺少 systemd"
 command -v useradd >/dev/null 2>&1 || die "缺少 useradd"
 command -v visudo >/dev/null 2>&1 || die "缺少 visudo"
 [[ -r /etc/ssh/ssh_host_ed25519_key.pub ]] || die "客户服务器缺少 Ed25519 SSH Host Key"
-[[ ! -e /etc/tsuite-support-client ]] || die "本机已有支持会话，请先关闭后再创建新会话"
+if [[ -e /etc/tsuite-support-client ]]; then
+	[[ -d /etc/tsuite-support-client && ! -L /etc/tsuite-support-client ]] ||
+		die "本机支持会话残留不是安全目录，请人工检查"
+	[[ -f /etc/tsuite-support-client/session.conf && ! -L /etc/tsuite-support-client/session.conf ]] ||
+		die "本机支持会话残留缺少有效配置，请人工清理"
+	[[ -f /usr/local/sbin/tsuite-support-client && ! -L /usr/local/sbin/tsuite-support-client &&
+		-x /usr/local/sbin/tsuite-support-client ]] ||
+		die "本机支持会话清理程序缺失或无效，请人工清理"
+	existing_session_id="$(python3 - /etc/tsuite-support-client/session.conf \
+		"$BASTION_HOST" "$BASTION_PORT" <<'PY'
+import re
+import sys
+
+expected = {"BASTION_HOST": sys.argv[2], "BASTION_PORT": sys.argv[3]}
+values = {"SESSION_ID": [], "BASTION_HOST": [], "BASTION_PORT": []}
+with open(sys.argv[1], encoding="utf-8") as handle:
+    for line in handle:
+        key, separator, value = line.rstrip("\n").partition("=")
+        if separator and key in values:
+            values[key].append(value)
+if len(values["SESSION_ID"]) != 1 or not re.fullmatch(r"[a-f0-9]{12}", values["SESSION_ID"][0]):
+    raise SystemExit("本机支持会话 SESSION_ID 无效")
+for key, expected_value in expected.items():
+    if values[key] != [expected_value]:
+        raise SystemExit("本机支持会话所属堡垒机与本次会话不一致")
+print(values["SESSION_ID"][0])
+PY
+)" || die "无法读取本机支持会话标识"
+fi
 
 if [[ -z "$TOKEN" ]]; then
 	read -r -s -p "请输入一次性支持会话码: " TOKEN </dev/tty
@@ -82,24 +111,48 @@ nonce="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
 customer_host_key="$(awk 'NF >= 2 {print $1, $2; exit}' /etc/ssh/ssh_host_ed25519_key.pub)"
 printf '%s' "$TOKEN" >"$work_dir/token"
 chmod 0600 "$work_dir/token"
-python3 - "$work_dir/request.json" "$work_dir/token" "$nonce" "$customer_host_key" <<'PY'
+python3 - "$work_dir/request.json" "$work_dir/reconcile.json" "$work_dir/token" \
+	"$nonce" "$customer_host_key" "$existing_session_id" <<'PY'
 import json
 import os
 import sys
 
-path, token_path, nonce, host_key = sys.argv[1:]
+path, reconcile_path, token_path, nonce, host_key, existing_session_id = sys.argv[1:]
 with open(token_path, encoding="utf-8") as token_file:
     token = token_file.read()
 with open(path, "w", encoding="utf-8") as handle:
     json.dump({"token": token, "nonce": nonce, "customer_host_key": host_key}, handle)
 os.chmod(path, 0o600)
+if existing_session_id:
+    with open(reconcile_path, "w", encoding="utf-8") as handle:
+        json.dump({"token": token, "existing_session_id": existing_session_id}, handle)
+    os.chmod(reconcile_path, 0o600)
 PY
+enrollment_ssh=(
+	ssh -F none -T -i "$ENROLLMENT_KEY" -o IdentitiesOnly=yes -o BatchMode=yes
+	-o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$KNOWN_HOSTS"
+	-o ClearAllForwardings=yes -p "$BASTION_PORT" tsuite-enroll@"$BASTION_HOST"
+)
+if [[ -n "$existing_session_id" ]]; then
+	"${enrollment_ssh[@]}" reconcile \
+		<"$work_dir/reconcile.json" >"$work_dir/reconcile-response.json"
+	python3 - "$work_dir/reconcile-response.json" "$existing_session_id" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    response = json.load(handle)
+if response != {"replace_existing_session": sys.argv[2]}:
+    raise SystemExit("旧支持会话核对响应无效")
+PY
+	/usr/local/sbin/tsuite-support-client cleanup
+	[[ ! -e /etc/tsuite-support-client && ! -e /usr/local/sbin/tsuite-support-client ]] ||
+		die "旧支持会话本机清理未完成，请检查 systemd 和临时用户"
+	printf '已确认远端旧会话 %s 终止，并完成本机残留清理。\n' "$existing_session_id"
+fi
 rm -f "$work_dir/token"
 unset TOKEN
-ssh -F none -T -i "$ENROLLMENT_KEY" -o IdentitiesOnly=yes -o BatchMode=yes \
-	-o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$KNOWN_HOSTS" \
-	-o ClearAllForwardings=yes -p "$BASTION_PORT" \
-	tsuite-enroll@"$BASTION_HOST" enroll \
+"${enrollment_ssh[@]}" enroll \
 	<"$work_dir/request.json" >"$work_dir/response.json"
 chmod 0600 "$work_dir/response.json"
 

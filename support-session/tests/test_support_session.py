@@ -63,6 +63,19 @@ class SupportSessionTest(unittest.TestCase):
 		self.store.save(session)
 		return token
 
+	def save_terminal_session(self, session_id, status):
+		now = int(time.time())
+		self.store.save({
+			"id": session_id,
+			"customer": "customer-one",
+			"status": status,
+			"created_at": now - 3600,
+			"token_expires_at": now - 2700,
+			"expires_at": now - 1 if status == "expired" else now + 3600,
+			"remote_port": 22001,
+			"tunnel_user": f"tsuite-tunnel-{session_id[:8]}",
+		})
+
 	def test_enrollment_is_idempotent_only_for_same_nonce_and_host_key(self):
 		token = self.save_issued_session()
 		nonce = "abcdefghijklmnopqrstuvwxyz012345"
@@ -153,6 +166,31 @@ class SupportSessionTest(unittest.TestCase):
 			SUPPORT.enroll(self.store, token, "abcdefghijklmnopqrstuvwxyz012345", PUBLIC_KEY)
 		self.assertEqual(self.store.load("012345abcdef")["status"], "issued")
 
+	def test_terminal_remote_session_can_be_reconciled_without_consuming_new_token(self):
+		token = self.save_issued_session()
+		for old_session_id, status in (("111111111111", "closed"), ("222222222222", "expired")):
+			with self.subTest(status=status):
+				self.save_terminal_session(old_session_id, status)
+				confirmed = SUPPORT.confirm_session_replacement(
+					self.store, token, "012345abcdef", old_session_id
+				)
+				self.assertEqual(confirmed, old_session_id)
+				self.assertEqual(self.store.load("012345abcdef")["status"], "issued")
+
+	def test_active_remote_session_cannot_be_reconciled(self):
+		token = self.save_issued_session()
+		old_session_id = "333333333333"
+		self.save_terminal_session(old_session_id, "closed")
+		old = self.store.load(old_session_id)
+		old["status"] = "enrolled"
+		old["expires_at"] = int(time.time()) + 3600
+		self.store.save(old)
+		with self.assertRaisesRegex(SUPPORT.SupportError, "仍处于活动状态"):
+			SUPPORT.confirm_session_replacement(
+				self.store, token, "012345abcdef", old_session_id
+			)
+		self.assertEqual(self.store.load("012345abcdef")["status"], "issued")
+
 	def test_settings_reject_missing_bootstrap(self):
 		value = self.settings.__dict__ | {"bootstrap_path": pathlib.Path(self.temporary.name) / "missing"}
 		with self.assertRaises(SUPPORT.SupportError):
@@ -166,6 +204,9 @@ class StaticSecurityTest(unittest.TestCase):
 		self.assertIn('printf \'%s\' "$TOKEN" >"$work_dir/token"', bootstrap)
 		self.assertNotIn("Environment=TSUITE_SUPPORT_TOKEN", bootstrap)
 		self.assertIn("OnCalendar=@$expires_at", bootstrap)
+		self.assertIn('"${enrollment_ssh[@]}" reconcile', bootstrap)
+		self.assertIn('/usr/local/sbin/tsuite-support-client cleanup', bootstrap)
+		self.assertNotIn('本机已有支持会话，请先关闭后再创建新会话', bootstrap)
 
 	def test_tunnel_key_and_sshd_are_loopback_only(self):
 		server = (ROOT / "bastion" / "tsuite_support_session.py").read_text(encoding="utf-8")

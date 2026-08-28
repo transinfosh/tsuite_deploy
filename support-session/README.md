@@ -100,6 +100,12 @@ tsuite-support create customer-code --purpose "升级 SRM"
 enrollment 命令，同时固定堡垒机 Host Key。客户执行后在终端提示中输入会话码；
 会话码不会出现在命令历史或进程参数中。
 
+如果客户机仍保留上一次会话的本地配置，bootstrap 会使用本次新会话的一次性码向堡垒机核对旧
+会话状态。只有旧会话在堡垒机上已经是 `closed` 或 `expired` 时，才会自动运行旧客户端的本机
+清理并继续建立新会话；`issued`、`enrolled` 或 `revoking` 会话一律拒绝覆盖。核对动作不会消费
+新会话码，因此本机清理失败后仍可在会话码有效期内重试。旧会话状态不存在或本机配置不完整时，
+系统也不会猜测性删除 root 运维凭据，需先人工核查。
+
 客户完成 enrollment 后，公司端可执行：
 
 ```bash

@@ -205,6 +205,11 @@ gh run watch --repo transinfosh/<repo> <run-id> --exit-status
 页面不持久保存一次性会话码和原始客户命令，这是安全设计，不是数据丢失。需要重发时关闭旧会话并
 创建新会话，不尝试从日志恢复 Token。
 
+客户机可能因断网、强制关闭或旧版清理失败而残留 `/etc/tsuite-support-client`。新版 bootstrap 会
+使用新会话的一次性码向 edge 核对残留配置中的完整旧会话 ID：只有 edge 已将旧会话标记为
+`closed` 或 `expired` 时才自动清理本机残留并继续；任何活动状态、缺失状态或无效本机配置都拒绝
+覆盖。不要为绕过检查而直接删除临时用户、sudoers 或会话目录，应先查清 edge 与客户机两侧状态。
+
 在控制机查看会话状态的受限命令为：
 
 ```bash
