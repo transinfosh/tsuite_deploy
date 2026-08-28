@@ -30,6 +30,8 @@ edge.trinfo.net（Caddy、FRPS、SSH enrollment/tunnel）
 - `/etc/tsuite-support-console/`：支持页面 OAuth 配置；
 - `/etc/tsuite-support-control/`：broker 的固定 Host Key 与受限 SSH 配置；
 - `/var/lib/tsuite-support-operator/`：每会话独立私钥和最小会话索引。
+- `/etc/tsuite-support-control/*_ed25519`：固定桥接私钥，仅
+  `tsuite-support-operator` 可读，权限为 `0600`。
 
 控制面备份应加密保存 `/etc/tsuite-support-control/`，但必须排除
 `/var/lib/tsuite-support-operator/sessions/`；短期会话私钥不能进入长期备份。

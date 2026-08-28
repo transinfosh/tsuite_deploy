@@ -94,14 +94,15 @@ migrate_or_generate_key() {
 	target="$CONFIG_DIR/$name"
 	if [[ ! -f "$target" ]]; then
 		if [[ -f "$legacy" ]]; then
-			install -m 0640 -o root -g "$BROKER_GROUP" "$legacy" "$target"
+			install -m 0600 -o "$BROKER_USER" -g "$BROKER_GROUP" "$legacy" "$target"
 		else
 			rm -f -- "$target.pub"
 			ssh-keygen -q -t ed25519 -N '' -C "$name" -f "$target"
 		fi
 	fi
-	chown root:"$BROKER_GROUP" "$target"
-	chmod 0640 "$target"
+	# OpenSSH 会拒绝任何可被组或其他用户读取的私钥；仅 broker 用户可以持有它。
+	chown "$BROKER_USER":"$BROKER_GROUP" "$target"
+	chmod 0600 "$target"
 	ssh-keygen -y -f "$target" | awk -v comment="$name" '{print $1, $2, comment}' >"$target.pub"
 	chown root:root "$target.pub"
 	chmod 0644 "$target.pub"
