@@ -27,6 +27,7 @@ from typing import Any
 
 CUSTOMER_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
 NONCE_RE = re.compile(r"^[A-Za-z0-9_-]{22,128}$")
+CREATED_BY_RE = re.compile(r"^[A-Za-z0-9_.@:-]{1,128}$")
 PUBLIC_KEY_RE = re.compile(r"^(ssh-ed25519|ecdsa-sha2-nistp256|sk-ssh-ed25519@openssh.com) [A-Za-z0-9+/=]+(?: .*)?$")
 SESSION_TRANSITIONS = {
 	"issued": {"enrolled", "revoking"},
@@ -79,6 +80,20 @@ def key_without_comment(value: str) -> str:
 
 def token_hash(token: str) -> str:
 	return hashlib.sha256(token.encode()).hexdigest()
+
+
+def validate_created_by(value: str) -> str:
+	value = value.strip()
+	if not CREATED_BY_RE.fullmatch(value):
+		raise SupportError("会话创建人格式无效")
+	return value
+
+
+def validate_purpose(value: str) -> str:
+	value = value.strip()
+	if not value or len(value) > 200 or any(ord(character) < 32 for character in value):
+		raise SupportError("支持用途必须为 1-200 个可见字符")
+	return value
 
 
 def chown_to_user(path: pathlib.Path, username: str) -> None:
@@ -297,9 +312,17 @@ def read_public_key(path: str) -> str:
 	return key_without_comment(pathlib.Path(path).read_text(encoding="utf-8"))
 
 
-def create_session(store: SessionStore, customer: str, operator_public_key: str) -> tuple[dict[str, Any], str]:
+def create_session(
+	store: SessionStore,
+	customer: str,
+	operator_public_key: str,
+	created_by: str,
+	purpose: str,
+) -> tuple[dict[str, Any], str]:
 	if not CUSTOMER_RE.fullmatch(customer):
 		raise SupportError("客户标识仅允许小写字母、数字和连字符")
+	created_by = validate_created_by(created_by)
+	purpose = validate_purpose(purpose)
 	settings = store.settings
 	settings.validate()
 	with store.locked():
@@ -325,6 +348,8 @@ def create_session(store: SessionStore, customer: str, operator_public_key: str)
 			session = {
 				"id": session_id,
 				"customer": customer,
+				"created_by": created_by,
+				"purpose": purpose,
 				"status": "issued",
 				"created_at": now,
 				"token_expires_at": now + settings.token_ttl_seconds,
@@ -408,8 +433,21 @@ def enroll(store: SessionStore, token: str, nonce: str, customer_host_key: str, 
 	return enrollment_payload(session, store.settings)
 
 
-def terminate_session(store: SessionStore, session: dict[str, Any], status: str) -> None:
+def terminate_session(
+	store: SessionStore,
+	session: dict[str, Any],
+	status: str,
+	*,
+	closed_by: str,
+	close_mode: str,
+	close_reason: str,
+) -> None:
 	if session["status"] != "revoking":
+		if close_mode not in {"normal", "force", "expiry"}:
+			raise SupportError("会话关闭方式无效")
+		session["closed_by"] = validate_created_by(closed_by)
+		session["close_mode"] = close_mode
+		session["close_reason"] = validate_purpose(close_reason)
 		store.transition(session, "revoking")
 		session.pop("enrollment_private_key", None)
 		session.pop("enrollment_public_key", None)
@@ -441,6 +479,12 @@ def terminate_session(store: SessionStore, session: dict[str, Any], status: str)
 	store.transition(session, status)
 	store.save(session)
 	rewrite_enrollment_authorized_keys(store)
+
+
+def gc_terminal_status(session: dict[str, Any]) -> str:
+	if session.get("status") == "revoking" and session.get("close_mode") in {"normal", "force"}:
+		return "closed"
+	return "expired"
 
 
 def enroll_ssh(store: SessionStore, session_id: str) -> None:
@@ -526,6 +570,8 @@ def build_parser() -> argparse.ArgumentParser:
 	create = subparsers.add_parser("create")
 	create.add_argument("--customer", required=True)
 	create.add_argument("--operator-public-key", required=True)
+	create.add_argument("--created-by", required=True)
+	create.add_argument("--purpose", required=True)
 	create.add_argument("--json", action="store_true")
 	show = subparsers.add_parser("show")
 	show.add_argument("session_id")
@@ -533,6 +579,9 @@ def build_parser() -> argparse.ArgumentParser:
 	subparsers.add_parser("list")
 	close = subparsers.add_parser("close")
 	close.add_argument("session_id")
+	close.add_argument("--closed-by", required=True)
+	close.add_argument("--mode", required=True, choices=("normal", "force"))
+	close.add_argument("--reason", required=True)
 	subparsers.add_parser("gc")
 	enroll_parser = subparsers.add_parser("enroll-ssh")
 	enroll_parser.add_argument("session_id")
@@ -546,7 +595,13 @@ def main() -> int:
 	store = SessionStore(settings)
 	try:
 		if args.command == "create":
-			session, token = create_session(store, args.customer, read_public_key(args.operator_public_key))
+			session, token = create_session(
+				store,
+				args.customer,
+				read_public_key(args.operator_public_key),
+				args.created_by,
+				args.purpose,
+			)
 			result = public_session(session) | {"token": token}
 			result["customer_command"] = customer_command(settings, session)
 			print(json.dumps(result, ensure_ascii=False) if args.json else result["customer_command"])
@@ -563,7 +618,14 @@ def main() -> int:
 			with store.locked():
 				session = store.load(args.session_id)
 				if session["status"] not in {"closed", "expired"}:
-					terminate_session(store, session, "closed")
+					terminate_session(
+						store,
+						session,
+						"closed",
+						closed_by=args.closed_by,
+						close_mode=args.mode,
+						close_reason=args.reason,
+					)
 		elif args.command == "gc":
 			now = int(time.time())
 			gc_errors = []
@@ -576,7 +638,15 @@ def main() -> int:
 					should_retry = session["status"] == "revoking"
 					if session["status"] not in {"closed", "expired"} and (token_expired or session_expired or should_retry):
 						try:
-							terminate_session(store, session, "expired")
+							terminal_status = gc_terminal_status(session)
+							terminate_session(
+								store,
+								session,
+								terminal_status,
+								closed_by="system:expiry",
+								close_mode="expiry",
+								close_reason="支持会话或一次性会话码已到期",
+							)
 						except SupportError as error:
 							gc_errors.append(str(error))
 			if gc_errors:

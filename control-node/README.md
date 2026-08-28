@@ -27,7 +27,12 @@ edge.trinfo.net（Caddy、FRPS、SSH enrollment/tunnel）
 - `/srv/tsuite-deploy/logs/`：部署日志；
 - `/srv/tsuite-deploy/backups/`：控制面配置备份；
 - `/etc/frp/frpc.toml`：FRPC Token，权限 `0640 root:tsuite-deploy`；
-- `/etc/tsuite-support-console/`：支持页面 OAuth 与受限 SSH 桥配置。
+- `/etc/tsuite-support-console/`：支持页面 OAuth 配置；
+- `/etc/tsuite-support-control/`：broker 的固定 Host Key 与受限 SSH 配置；
+- `/var/lib/tsuite-support-operator/`：每会话独立私钥和最小会话索引。
+
+控制面备份应加密保存 `/etc/tsuite-support-control/`，但必须排除
+`/var/lib/tsuite-support-operator/sessions/`；短期会话私钥不能进入长期备份。
 
 ## 基础安装
 
@@ -47,7 +52,26 @@ sudo ./install.sh \
 
 ## GitHub 支持页面
 
-先安装堡垒机受限桥接 key，再将 OAuth Client Secret 写入仅 root 可读文件，执行：
+控制机先创建专用 broker、每会话私钥目录、bridge key、edge 会话代理 key、固定 Host Key 和最小
+sudoers。Host Key 文件必须通过独立渠道核验，不能直接信任 `ssh-keyscan`：
+
+```bash
+sudo ./prepare-support-access.sh \
+  --bastion-host edge.trinfo.net \
+  --bastion-host-key-file /secure/path/edge-known-hosts \
+  --operator-user adam
+```
+
+把命令输出的两个公钥复制到 edge，在 edge 的固定版本仓库中执行：
+
+```bash
+sudo support-session/bastion/install-console-bridge.sh \
+  --bridge-public-key /secure/path/bridge_ed25519.pub \
+  --edge-operator-public-key /secure/path/edge_operator_ed25519.pub \
+  --operator-user tsuite-operator
+```
+
+最后将 OAuth Client Secret 写入仅 root 可读文件，在控制机执行：
 
 ```bash
 sudo ./install-support-console.sh \
@@ -56,9 +80,34 @@ sudo ./install-support-console.sh \
   --github-allowed-org transinfosh
 ```
 
+已有控制机原地升级时，可以省略 `--github-client-secret-file`，安装器会以 root 身份沿用现有 OAuth
+配置中的 Secret；首次安装仍必须显式提供 Secret 文件。
+
+从旧版固定 operator key 升级时，先确认 edge 上没有 `issued`、`enrolled` 或 `revoking` 会话，再按上述
+顺序更新。控制机安装器只有在新 broker 自检通过后，才会删除旧 `/etc/tsuite-support-console/` 中的共享
+私钥副本；未结束的旧会话不能自动迁移到每会话独立 key。
+
 OAuth App 的 Homepage URL 为 `https://edge.trinfo.net/support/`，Callback URL 为
 `https://edge.trinfo.net/support/auth/github/callback`。页面进程不能运行任意 Shell；它只能使用
-固定 Host Key、固定 SSH identity 和 forced command 调用堡垒机的 create/show/list/close 动作。
+限定 sudo 调用 broker 的 create/show/list/close。broker 为每个会话生成独立 operator key，并且只有
+运维账号可以通过 broker 调用 ssh/run/force-close；页面进程不能读取 bridge、edge 或会话私钥。
+
+安装器会同时验证 forced-command bridge 和 edge forced proxy 通道。代理 key 不能取得 edge Shell，也
+不能转发任意回环端口；edge 会根据会话 ID 只代理已接入会话登记的端口。日常命令：
+
+```bash
+sudo -n -u tsuite-support-operator tsuite-support-console-action list
+sudo -n -u tsuite-support-operator tsuite-support-console-action show SESSION_ID
+sudo -n -u tsuite-support-operator tsuite-support-console-action ssh SESSION_ID
+sudo -n -u tsuite-support-operator tsuite-support-console-action run SESSION_ID -- sudo tsuite-deploy
+sudo -n -u tsuite-support-operator tsuite-support-console-action close SESSION_ID --closed-by adam
+sudo -n -u tsuite-support-operator tsuite-support-console-action force-close SESSION_ID \
+  --closed-by adam --reason "客户服务器已离线；工单记录了待到期回收的本地残留"
+```
+
+普通 `close` 会先确认客户侧清理已经调度，再撤销堡垒机，并记录关闭人。只有客户不可达且已记录残留
+风险时，运维人员才能显式使用带 `--reason` 的 `force-close`；Web 页面没有该权限。关闭方式、关闭人和
+原因会保留在 edge 会话历史中。
 
 ## 安全约束
 

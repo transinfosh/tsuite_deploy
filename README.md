@@ -6,6 +6,7 @@ TSuite 平台部署仓库；其中包含面向 Ubuntu 单机服务器的交互�
 
 ## 部署模块
 
+- [AI Agent 部署运行手册](docs/AI_AGENT_DEPLOYMENT_RUNBOOK.md)：面向自动化代理的统一操作入口，覆盖发布、远程接入、客户部署、验证、回退与安全边界。
 - [single-node](single-node/README.md)：单台 Ubuntu 上的交互式 Docker Compose 部署，覆盖新安装、已有站点更新和旧 Compose 接管。
 - [multi-node](multi-node/README.md)：以 Ansible 编排 Control、Runtime、Customer 及可选数据库/入口节点。
 - [control-node](control-node/README.md)：集中保存部署仓库、Ansible inventory、发布制品和支持管理页面，并通过 FRPC 接入公网 edge。

@@ -1,0 +1,44 @@
+name: Support session security checks
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "control-node/**"
+      - "support-session/**"
+      - ".github/workflows/support-session.yml"
+  pull_request:
+    paths:
+      - "control-node/**"
+      - "support-session/**"
+      - ".github/workflows/support-session.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install shell tools
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Check Python and shell syntax
+        run: |
+          python3 -m py_compile support-session/bastion/*.py support-session/console/*.py support-session/operator/tsuite-support
+          bash -n control-node/*.sh control-node/github-egress/*.sh support-session/bastion/*.sh support-session/customer/*.sh support-session/operator/*.sh
+
+      - name: Run support-session tests
+        run: |
+          python3 -m unittest discover -s support-session/tests -p 'test_*.py'
+          support-session/tests/test_ssh_restrictions.sh
+
+      - name: Run ShellCheck
+        run: >-
+          shellcheck control-node/*.sh control-node/github-egress/*.sh
+          support-session/bastion/*.sh support-session/customer/*.sh support-session/operator/*.sh
+          support-session/tests/test_ssh_restrictions.sh

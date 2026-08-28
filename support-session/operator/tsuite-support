@@ -12,6 +12,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Any
 
 
@@ -90,6 +91,8 @@ def customer_ssh_args(config: dict[str, Any], local: dict[str, Any], remote: dic
 		raise CliError("客户 SSH Host Key 格式无效")
 	if remote.get("id") != local.get("id"):
 		raise CliError("堡垒机会话与本地会话不一致")
+	if remote.get("status") != "enrolled" or remote.get("tunnel_reachable") is not True:
+		raise CliError("客户支持会话当前不可达或已经开始撤销")
 	port = int(remote["remote_port"])
 	if not 1024 <= port <= 65535:
 		raise CliError("客户反向 SSH 端口无效")
@@ -123,7 +126,16 @@ def create(args: argparse.Namespace) -> None:
 		key_path = pathlib.Path(temporary_dir) / "operator_ed25519"
 		run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", f"tsuite-support:{args.customer}", "-f", str(key_path)])
 		public_key = key_path.with_suffix(".pub").read_text(encoding="utf-8")
-		created = remote_cli(config, "create", "--customer", args.customer, "--operator-public-key", "-", "--json", input_text=public_key)
+		created = remote_cli(
+			config,
+			"create",
+			"--customer", args.customer,
+			"--operator-public-key", "-",
+			"--created-by", args.created_by,
+			"--purpose", args.purpose,
+			"--json",
+			input_text=public_key,
+		)
 		result = json.loads(created.stdout)
 		session_id = result["id"]
 		if not re.fullmatch(r"[a-f0-9]{12}", session_id) or not isinstance(result.get("token"), str):
@@ -163,25 +175,47 @@ def close(args: argparse.Namespace) -> None:
 	config = read_json(CONFIG_PATH)
 	local = load_session(args.session_id)
 	remote = show_remote(config, args.session_id)
-	cleanup_confirmed = False
-	try:
-		ssh_args, _ = customer_ssh_args(config, local, remote)
-		cleanup = subprocess.run(
-			[*ssh_args, "sudo", "-n", "/usr/local/sbin/tsuite-support-client", "close"],
-			check=False, capture_output=True, text=True,
+	status = str(remote.get("status", ""))
+	if status not in {"issued", "enrolled", "revoking", "closed", "expired"}:
+		raise CliError("堡垒机返回了未知会话状态")
+	cleanup_confirmed = bool(local.get("cleanup_confirmed_at"))
+	forced = False
+	if status not in {"closed", "expired"}:
+		if status in {"enrolled", "revoking"} and not cleanup_confirmed and not args.force:
+			try:
+				ssh_args, _ = customer_ssh_args(config, local, remote)
+				cleanup = subprocess.run(
+					[*ssh_args, "sudo", "-n", "/usr/local/sbin/tsuite-support-client", "close"],
+					check=False, capture_output=True, text=True,
+				)
+				cleanup_confirmed = (
+					cleanup.returncode == 0
+					and f"cleanup-scheduled:{args.session_id}" in cleanup.stdout
+				)
+			except CliError:
+				pass
+			if cleanup_confirmed:
+				local["cleanup_confirmed_at"] = int(time.time())
+				atomic_write(session_path(args.session_id), json.dumps(local, ensure_ascii=False, indent=2) + "\n")
+		if status in {"enrolled", "revoking"} and not cleanup_confirmed and not args.force:
+			raise CliError(
+				"客户侧清理未确认；堡垒机通道和本地密钥均已保留，请重试 close。"
+				"会话到期后客户 timer 和堡垒机 GC 仍会自动回收。"
+			)
+		forced = status in {"enrolled", "revoking"} and not cleanup_confirmed
+		if forced and not args.reason:
+			raise CliError("强制关闭必须使用 --reason 记录客户侧残留风险")
+		mode = "force" if forced else "normal"
+		reason = args.reason if forced else (
+			"客户侧清理已确认" if cleanup_confirmed else "客户尚未接入"
 		)
-		cleanup_confirmed = (
-			cleanup.returncode == 0
-			and f"cleanup-scheduled:{args.session_id}" in cleanup.stdout
+		remote_cli(
+			config,
+			"close", args.session_id,
+			"--closed-by", args.closed_by,
+			"--mode", mode,
+			"--reason", reason,
 		)
-	except CliError:
-		pass
-	if not cleanup_confirmed and not args.force:
-		raise CliError(
-			"客户侧清理未确认；堡垒机通道和本地密钥均已保留，请重试 close。"
-			"会话到期后客户 timer 和堡垒机 GC 仍会自动回收。"
-		)
-	remote_cli(config, "close", args.session_id)
 	for path in (
 		pathlib.Path(local["identity_file"]),
 		SESSIONS_DIR / f"{args.session_id}.known_hosts",
@@ -191,10 +225,14 @@ def close(args: argparse.Namespace) -> None:
 			path.unlink()
 		except FileNotFoundError:
 			pass
-	if cleanup_confirmed:
+	if status in {"closed", "expired"}:
+		print(f"会话已经结束，本地凭据已清理: {args.session_id}")
+	elif forced:
+		print(f"警告：已强制撤销堡垒机通道，客户侧清理未确认: {args.session_id}")
+	elif cleanup_confirmed:
 		print(f"会话已关闭，客户清理已调度: {args.session_id}")
 	else:
-		print(f"警告：已强制撤销堡垒机通道，客户侧清理未确认: {args.session_id}")
+		print(f"会话已关闭（客户尚未接入）: {args.session_id}")
 
 
 def list_sessions() -> None:
@@ -217,6 +255,8 @@ def parser() -> argparse.ArgumentParser:
 	configure_parser.add_argument("--remote-config", default="/etc/tsuite-support/config.json")
 	create_parser = subparsers.add_parser("create")
 	create_parser.add_argument("customer")
+	create_parser.add_argument("--created-by", default=os.environ.get("USER", "operator"))
+	create_parser.add_argument("--purpose", required=True)
 	ssh_parser = subparsers.add_parser("ssh")
 	ssh_parser.add_argument("session_id")
 	run_parser = subparsers.add_parser("run")
@@ -226,7 +266,9 @@ def parser() -> argparse.ArgumentParser:
 	status_parser.add_argument("session_id")
 	close_parser = subparsers.add_parser("close")
 	close_parser.add_argument("session_id")
+	close_parser.add_argument("--closed-by", default=os.environ.get("USER", "operator"))
 	close_parser.add_argument("--force", action="store_true")
+	close_parser.add_argument("--reason")
 	subparsers.add_parser("list")
 	return root
 

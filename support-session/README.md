@@ -63,20 +63,17 @@ Authorization callback URL 为 `https://edge.trinfo.net/support/auth/github/call
 
 生产环境中页面安装在内网部署控制机，堡垒机只安装 forced-command 桥接程序。控制机通过固定
 Host Key 和专用 bridge key 调用堡垒机，bridge key 不能获得普通 Shell。具体安装方式见
-[control-node](../control-node/README.md)。同机试用场景仍可使用：
-
-```bash
-cd support-session/bastion
-sudo ./install-console.sh \
-  --bastion-host edge.example.com \
-  --github-client-id YOUR_GITHUB_CLIENT_ID \
-  --github-allowed-org transinfosh
-```
-
-安装器会隐藏提示 Client Secret，然后页面可从
-`https://edge.example.com/support/` 访问。浏览器中创建会话后，页面仅显示一次客户执行命令和
+[control-node](../control-node/README.md)。堡垒机同机页面已经停用，避免 Web 进程与会话私钥处于
+同一权限边界。浏览器中创建会话后，页面仅显示一次客户执行命令和
 一次性会话码；二者仍应通过独立安全渠道发送给客户。该页面不替代客户发起的出站连接，也不提供
 浏览器终端；客户仍只需执行页面给出的那一条命令。
+
+页面要求填写支持用途，并把已认证 GitHub 登录名作为创建人写入堡垒机会话。控制机专用 broker 会为
+每个会话生成独立 operator key；Web 服务既不能读取私钥，也没有 ssh/run/force-close 权限。页面关闭
+已接入会话时，broker 必须先通过客户通道确认本地清理已调度，之后才撤销堡垒机连接。
+
+升级说明：会话管理器的 `create` 现在强制要求 `--created-by` 与 `--purpose`。更新堡垒机管理器时必须
+同步更新公司端 CLI 或控制机 broker；旧客户端在补齐审计参数前会被明确拒绝，不会创建无审计记录的会话。
 
 ## 安装公司端 CLI
 
@@ -94,7 +91,7 @@ tsuite-support configure --bastion company-bastion
 公司运维创建会话：
 
 ```bash
-tsuite-support create customer-code
+tsuite-support create customer-code --purpose "升级 SRM"
 ```
 
 命令会输出一条 `curl ... | sudo bash` 客户执行语句，并在标准错误中单独显示
@@ -114,12 +111,19 @@ tsuite-support run SESSION_ID -- sudo tsuite-deploy
 完成工作后立即关闭，不必等待自动过期：
 
 ```bash
-tsuite-support close SESSION_ID
+tsuite-support close SESSION_ID --closed-by alice
 ```
 
 关闭命令只有在客户机确认清理任务已经调度后，才撤销堡垒机通道并删除公司本地 key；当前 SSH
 连接随后中断属于预期行为。客户不可达时可用 `--force` 只撤销堡垒机端，但命令会明确警告客户
-残留尚未确认，双方的原生 key 过期时间和 timer/GC 仍会兜底。堡垒机可用
+残留尚未确认，双方的原生 key 过期时间和 timer/GC 仍会兜底。强制关闭必须同时提供原因，例如：
+
+```bash
+tsuite-support close SESSION_ID --force --closed-by alice \
+  --reason "客户服务器已离线；工单记录了待到期回收的本地残留"
+```
+
+堡垒机会持久记录关闭人、正常/强制/到期关闭方式和关闭原因。堡垒机可用
 `sudo tsuite-support-session list` 核对是否仍有活动会话。
 
 ## 首次客户实测顺序

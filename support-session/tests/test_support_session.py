@@ -80,6 +80,25 @@ class SupportSessionTest(unittest.TestCase):
 		self.assertNotIn("tunnel_private_key", public)
 		self.assertNotIn("operator_public_key", public)
 
+	def test_audit_fields_are_validated(self):
+		self.assertEqual(SUPPORT.validate_created_by("alice-ops"), "alice-ops")
+		self.assertEqual(SUPPORT.validate_purpose(" 升级 SRM "), "升级 SRM")
+		with self.assertRaises(SUPPORT.SupportError):
+			SUPPORT.validate_created_by("alice;root")
+		with self.assertRaises(SUPPORT.SupportError):
+			SUPPORT.validate_purpose("\n")
+
+	def test_gc_preserves_the_original_manual_close_outcome(self):
+		self.assertEqual(
+			SUPPORT.gc_terminal_status({"status": "revoking", "close_mode": "normal"}),
+			"closed",
+		)
+		self.assertEqual(
+			SUPPORT.gc_terminal_status({"status": "revoking", "close_mode": "force"}),
+			"closed",
+		)
+		self.assertEqual(SUPPORT.gc_terminal_status({"status": "revoking"}), "expired")
+
 	def test_enrollment_key_is_forced_to_one_session_and_native_expiry(self):
 		self.save_issued_session()
 		session = self.store.load("012345abcdef")
@@ -177,13 +196,28 @@ class StaticSecurityTest(unittest.TestCase):
 
 	def test_console_is_restricted_to_local_caddy_proxy_and_fixed_actions(self):
 		installer = (ROOT / "bastion" / "install-console.sh").read_text(encoding="utf-8")
-		base_installer = (ROOT / "bastion" / "install.sh").read_text(encoding="utf-8")
-		self.assertIn("reverse_proxy 127.0.0.1:8765", installer)
-		self.assertIn("NoNewPrivileges=yes", installer)
-		self.assertIn("ProtectSystem=strict", installer)
-		self.assertIn("tsuite-support-console-action create *", installer)
-		self.assertIn("import $caddy_console_routes", base_installer)
-		self.assertNotIn("NOPASSWD: ALL", installer)
+		control_installer = (ROOT.parent / "control-node" / "install-support-console.sh").read_text(encoding="utf-8")
+		prepare = (ROOT.parent / "control-node" / "prepare-support-access.sh").read_text(encoding="utf-8")
+		self.assertIn("堡垒机同机支持页面已停用", installer)
+		self.assertIn("ProtectSystem=strict", control_installer)
+		self.assertNotIn("SupplementaryGroups=tsuite-deploy", control_installer)
+		self.assertNotIn("CapabilityBoundingSet=", control_installer)
+		self.assertIn('ReadWritePaths=$STATE_DIR $BROKER_STATE_DIR', control_installer)
+		self.assertIn('ExecStartPre=/usr/bin/sudo -n -u $BROKER_USER /usr/local/bin/tsuite-support-console-action list', control_installer)
+		self.assertIn('首次安装必须提供 --github-client-secret-file', control_installer)
+		self.assertIn('existing.get("github_client_secret", "")', control_installer)
+		self.assertIn("TSUITE_SUPPORT_WEB", prepare)
+		self.assertIn("TSUITE_SUPPORT_OPERATOR", prepare)
+		self.assertNotIn("NOPASSWD: ALL", prepare)
+		self.assertIn('local name legacy target', prepare)
+		self.assertIn('target="$CONFIG_DIR/$name"', prepare)
+		self.assertIn('remove_broker_membership "$OPERATOR_USER"', prepare)
+		self.assertIn('remove_broker_membership "$CONSOLE_USER"', prepare)
+		web_alias = next(line for line in prepare.splitlines() if line.startswith("Cmnd_Alias TSUITE_SUPPORT_WEB"))
+		self.assertNotIn("force-close", web_alias)
+		self.assertNotIn(" ssh *", web_alias)
+		self.assertNotIn(" run *", web_alias)
+		self.assertIn('"$CONFIG_DIR/operator_ed25519"', control_installer)
 
 
 if __name__ == "__main__":

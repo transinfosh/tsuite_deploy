@@ -30,6 +30,7 @@ MAX_BODY_BYTES = 8192
 SESSION_TTL_SECONDS = 8 * 60 * 60
 OAUTH_STATE_TTL_SECONDS = 10 * 60
 ACTION = "/usr/local/bin/tsuite-support-console-action"
+BROKER_USER = "tsuite-support-operator"
 ACTIVE_STATUSES = {"issued", "enrolled", "revoking"}
 CLOSABLE_STATUSES = {"issued", "enrolled"}
 STATUS_PRESENTATION = {
@@ -42,6 +43,11 @@ STATUS_PRESENTATION = {
 DETAIL_FIELD_LABELS = {
 	"id": "会话 ID",
 	"customer": "客户环境标识",
+	"created_by": "创建人",
+	"purpose": "支持用途",
+	"closed_by": "关闭人",
+	"close_mode": "关闭方式",
+	"close_reason": "关闭原因",
 	"status": "状态",
 	"created_at": "创建时间",
 	"token_expires_at": "会话码到期时间",
@@ -58,6 +64,7 @@ DETAIL_FIELD_LABELS = {
 DETAIL_FIELD_ORDER = tuple(DETAIL_FIELD_LABELS)
 TIMESTAMP_FIELDS = {key for key in DETAIL_FIELD_LABELS if key.endswith("_at")}
 CHINA_TIMEZONE = timezone(timedelta(hours=8))
+CLOSE_MODE_LABELS = {"normal": "正常关闭", "force": "强制关闭", "expiry": "到期回收"}
 
 
 class ConsoleError(RuntimeError):
@@ -261,7 +268,7 @@ def github_identity(settings: Settings, code: str, verifier: str) -> tuple[str, 
 def manager(*arguments: str) -> str:
 	try:
 		result = subprocess.run(
-			[ACTION, *arguments],
+				["sudo", "-n", "-u", BROKER_USER, ACTION, *arguments],
 			check=False, capture_output=True, text=True, timeout=30,
 		)
 	except (OSError, subprocess.TimeoutExpired) as error:
@@ -297,6 +304,8 @@ def detail_value(field: str, value: Any) -> str:
 		return datetime.fromtimestamp(value, CHINA_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S（UTC+8）")
 	if isinstance(value, bool):
 		return "是" if value else "否"
+	if field == "close_mode":
+		return CLOSE_MODE_LABELS.get(str(value), str(value))
 	return str(value)
 
 
@@ -451,7 +460,7 @@ class Application:
 				if status in CLOSABLE_STATUSES:
 					actions.append(
 						f'<form method="post" action="/support/session/{escaped_id}/close" '
-						'onsubmit="return confirm(\'确定关闭这个支持会话吗？关闭后客户连接将立即中断。\')">'
+						'onsubmit="return confirm(\'确定关闭这个支持会话吗？系统会先调度客户侧清理，再撤销连接。\')">'
 						f'<input type="hidden" name="csrf" value="{html.escape(str(session["csrf"]))}">'
 						'<button type="submit" class="danger compact">关闭会话</button></form>'
 					)
@@ -482,7 +491,7 @@ class Application:
 	def dashboard(self, start_response: Callable[..., Any], session: sqlite3.Row) -> list[bytes]:
 		content = f"""<header><h1>TSuite 支持管理</h1><form method=\"post\" action=\"/support/logout\"><input type=\"hidden\" name=\"csrf\" value=\"{html.escape(str(session['csrf']))}\"><button>退出 {html.escape(str(session['login']))}</button></form></header>
 <section class=\"card\"><h2>新建支持会话</h2><p class=\"muted\">为同一台客户机器使用固定的环境标识，例如 <code>dtaut-srm-prod-01</code>。每次连接都会自动生成新的完整会话 ID。</p>
-<form class=\"create-form\" method=\"post\" action=\"/support/session\"><input type=\"hidden\" name=\"csrf\" value=\"{html.escape(str(session['csrf']))}\"><label>客户环境标识<input name=\"customer\" required autocomplete=\"off\" placeholder=\"例如 dtaut-srm-prod-01\" pattern=\"[a-z0-9][a-z0-9-]{{0,47}}\"></label><button class=\"primary\">创建会话</button></form>
+<form class=\"create-form\" method=\"post\" action=\"/support/session\"><input type=\"hidden\" name=\"csrf\" value=\"{html.escape(str(session['csrf']))}\"><label>客户环境标识<input name=\"customer\" required autocomplete=\"off\" placeholder=\"例如 dtaut-srm-prod-01\" pattern=\"[a-z0-9][a-z0-9-]{{0,47}}\"></label><label>支持用途<input name=\"purpose\" required maxlength=\"200\" autocomplete=\"off\" placeholder=\"例如升级 SRM 至 0.1.10\"></label><button class=\"primary\">创建会话</button></form>
 <div id=\"session-summary\" class=\"summary\" aria-live=\"polite\"><span class=\"loading-label\">正在读取会话数据…</span></div></section>
 <section><h2>客户环境与会话</h2><div id=\"session-groups\" class=\"group-list\" aria-live=\"polite\" aria-busy=\"true\"><div class=\"card loading\"><span class=\"spinner\"></span><span>正在加载会话列表…</span></div></div></section>"""
 		return self.response(start_response, HTTPStatus.OK, page("支持管理", content))
@@ -495,17 +504,22 @@ class Application:
 			if path == "/login" and method == "GET":
 				state, verifier = self.store.new_oauth_state()
 				query = urllib.parse.urlencode({"client_id": self.settings.client_id, "redirect_uri": self.settings.callback_url, "scope": "read:org", "state": state, "code_challenge": code_challenge(verifier), "code_challenge_method": "S256"})
-				return self.redirect(start_response, f"https://github.com/login/oauth/authorize?{query}")
+				oauth_cookie = f"tsuite_support_oauth={state}; Path=/support/auth/github/callback; Secure; HttpOnly; SameSite=Lax; Max-Age={OAUTH_STATE_TTL_SECONDS}"
+				return self.redirect(start_response, f"https://github.com/login/oauth/authorize?{query}", [("Set-Cookie", oauth_cookie)])
 			if path == "/auth/github/callback" and method == "GET":
 				query = urllib.parse.parse_qs(environ.get("QUERY_STRING", ""))
 				state, code = query.get("state", [""])[-1], query.get("code", [""])[-1]
+				browser_state = parse_cookie(environ.get("HTTP_COOKIE"), "tsuite_support_oauth")
+				if not browser_state or not secrets.compare_digest(browser_state, state):
+					raise ConsoleError("GitHub 登录请求与当前浏览器不匹配")
 				verifier = self.store.consume_oauth_state(state)
 				if not verifier or not code:
 					raise ConsoleError("GitHub 登录状态已失效，请重新登录")
 				login, name = github_identity(self.settings, code, verifier)
 				session_id, _ = self.store.new_session(login, name)
 				cookie = f"tsuite_support_session={session_id}; Path=/support; Secure; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL_SECONDS}"
-				return self.redirect(start_response, "/support/", [("Set-Cookie", cookie)])
+				clear_oauth = "tsuite_support_oauth=; Path=/support/auth/github/callback; Secure; HttpOnly; SameSite=Lax; Max-Age=0"
+				return self.redirect(start_response, "/support/", [("Set-Cookie", cookie), ("Set-Cookie", clear_oauth)])
 			session_id, session = self.require_session(environ)
 			if path == "/logout" and method == "POST":
 				form = form_data(environ)
@@ -525,7 +539,14 @@ class Application:
 				if not secrets.compare_digest(form.get("csrf", ""), str(session["csrf"])):
 					raise ConsoleError("请求校验失败，请刷新页面后重试")
 				customer = form.get("customer", "")
-				created = json.loads(manager("create", customer))
+				purpose = form.get("purpose", "").strip()
+				if not purpose or len(purpose) > 200 or any(ord(character) < 32 for character in purpose):
+					raise ConsoleError("请输入 1-200 个可见字符的支持用途")
+				created = json.loads(manager(
+					"create", customer,
+					"--created-by", str(session["login"]),
+					"--purpose", purpose,
+				))
 				if not isinstance(created, dict) or not isinstance(created.get("token"), str):
 					raise ConsoleError("支持会话服务返回无效数据")
 				content = f"""<header><h1>支持会话已创建</h1><a href=\"/support/\">返回会话列表</a></header><section class=\"card\"><p>会话 ID：<code>{html.escape(str(created['id']))}</code>。以下内容仅显示一次，且不会被管理页面持久保存。</p>
@@ -540,7 +561,7 @@ class Application:
 				form = form_data(environ)
 				if not secrets.compare_digest(form.get("csrf", ""), str(session["csrf"])):
 					raise ConsoleError("请求校验失败，请刷新页面后重试")
-				manager("close", target)
+				manager("close", target, "--closed-by", str(session["login"]))
 				return self.redirect(start_response, "/support/")
 			if path.startswith("/session/"):
 				target = path.removeprefix("/session/")
@@ -562,10 +583,10 @@ class Application:
 					destructive_action = ""
 					action_note = "当前状态不支持关闭操作。"
 					if status in CLOSABLE_STATUSES:
-						action_note = "关闭会话会立即撤销客户连接，且无法恢复。"
+						action_note = "关闭会话会先调度客户侧清理，再撤销连接，且无法恢复。"
 						destructive_action = (
 							f'<form method="post" action="/support/session/{escaped_target}/close" '
-							'onsubmit="return confirm(\'确定关闭这个支持会话吗？关闭后客户连接将立即中断。\')">'
+							'onsubmit="return confirm(\'确定关闭这个支持会话吗？系统会先调度客户侧清理，再撤销连接。\')">'
 							f'<input type="hidden" name="csrf" value="{html.escape(str(session["csrf"]))}">'
 							'<button type="submit" class="danger">关闭会话</button></form>'
 						)
