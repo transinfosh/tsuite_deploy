@@ -158,6 +158,12 @@ chown root:"$ENROLL_USER" "$CONFIG_DIR/config.json"
 caddy_snippet="/etc/caddy/tsuite-support.caddy"
 caddy_console_routes="/etc/caddy/tsuite-support-console-routes.caddy"
 caddy_import='import /etc/caddy/tsuite-support.caddy'
+if [[ -f "$caddy_snippet" ]] && grep -Fqx '# Managed by tsuite_deploy/control-node.' "$caddy_snippet"; then
+	grep -Fq 'handle_path /tsuite-support/*' "$caddy_snippet" || \
+		die "control-node Caddy 配置缺少 /tsuite-support/* 路由"
+	caddy validate --config /etc/caddy/Caddyfile >/dev/null || \
+		die "现有 control-node Caddy 配置校验失败"
+else
 caddyfile_backup="$(mktemp /etc/caddy/.Caddyfile.tsuite-support.XXXXXX)"
 cp -a /etc/caddy/Caddyfile "$caddyfile_backup"
 caddy_snippet_backup=""
@@ -179,8 +185,12 @@ $BASTION_HOST {
 }
 EOF
 chmod 0644 "$caddy_snippet"
-if [[ ! -f "$caddy_console_routes" ]]; then
-	install -m 0644 -o root -g root /dev/null "$caddy_console_routes"
+if [[ ! -s "$caddy_console_routes" ]]; then
+	cat >"$caddy_console_routes" <<'EOF'
+@tsuite_support_console_disabled path /__tsuite-support-console-disabled__
+respond @tsuite_support_console_disabled 404
+EOF
+	chmod 0644 "$caddy_console_routes"
 fi
 if ! grep -Fqx "$caddy_import" /etc/caddy/Caddyfile; then
 	printf '\n# Managed by tsuite_deploy/support-session.\n%s\n' "$caddy_import" >>/etc/caddy/Caddyfile
@@ -197,6 +207,7 @@ if ! caddy validate --config /etc/caddy/Caddyfile >/dev/null || ! systemctl relo
 fi
 rm -f "$caddyfile_backup"
 [[ -z "$caddy_snippet_backup" ]] || rm -f "$caddy_snippet_backup"
+fi
 
 cat >/etc/sudoers.d/tsuite-support-session <<EOF
 $OPERATOR_USER ALL=(root) NOPASSWD: /usr/local/sbin/tsuite-support-session --config $CONFIG_DIR/config.json create *

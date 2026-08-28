@@ -182,6 +182,8 @@ class StaticSecurityTest(unittest.TestCase):
 		self.assertIn("tsuite-enroll 公钥登录自检失败", installer)
 		self.assertIn('ENROLL_HOME="/var/empty/tsuite-enroll"', installer)
 		self.assertIn("/tsuite-support/*", installer)
+		self.assertIn("# Managed by tsuite_deploy/control-node.", installer)
+		self.assertIn("control-node Caddy 配置缺少", installer)
 		self.assertIn('Cache-Control "no-store"', installer)
 		self.assertNotIn("NOPASSWD: ALL", installer)
 
