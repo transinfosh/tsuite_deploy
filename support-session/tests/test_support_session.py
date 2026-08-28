@@ -224,6 +224,16 @@ class StaticSecurityTest(unittest.TestCase):
 		self.assertNotIn(" run *", web_alias)
 		self.assertIn('"$CONFIG_DIR/operator_ed25519"', control_installer)
 
+	def test_edge_operator_shell_only_allows_forced_entry_points(self):
+		installer = (ROOT / "bastion" / "install-console-bridge.sh").read_text(encoding="utf-8")
+		shell = (ROOT / "bastion" / "tsuite-support-operator-shell").read_text(encoding="utf-8")
+		self.assertIn("tsuite-support-operator-shell", installer)
+		self.assertIn("usermod --shell", installer)
+		self.assertIn("tsuite-support-console-action --forced", shell)
+		self.assertIn("tsuite-support-console-action --proxy", shell)
+		self.assertNotIn("/bin/bash", shell)
+		self.assertNotIn("/bin/sh -c", shell)
+
 
 if __name__ == "__main__":
 	unittest.main()

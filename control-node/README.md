@@ -93,6 +93,8 @@ OAuth App 的 Homepage URL 为 `https://edge.trinfo.net/support/`，Callback URL
 `https://edge.trinfo.net/support/auth/github/callback`。页面进程不能运行任意 Shell；它只能使用
 限定 sudo 调用 broker 的 create/show/list/close。broker 为每个会话生成独立 operator key，并且只有
 运维账号可以通过 broker 调用 ssh/run/force-close；页面进程不能读取 bridge、edge 或会话私钥。
+edge 上的 `tsuite-operator` 使用专用受限 Shell：只允许 sshd 已绑定的 bridge/proxy forced-command，
+不能进入交互式 Shell，也不能执行任意命令。
 
 安装器会同时验证 forced-command bridge 和 edge forced proxy 通道。代理 key 不能取得 edge Shell，也
 不能转发任意回环端口；edge 会根据会话 ID 只代理已接入会话登记的端口。日常命令：

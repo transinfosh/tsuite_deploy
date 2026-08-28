@@ -1,0 +1,17 @@
+#!/bin/sh
+# Restricted login shell for the edge operator account. sshd forced commands are
+# still launched through the account shell, so /usr/sbin/nologin cannot be used.
+
+if [ "$#" -eq 2 ] && [ "$1" = "-c" ]; then
+	case "$2" in
+		"/usr/local/sbin/tsuite-support-console-action --forced")
+			exec /usr/local/sbin/tsuite-support-console-action --forced
+			;;
+		"/usr/local/sbin/tsuite-support-console-action --proxy")
+			exec /usr/local/sbin/tsuite-support-console-action --proxy
+			;;
+	esac
+fi
+
+printf '%s\n' 'This account only accepts TSuite forced commands.' >&2
+exit 1

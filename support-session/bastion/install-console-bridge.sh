@@ -33,6 +33,12 @@ operator_group="$(id -gn "$OPERATOR_USER")"
 install -d -m 0750 -o root -g "$operator_group" /etc/tsuite-support-console
 install -m 0755 -o root -g root "$SCRIPT_DIR/tsuite_support_console_action.py" \
 	/usr/local/sbin/tsuite-support-console-action
+install -m 0755 -o root -g root "$SCRIPT_DIR/tsuite-support-operator-shell" \
+	/usr/local/sbin/tsuite-support-operator-shell
+# sshd launches authorized_keys forced commands through the account shell.
+# A nologin shell blocks the forced command, while this wrapper permits only the
+# two installed TSuite entry points and rejects interactive/arbitrary commands.
+usermod --shell /usr/local/sbin/tsuite-support-operator-shell "$OPERATOR_USER"
 
 sudoers_file="/etc/sudoers.d/tsuite-support-session"
 [[ -f "$sudoers_file" ]] || die "缺少 support-session 基础 sudoers 配置"
