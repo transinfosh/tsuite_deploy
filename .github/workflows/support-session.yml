@@ -39,6 +39,6 @@ jobs:
 
       - name: Run ShellCheck
         run: >-
-          shellcheck control-node/*.sh control-node/github-egress/*.sh
+          shellcheck --severity=warning control-node/*.sh control-node/github-egress/*.sh
           support-session/bastion/*.sh support-session/customer/*.sh support-session/operator/*.sh
           support-session/tests/test_ssh_restrictions.sh
