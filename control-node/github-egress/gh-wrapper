@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+set -eu
+export HTTPS_PROXY="http://127.0.0.1:18080"
+export HTTP_PROXY="http://127.0.0.1:18080"
+exec /usr/bin/gh "$@"

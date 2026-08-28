@@ -8,6 +8,8 @@ TSuite 平台部署仓库；其中包含面向 Ubuntu 单机服务器的交互�
 
 - [single-node](single-node/README.md)：单台 Ubuntu 上的交互式 Docker Compose 部署，覆盖新安装、已有站点更新和旧 Compose 接管。
 - [multi-node](multi-node/README.md)：以 Ansible 编排 Control、Runtime、Customer 及可选数据库/入口节点。
+- [control-node](control-node/README.md)：集中保存部署仓库、Ansible inventory、发布制品和支持管理页面，并通过 FRPC 接入公网 edge。
+- [support-session](support-session/README.md)：通过堡垒机建立自动过期的临时 SSH 反向隧道，让客户一条命令授权远程部署支持。
 - [shared/contracts](shared/contracts/README.md)：两种部署形态共同遵循的发布、备份与健康检查约定；该目录不参与运行时部署。
 
 根目录的 [install.sh](install.sh) 是单机部署的兼容安装入口，既有的 `curl … | sudo bash` 命令保持有效。

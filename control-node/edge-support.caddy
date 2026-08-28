@@ -1,0 +1,29 @@
+# Managed by tsuite_deploy/control-node.
+edge.trinfo.net {
+	handle_path /tsuite-support/* {
+		root * /var/lib/tsuite-support-downloads
+		header Cache-Control "no-store"
+		header X-Content-Type-Options "nosniff"
+		file_server
+	}
+
+	handle /support/* {
+		reverse_proxy 127.0.0.1:8080 {
+			header_up Host {host}
+		}
+	}
+
+	handle /deploy-files/* {
+		reverse_proxy 127.0.0.1:8080 {
+			header_up Host {host}
+		}
+	}
+
+	handle /_tsuite-control-health {
+		reverse_proxy 127.0.0.1:8080 {
+			header_up Host {host}
+		}
+	}
+
+	respond 404
+}

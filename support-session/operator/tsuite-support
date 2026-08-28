@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+"""Company-side CLI for temporary TSuite support sessions."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import pathlib
+import re
+import shlex
+import subprocess
+import sys
+import tempfile
+from typing import Any
+
+
+CONFIG_HOME = pathlib.Path(os.environ.get("XDG_CONFIG_HOME", pathlib.Path.home() / ".config"))
+ROOT = CONFIG_HOME / "tsuite-support"
+CONFIG_PATH = ROOT / "config.json"
+SESSIONS_DIR = ROOT / "sessions"
+
+
+class CliError(RuntimeError):
+	pass
+
+
+def atomic_write(path: pathlib.Path, content: str, mode: int = 0o600) -> None:
+	path.parent.mkdir(parents=True, exist_ok=True)
+	fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+	try:
+		with os.fdopen(fd, "w", encoding="utf-8") as handle:
+			handle.write(content)
+			handle.flush()
+			os.fsync(handle.fileno())
+		os.chmod(temporary_name, mode)
+		os.replace(temporary_name, path)
+	finally:
+		try:
+			os.unlink(temporary_name)
+		except FileNotFoundError:
+			pass
+
+
+def read_json(path: pathlib.Path) -> dict[str, Any]:
+	try:
+		with path.open(encoding="utf-8") as handle:
+			value = json.load(handle)
+	except FileNotFoundError as error:
+		raise CliError(f"配置不存在: {path}") from error
+	if not isinstance(value, dict):
+		raise CliError(f"配置格式无效: {path}")
+	return value
+
+
+def run(args: list[str], *, input_text: str | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
+	return subprocess.run(args, input=input_text, text=True, check=check, capture_output=True)
+
+
+def ssh_admin(config: dict[str, Any], remote_args: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
+	return run(
+		["ssh", "-o", "BatchMode=yes", config["bastion"], shlex.join(remote_args)],
+		input_text=input_text,
+	)
+
+
+def remote_cli(config: dict[str, Any], *args: str, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
+	return ssh_admin(
+		config,
+		["sudo", "-n", "/usr/local/sbin/tsuite-support-session", "--config", config["remote_config"], *args],
+		input_text=input_text,
+	)
+
+
+def session_path(session_id: str) -> pathlib.Path:
+	if not re.fullmatch(r"[a-f0-9]{12}", session_id):
+		raise CliError("会话 ID 无效")
+	return SESSIONS_DIR / f"{session_id}.json"
+
+
+def load_session(session_id: str) -> dict[str, Any]:
+	return read_json(session_path(session_id))
+
+
+def customer_ssh_args(config: dict[str, Any], local: dict[str, Any], remote: dict[str, Any]) -> tuple[list[str], pathlib.Path]:
+	host_key = remote.get("customer_host_key")
+	if not host_key:
+		raise CliError("客户尚未领取会话，缺少固定的客户 SSH Host Key")
+	if not re.fullmatch(r"(ssh-ed25519|ecdsa-sha2-nistp256) [A-Za-z0-9+/=]+", host_key):
+		raise CliError("客户 SSH Host Key 格式无效")
+	if remote.get("id") != local.get("id"):
+		raise CliError("堡垒机会话与本地会话不一致")
+	port = int(remote["remote_port"])
+	if not 1024 <= port <= 65535:
+		raise CliError("客户反向 SSH 端口无效")
+	known_hosts = SESSIONS_DIR / f"{remote['id']}.known_hosts"
+	atomic_write(known_hosts, f"[127.0.0.1]:{port} {host_key}\n")
+	args = [
+		"ssh", "-J", config["bastion"], "-i", local["identity_file"],
+		"-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
+		"-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={known_hosts}",
+		"-p", str(port), f"tsuite-ops-{remote['id'][:8]}@127.0.0.1",
+	]
+	return args, known_hosts
+
+
+def configure(args: argparse.Namespace) -> None:
+	if args.bastion.startswith("-") or not re.fullmatch(r"[A-Za-z0-9_.@:-]+", args.bastion):
+		raise CliError("堡垒机必须使用安全的 SSH Host alias 或 user@host")
+	if not re.fullmatch(r"/[A-Za-z0-9_./-]+", args.remote_config) or ".." in pathlib.PurePosixPath(args.remote_config).parts:
+		raise CliError("远端配置必须是安全的绝对路径")
+	value = {"bastion": args.bastion, "remote_config": args.remote_config}
+	atomic_write(CONFIG_PATH, json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+
+
+def create(args: argparse.Namespace) -> None:
+	config = read_json(CONFIG_PATH)
+	if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,47}", args.customer):
+		raise CliError("客户标识无效")
+	ROOT.mkdir(parents=True, exist_ok=True)
+	SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+	with tempfile.TemporaryDirectory(prefix="tsuite-support-operator.") as temporary_dir:
+		key_path = pathlib.Path(temporary_dir) / "operator_ed25519"
+		run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", f"tsuite-support:{args.customer}", "-f", str(key_path)])
+		public_key = key_path.with_suffix(".pub").read_text(encoding="utf-8")
+		created = remote_cli(config, "create", "--customer", args.customer, "--operator-public-key", "-", "--json", input_text=public_key)
+		result = json.loads(created.stdout)
+		session_id = result["id"]
+		if not re.fullmatch(r"[a-f0-9]{12}", session_id) or not isinstance(result.get("token"), str):
+			raise CliError("堡垒机返回了无效的会话数据")
+		identity_path = SESSIONS_DIR / f"{session_id}.ed25519"
+		atomic_write(identity_path, key_path.read_text(encoding="utf-8"))
+		local = {"id": session_id, "customer": args.customer, "identity_file": str(identity_path)}
+		atomic_write(session_path(session_id), json.dumps(local, ensure_ascii=False, indent=2) + "\n")
+	print(result["customer_command"])
+	print(f"一次性会话码: {result['token']}", file=sys.stderr)
+	print(f"会话 ID: {session_id}", file=sys.stderr)
+
+
+def show_remote(config: dict[str, Any], session_id: str) -> dict[str, Any]:
+	result = remote_cli(config, "show", session_id, "--json")
+	value = json.loads(result.stdout)
+	if not isinstance(value, dict) or value.get("id") != session_id:
+		raise CliError("堡垒机返回了无效的会话状态")
+	return value
+
+
+def connect(args: argparse.Namespace, command: list[str] | None = None) -> int:
+	config = read_json(CONFIG_PATH)
+	local = load_session(args.session_id)
+	remote = show_remote(config, args.session_id)
+	ssh_args, _ = customer_ssh_args(config, local, remote)
+	if command:
+		if command[0] == "--":
+			command = command[1:]
+		if not command:
+			raise CliError("缺少远端命令")
+		ssh_args.append(shlex.join(command))
+	return subprocess.call(ssh_args)
+
+
+def close(args: argparse.Namespace) -> None:
+	config = read_json(CONFIG_PATH)
+	local = load_session(args.session_id)
+	remote = show_remote(config, args.session_id)
+	cleanup_confirmed = False
+	try:
+		ssh_args, _ = customer_ssh_args(config, local, remote)
+		cleanup = subprocess.run(
+			[*ssh_args, "sudo", "-n", "/usr/local/sbin/tsuite-support-client", "close"],
+			check=False, capture_output=True, text=True,
+		)
+		cleanup_confirmed = (
+			cleanup.returncode == 0
+			and f"cleanup-scheduled:{args.session_id}" in cleanup.stdout
+		)
+	except CliError:
+		pass
+	if not cleanup_confirmed and not args.force:
+		raise CliError(
+			"客户侧清理未确认；堡垒机通道和本地密钥均已保留，请重试 close。"
+			"会话到期后客户 timer 和堡垒机 GC 仍会自动回收。"
+		)
+	remote_cli(config, "close", args.session_id)
+	for path in (
+		pathlib.Path(local["identity_file"]),
+		SESSIONS_DIR / f"{args.session_id}.known_hosts",
+		session_path(args.session_id),
+	):
+		try:
+			path.unlink()
+		except FileNotFoundError:
+			pass
+	if cleanup_confirmed:
+		print(f"会话已关闭，客户清理已调度: {args.session_id}")
+	else:
+		print(f"警告：已强制撤销堡垒机通道，客户侧清理未确认: {args.session_id}")
+
+
+def list_sessions() -> None:
+	config = read_json(CONFIG_PATH)
+	result = remote_cli(config, "list")
+	print(result.stdout, end="")
+
+
+def status(args: argparse.Namespace) -> None:
+	config = read_json(CONFIG_PATH)
+	remote = show_remote(config, args.session_id)
+	print(json.dumps(remote, ensure_ascii=False, indent=2))
+
+
+def parser() -> argparse.ArgumentParser:
+	root = argparse.ArgumentParser(description=__doc__)
+	subparsers = root.add_subparsers(dest="command", required=True)
+	configure_parser = subparsers.add_parser("configure")
+	configure_parser.add_argument("--bastion", required=True)
+	configure_parser.add_argument("--remote-config", default="/etc/tsuite-support/config.json")
+	create_parser = subparsers.add_parser("create")
+	create_parser.add_argument("customer")
+	ssh_parser = subparsers.add_parser("ssh")
+	ssh_parser.add_argument("session_id")
+	run_parser = subparsers.add_parser("run")
+	run_parser.add_argument("session_id")
+	run_parser.add_argument("remote_command", nargs=argparse.REMAINDER)
+	status_parser = subparsers.add_parser("status")
+	status_parser.add_argument("session_id")
+	close_parser = subparsers.add_parser("close")
+	close_parser.add_argument("session_id")
+	close_parser.add_argument("--force", action="store_true")
+	subparsers.add_parser("list")
+	return root
+
+
+def main() -> int:
+	args = parser().parse_args()
+	try:
+		if args.command == "configure":
+			configure(args)
+		elif args.command == "create":
+			create(args)
+		elif args.command == "ssh":
+			return connect(args)
+		elif args.command == "run":
+			if not args.remote_command:
+				raise CliError("缺少远端命令")
+			return connect(args, args.remote_command)
+		elif args.command == "status":
+			status(args)
+		elif args.command == "close":
+			close(args)
+		elif args.command == "list":
+			list_sessions()
+		return 0
+	except (CliError, subprocess.CalledProcessError, json.JSONDecodeError) as error:
+		if isinstance(error, subprocess.CalledProcessError) and error.stderr:
+			print(error.stderr, file=sys.stderr, end="")
+		print(f"错误: {error}", file=sys.stderr)
+		return 1
+
+
+if __name__ == "__main__":
+	raise SystemExit(main())

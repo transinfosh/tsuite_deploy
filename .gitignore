@@ -2,6 +2,8 @@
 .env.dry-run
 .vault-pass
 .venv-ansible/
+__pycache__/
+*.py[cod]
 compose.generated.yaml
 compose.proxy.yaml
 deployment.state

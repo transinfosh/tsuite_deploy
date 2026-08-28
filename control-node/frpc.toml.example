@@ -1,0 +1,14 @@
+serverAddr = "edge.trinfo.net"
+serverPort = 7000
+
+auth.method = "token"
+auth.token = "REPLACE_FROM_ROOT_ONLY_SECRET_FILE"
+
+transport.tls.enable = true
+
+[[proxies]]
+name = "tsuite-deploy-control-web"
+type = "http"
+localIP = "127.0.0.1"
+localPort = 8081
+customDomains = ["edge.trinfo.net"]
