@@ -32,8 +32,6 @@
              else control_frappe_image }}
         frappe_pull_policy: "{{ 'never' if image_delivery_mode == 'local_bundle' else 'always' }}"
         frappe_apps:
-          - tbi
-          - tai
           - tai_control
         frappe_db_password: "{{ vault_control_db_password }}"
         frappe_db_root_password: "{{ vault_runtime_db_admin_password if (external_database_enabled | default(false) | bool) else vault_control_db_password }}"
