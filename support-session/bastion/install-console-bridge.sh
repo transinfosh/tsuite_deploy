@@ -36,15 +36,9 @@ install -m 0755 -o root -g root "$SCRIPT_DIR/tsuite_support_console_action.py" \
 install -m 0644 -o root -g root "$OPERATOR_PUBLIC_KEY" \
 	/etc/tsuite-support-console/operator_ed25519.pub
 
-sudoers_file="/etc/sudoers.d/tsuite-support-console-bridge"
-cat >"$sudoers_file" <<EOF
-$OPERATOR_USER ALL=(root) NOPASSWD: /usr/local/sbin/tsuite-support-session --config /etc/tsuite-support/config.json create *
-$OPERATOR_USER ALL=(root) NOPASSWD: /usr/local/sbin/tsuite-support-session --config /etc/tsuite-support/config.json show *
-$OPERATOR_USER ALL=(root) NOPASSWD: /usr/local/sbin/tsuite-support-session --config /etc/tsuite-support/config.json list
-$OPERATOR_USER ALL=(root) NOPASSWD: /usr/local/sbin/tsuite-support-session --config /etc/tsuite-support/config.json close *
-EOF
-chmod 0440 "$sudoers_file"
-visudo -cf "$sudoers_file" >/dev/null || die "控制台桥接 sudoers 校验失败"
+sudoers_file="/etc/sudoers.d/tsuite-support-session"
+[[ -f "$sudoers_file" ]] || die "缺少 support-session 基础 sudoers 配置"
+visudo -cf "$sudoers_file" >/dev/null || die "support-session 基础 sudoers 配置无效"
 
 operator_home="$(getent passwd "$OPERATOR_USER" | cut -d: -f6)"
 [[ -n "$operator_home" && "$operator_home" == /* ]] || die "无法读取运维用户 Home"

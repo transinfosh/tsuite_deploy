@@ -175,6 +175,7 @@ class SupportConsoleTest(unittest.TestCase):
 
 	def test_manager_bridge_is_fixed_and_not_shell_based(self):
 		action = (ROOT / "bastion" / "tsuite_support_console_action.py").read_text(encoding="utf-8")
+		bridge = (ROOT / "bastion" / "install-console-bridge.sh").read_text(encoding="utf-8")
 		remote = (ROOT / "console" / "tsuite_support_remote_action.py").read_text(encoding="utf-8")
 		self.assertIn('"--operator-public-key", str(key)', action)
 		self.assertIn("CUSTOMER_RE", action)
@@ -185,6 +186,8 @@ class SupportConsoleTest(unittest.TestCase):
 		self.assertIn('"ControlMaster=auto"', remote)
 		self.assertIn('"ControlPersist=3600"', remote)
 		self.assertIn('CONTROL_PATH = "/var/lib/tsuite-support-console/ssh-control-%C"', remote)
+		self.assertIn('sudoers_file="/etc/sudoers.d/tsuite-support-session"', bridge)
+		self.assertNotIn('sudoers_file="/etc/sudoers.d/tsuite-support-console-bridge"', bridge)
 		self.assertNotIn("shell=True", remote)
 
 	def test_remote_action_rejects_untrusted_identifiers_before_ssh(self):
