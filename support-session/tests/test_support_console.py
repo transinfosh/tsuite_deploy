@@ -430,6 +430,7 @@ class SupportOperatorBrokerTest(unittest.TestCase):
 			"identity_file": str(REMOTE.identity_path(self.settings, session_id)),
 		}))
 		events = []
+		cleanup_environment = {}
 		remote = {
 			"id": session_id,
 			"status": "enrolled",
@@ -438,8 +439,9 @@ class SupportOperatorBrokerTest(unittest.TestCase):
 			"customer_host_key": "ssh-ed25519 " + "A" * 44,
 		}
 
-		def cleanup_run(arguments, input_text=None):
+		def cleanup_run(arguments, input_text=None, env=None):
 			events.append("customer-cleanup")
+			cleanup_environment.update(env or {})
 			return subprocess.CompletedProcess(arguments, 0, f"cleanup-scheduled:{session_id}\n", "")
 
 		def close_remote(settings, *arguments, input_text=None):
@@ -452,6 +454,7 @@ class SupportOperatorBrokerTest(unittest.TestCase):
 			mock.patch.object(REMOTE, "remote_action", side_effect=close_remote):
 			REMOTE.close_session(self.settings, session_id, "alice")
 		self.assertEqual(events, ["customer-cleanup", "bastion-close"])
+		self.assertEqual(cleanup_environment.get("SHELL"), "/bin/sh")
 		self.assertFalse(REMOTE.identity_path(self.settings, session_id).exists())
 		self.assertFalse(REMOTE.session_state_path(self.settings, session_id).exists())
 

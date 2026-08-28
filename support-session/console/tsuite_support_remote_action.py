@@ -120,8 +120,23 @@ def validate_purpose(value: str) -> str:
 	return value
 
 
-def run(args: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
-	return subprocess.run(args, input=input_text, text=True, check=False, capture_output=True)
+def run(
+	args: list[str],
+	*,
+	input_text: str | None = None,
+	env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+	return subprocess.run(
+		args, input=input_text, text=True, check=False, capture_output=True, env=env
+	)
+
+
+def customer_proxy_environment() -> dict[str, str]:
+	# ProxyCommand is executed through $SHELL. Keep the broker account nologin,
+	# and override the shell only for the strictly generated customer SSH child.
+	environment = os.environ.copy()
+	environment["SHELL"] = "/bin/sh"
+	return environment
 
 
 def ensure_success(result: subprocess.CompletedProcess[str], message: str) -> str:
@@ -318,12 +333,7 @@ def connect_customer(settings: Settings, session_id: str, command: list[str] | N
 		arguments = customer_ssh_args(settings, session_id, remote, known_hosts)
 		if command:
 			arguments.append(shlex.join(command))
-		# OpenSSH executes ProxyCommand through $SHELL. The broker intentionally has
-		# a nologin account shell, so override it only for this strictly generated
-		# child command without making the broker itself login-capable.
-		environment = os.environ.copy()
-		environment["SHELL"] = "/bin/sh"
-		return subprocess.call(arguments, env=environment)
+		return subprocess.call(arguments, env=customer_proxy_environment())
 
 
 def close_session(
@@ -345,7 +355,10 @@ def close_session(
 			with tempfile.TemporaryDirectory(prefix="tsuite-support-known-hosts.") as temporary_dir:
 				known_hosts = pathlib.Path(temporary_dir) / "known_hosts"
 				arguments = customer_ssh_args(settings, session_id, remote, known_hosts)
-				cleanup = run([*arguments, "sudo -n /usr/local/sbin/tsuite-support-client close"])
+				cleanup = run(
+					[*arguments, "sudo -n /usr/local/sbin/tsuite-support-client close"],
+					env=customer_proxy_environment(),
+				)
 				if cleanup.returncode != 0 or f"cleanup-scheduled:{session_id}" not in cleanup.stdout:
 					raise RemoteActionError("客户侧清理未确认；会话未撤销，请重试或由运维显式 force-close")
 			local["cleanup_confirmed_at"] = int(time.time())
