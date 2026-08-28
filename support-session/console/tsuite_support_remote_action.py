@@ -318,7 +318,12 @@ def connect_customer(settings: Settings, session_id: str, command: list[str] | N
 		arguments = customer_ssh_args(settings, session_id, remote, known_hosts)
 		if command:
 			arguments.append(shlex.join(command))
-		return subprocess.call(arguments)
+		# OpenSSH executes ProxyCommand through $SHELL. The broker intentionally has
+		# a nologin account shell, so override it only for this strictly generated
+		# child command without making the broker itself login-capable.
+		environment = os.environ.copy()
+		environment["SHELL"] = "/bin/sh"
+		return subprocess.call(arguments, env=environment)
 
 
 def close_session(

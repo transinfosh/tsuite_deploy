@@ -480,6 +480,16 @@ class SupportOperatorBrokerTest(unittest.TestCase):
 		self.assertTrue(REMOTE.identity_path(self.settings, session_id).exists())
 		self.assertTrue(REMOTE.session_state_path(self.settings, session_id).exists())
 
+	def test_customer_proxy_uses_shell_without_enabling_broker_login(self):
+		session_id = "012345abcdef"
+		with mock.patch.object(REMOTE, "remote_session", return_value={"id": session_id}), \
+			mock.patch.object(REMOTE, "customer_ssh_args", return_value=["ssh"]), \
+			mock.patch.object(REMOTE.subprocess, "call", return_value=0) as call:
+			self.assertEqual(REMOTE.connect_customer(self.settings, session_id, ["true"]), 0)
+		arguments, = call.call_args.args
+		self.assertEqual(arguments, ["ssh", "true"])
+		self.assertEqual(call.call_args.kwargs["env"]["SHELL"], "/bin/sh")
+
 	def test_force_close_skips_customer_cleanup_and_removes_local_key(self):
 		session_id = "012345abcdef"
 		REMOTE.atomic_write(REMOTE.identity_path(self.settings, session_id), "private")
