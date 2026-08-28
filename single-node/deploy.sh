@@ -385,7 +385,7 @@ validate_inputs() {
 		die "PostgreSQL 端口无效"
 	fi
 	[[ "$DB_MODE" == "container" || "$DB_MODE" == "local" || "$DB_MODE" == "adopt" ]] || die "数据库模式无效"
-	if ! "$ADOPT_EXISTING_SITE"; then
+	if [[ "$DB_MODE" != "adopt" ]]; then
 		[[ "$DB_ADMIN_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || die "数据库管理员用户名格式无效"
 	fi
 	validate_private_subnet "$DOCKER_SUBNET" || die "Docker 子网格式无效，必须是规范的私有 IPv4 子网"
@@ -398,6 +398,13 @@ validate_inputs() {
 	if [[ "$DB_MODE" == "local" && "$DOCKER_SUBNET" != 172.* ]]; then
 		warn "本机 PostgreSQL 模式建议使用 172.16.0.0/12 内的 Docker 子网"
 	fi
+	if [[ "$DB_MODE" == "adopt" ]]; then
+		[[ -n "$ADOPT_DB_HOST" ]] || die "接管模式必须指定现有数据库地址"
+		[[ "$ADOPT_TARGET_VOLUME" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]] ||
+			die "接管后的 sites volume 名称无效"
+		[[ "$ADOPT_NETWORK_NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]] ||
+			die "旧 Docker 网络名称无效"
+	fi
 	if "$ADOPT_EXISTING_SITE"; then
 		[[ -f "$ADOPT_SOURCE_COMPOSE" ]] || die "旧 Compose 文件不存在: $ADOPT_SOURCE_COMPOSE"
 		[[ "$ADOPT_SOURCE_VOLUME" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]] ||
@@ -406,9 +413,6 @@ validate_inputs() {
 			die "新 sites volume 名称无效"
 		[[ "$ADOPT_SOURCE_VOLUME" != "$ADOPT_TARGET_VOLUME" ]] ||
 			die "新旧 sites volume 不能相同"
-		[[ -n "$ADOPT_DB_HOST" ]] || die "接管模式必须指定现有数据库地址"
-		[[ "$ADOPT_NETWORK_NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]] ||
-			die "旧 Docker 网络名称无效"
 	fi
 }
 
@@ -508,9 +512,23 @@ collect_deployment_settings() {
 		return
 	fi
 
-	if "$EXISTING_DEPLOYMENT" && [[ "$EXISTING_DB_MODE" == "container" || "$EXISTING_DB_MODE" == "local" ]]; then
+	if "$EXISTING_DEPLOYMENT" && [[ "$EXISTING_DB_MODE" =~ ^(container|local|adopt)$ ]]; then
 		DB_MODE="$EXISTING_DB_MODE"
 		log "复用已有 PostgreSQL 部署方式：$DB_MODE"
+		if [[ "$DB_MODE" == "adopt" ]]; then
+			ADOPT_SOURCE_COMPOSE="${EXISTING_ADOPT_SOURCE_COMPOSE:-${SAVED_ADOPT_SOURCE_COMPOSE:-}}"
+			ADOPT_SOURCE_VOLUME="${EXISTING_ADOPT_SOURCE_VOLUME:-${SAVED_ADOPT_SOURCE_VOLUME:-}}"
+			ADOPT_TARGET_VOLUME="${EXISTING_ADOPT_TARGET_VOLUME:-${SAVED_ADOPT_TARGET_VOLUME:-}}"
+			ADOPT_DB_HOST="${EXISTING_ADOPT_DB_HOST:-${SAVED_ADOPT_DB_HOST:-}}"
+			ADOPT_NETWORK_NAME="${EXISTING_ADOPT_NETWORK_NAME:-${SAVED_ADOPT_NETWORK_NAME:-}}"
+			DB_PORT="${EXISTING_DB_PORT:-$DEFAULT_DB_PORT}"
+			DB_ADMIN_USER=""
+			DB_PASSWORD=""
+			ADMIN_PASSWORD=""
+			parse_apps
+			split_image
+			return
+		fi
 	else
 		printf '\nPostgreSQL 部署方式：\n'
 		printf '  1) PostgreSQL 容器（推荐，迁移和备份更简单）\n'
@@ -576,7 +594,7 @@ write_deployment_inputs() {
 		printf 'INPUT_DB_MODE=%s\n' "$DB_MODE"
 		printf 'INPUT_DB_PORT=%s\n' "$DB_PORT"
 		printf 'INPUT_DB_ADMIN_USER=%s\n' "$DB_ADMIN_USER"
-		if "$ADOPT_EXISTING_SITE"; then
+		if [[ "$DB_MODE" == "adopt" ]]; then
 			printf 'INPUT_ADOPT_SOURCE_COMPOSE=%s\n' "$ADOPT_SOURCE_COMPOSE"
 			printf 'INPUT_ADOPT_SOURCE_VOLUME=%s\n' "$ADOPT_SOURCE_VOLUME"
 			printf 'INPUT_ADOPT_TARGET_VOLUME=%s\n' "$ADOPT_TARGET_VOLUME"
@@ -779,6 +797,22 @@ backup_existing_site() {
 		log "升级前备份站点 ${EXISTING_SITE_NAME:-$SITE_NAME}"
 		backup_running_site "${EXISTING_SITE_NAME:-$SITE_NAME}"
 	else
+		if [[ "$STATE_DB_MODE" == "adopt" ]]; then
+			local stopped_backend_id
+			stopped_backend_id="$(docker ps -aq \
+				--filter 'label=com.docker.compose.project=frappe' \
+				--filter 'label=com.docker.compose.service=backend' | sed -n '1p')"
+			[[ -n "$stopped_backend_id" ]] ||
+				die "接管模式的 backend 已停止且找不到既有容器，无法安全完成升级前备份"
+			log "临时启动既有 backend 容器以探测 PostgreSQL 版本并备份"
+			docker start "$stopped_backend_id" >/dev/null
+			if ! (backup_running_site "${EXISTING_SITE_NAME:-$SITE_NAME}"); then
+				docker stop "$stopped_backend_id" >/dev/null 2>&1 || true
+				die "临时启动 backend 后备份失败"
+			fi
+			docker stop "$stopped_backend_id" >/dev/null
+			return
+		fi
 		log "后端当前未运行，使用一次性容器备份站点 ${EXISTING_SITE_NAME:-$SITE_NAME}"
 		run docker compose "${COMPOSE_ARGS[@]}" run --rm backend \
 			bench --site "${EXISTING_SITE_NAME:-$SITE_NAME}" backup --with-files
@@ -885,6 +919,12 @@ download_frappe_docker() {
 		if [[ -n "$(git -C "$repo_dir" status --porcelain)" ]]; then
 			die "$repo_dir 存在未提交修改，请先处理后再升级"
 		fi
+		if [[ "$FRAPPE_DOCKER_REF" =~ ^[a-f0-9]{40}$ ]] &&
+			[[ "$(git -C "$repo_dir" rev-parse HEAD)" == "$FRAPPE_DOCKER_REF" ]]; then
+			FRAPPE_DOCKER_COMMIT="$FRAPPE_DOCKER_REF"
+			log "frappe_docker 已处于目标提交，跳过网络更新"
+			return
+		fi
 		if git -C "$repo_dir" remote set-url origin "$FRAPPE_DOCKER_REPO" &&
 			git -C "$repo_dir" fetch --force --tags origin &&
 			git -C "$repo_dir" fetch --force origin "$FRAPPE_DOCKER_REF" &&
@@ -901,7 +941,7 @@ download_frappe_docker() {
 		fi
 	fi
 
-	if [[ ! "$FRAPPE_DOCKER_REPO" =~ ^https://github\\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)\\.git$ ]]; then
+	if [[ ! "$FRAPPE_DOCKER_REPO" =~ ^https://github[.]com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)[.]git$ ]]; then
 		die "无法通过 Git 下载 frappe_docker，且仅 GitHub HTTPS 仓库支持源码归档回退"
 	fi
 	archive_url="https://codeload.github.com/${BASH_REMATCH[1]}/${BASH_REMATCH[2]}/tar.gz/$FRAPPE_DOCKER_REF"
@@ -978,6 +1018,7 @@ find_adopt_source_backend() {
 }
 
 backup_adopted_database_with_postgres_client() {
+	local backend_container="$1"
 	local source_mountpoint
 	local site_config
 	local db_name
@@ -986,6 +1027,8 @@ backup_adopted_database_with_postgres_client() {
 	local db_user
 	local db_password
 	local backup_name
+	local server_version_num
+	local server_major
 
 	source_mountpoint="$(docker volume inspect -f '{{ .Mountpoint }}' "$ADOPT_SOURCE_VOLUME")"
 	site_config="$source_mountpoint/$SITE_NAME/site_config.json"
@@ -998,15 +1041,27 @@ backup_adopted_database_with_postgres_client() {
 	db_user="$(jq -er '.db_user // empty' "$site_config")" || die "无法读取旧站点数据库用户"
 	db_password="$(jq -er '.db_password // empty' "$site_config")" || die "无法读取旧站点数据库密码"
 	backup_name="$(date -u +%Y%m%d_%H%M%S)-${SITE_NAME}-database.sql.gz"
+	server_version_num="$(docker exec -e "PGPASSWORD=$db_password" "$backend_container" \
+		psql --no-password --tuples-only --no-align --host "$db_host" --port "$db_port" \
+			--username "$db_user" --dbname "$db_name" --command 'SHOW server_version_num;')"
+	[[ "$server_version_num" =~ ^[0-9]+$ ]] || die "无法读取既有 PostgreSQL 服务端版本"
+	server_major=$((server_version_num / 10000))
+	((server_major >= 10)) || die "不支持 PostgreSQL $server_version_num 的接管备份"
 
-	warn "旧 backend 的 pg_dump 与数据库版本不兼容，改用 PostgreSQL 16 客户端备份数据库"
-	docker run --rm --network "$ADOPT_NETWORK_NAME" \
+	warn "旧 backend 的 pg_dump 与数据库版本不兼容，改用 PostgreSQL $server_major 客户端备份数据库"
+	docker run --rm --network "$ADOPT_NETWORK_NAME" --add-host "host.docker.internal:host-gateway" \
 		-e "PGPASSWORD=$db_password" \
 		-v "$ADOPT_SOURCE_VOLUME:/sites" \
-		postgres:16 bash -ec '
+		"postgres:$server_major" bash -o pipefail -ceu '
 			backup_dir="/sites/$1/private/backups"
 			mkdir -p "$backup_dir"
-			pg_dump --host "$2" --port "$3" --username "$4" "$5" | gzip > "$backup_dir/$6"
+			partial="$backup_dir/$6.partial"
+			trap '\''rm -f "$partial"'\'' EXIT
+			pg_dump --no-password --host "$2" --port "$3" --username "$4" "$5" | gzip > "$partial"
+			gzip -t "$partial"
+			test -s "$partial"
+			mv "$partial" "$backup_dir/$6"
+			trap - EXIT
 		' _ "$SITE_NAME" "$db_host" "$db_port" "$db_user" "$db_name" "$backup_name"
 }
 
@@ -1033,7 +1088,7 @@ backup_and_clone_adopted_site() {
 	log "备份旧 backend 容器中的站点 $SITE_NAME"
 	if ! docker exec "$backend_container" \
 		bench --site "$SITE_NAME" backup --with-files; then
-		backup_adopted_database_with_postgres_client
+		backup_adopted_database_with_postgres_client "$backend_container"
 	fi
 	mapfile -t container_ids < <(docker ps -aq --filter "label=com.docker.compose.project=$ADOPT_SOURCE_PROJECT")
 	((${#container_ids[@]})) || die "找不到旧 Compose 项目 $ADOPT_SOURCE_PROJECT 的容器"
@@ -1061,6 +1116,7 @@ write_env_file() {
 	{
 		printf 'CUSTOM_IMAGE=%s\n' "$IMAGE_REPOSITORY"
 		printf 'CUSTOM_TAG=%s\n' "$IMAGE_TAG"
+		printf 'ERPNEXT_VERSION=\n'
 		printf 'PULL_POLICY=missing\n'
 		printf 'RESTART_POLICY=unless-stopped\n'
 		printf 'DB_PASSWORD=%s\n' "$DB_PASSWORD"
@@ -1109,23 +1165,14 @@ services:
       - "host.docker.internal:host-gateway"
 
 EOF
-		if "$ADOPT_EXISTING_SITE"; then
-			cat <<EOF
-networks:
-  default:
-    external: true
-    name: $(yaml_quote "$ADOPT_NETWORK_NAME")
-EOF
-		else
-			cat <<EOF
+		cat <<EOF
 networks:
   default:
     ipam:
       config:
         - subnet: $(yaml_quote "$DOCKER_SUBNET")
 EOF
-		fi
-		if "$ADOPT_EXISTING_SITE"; then
+		if [[ "$DB_MODE" == "adopt" ]]; then
 			cat <<EOF
 volumes:
   sites:
@@ -1176,7 +1223,7 @@ write_state() {
 		printf 'STATE_HTTP_PORT=%s\n' "$HTTP_PORT"
 		printf 'STATE_DOCKER_SUBNET=%s\n' "$DOCKER_SUBNET"
 		printf 'STATE_FRAPPE_DOCKER_COMMIT=%s\n' "${FRAPPE_DOCKER_COMMIT:-dry-run}"
-		if "$ADOPT_EXISTING_SITE"; then
+		if [[ "$DB_MODE" == "adopt" ]]; then
 			printf 'STATE_ADOPT_SOURCE_COMPOSE=%s\n' "$ADOPT_SOURCE_COMPOSE"
 			printf 'STATE_ADOPT_SOURCE_VOLUME=%s\n' "$ADOPT_SOURCE_VOLUME"
 			printf 'STATE_ADOPT_TARGET_VOLUME=%s\n' "$ADOPT_TARGET_VOLUME"
@@ -1280,8 +1327,9 @@ install_or_upgrade_site() {
 	update_container_postgres_password
 
 	if ! site_exists; then
-		"$ADOPT_EXISTING_SITE" &&
+		if [[ "$DB_MODE" == "adopt" ]]; then
 			die "接管后的 sites volume 中未找到站点: $SITE_NAME"
+		fi
 		log "创建站点 $SITE_NAME"
 		docker compose "${COMPOSE_ARGS[@]}" exec -T backend \
 			bench new-site "$SITE_NAME" \
@@ -1310,6 +1358,8 @@ install_or_upgrade_site() {
 
 	log "迁移站点"
 	docker compose "${COMPOSE_ARGS[@]}" exec -T backend bench --site "$SITE_NAME" migrate
+	docker compose "${COMPOSE_ARGS[@]}" exec -T backend \
+		bench --site "$SITE_NAME" set-maintenance-mode off
 	docker compose "${COMPOSE_ARGS[@]}" exec -T backend bench use "$SITE_NAME"
 	docker compose "${COMPOSE_ARGS[@]}" restart backend frontend websocket queue-short queue-long scheduler
 }
