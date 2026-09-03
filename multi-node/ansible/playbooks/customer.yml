@@ -27,6 +27,18 @@
              if image_delivery_mode == 'local_bundle'
              else customer_frappe_image }}
         frappe_pull_policy: "{{ 'never' if image_delivery_mode == 'local_bundle' else 'always' }}"
+        frappe_queue_short_queues: "tai_delivery_short,short,default"
+        frappe_queue_long_queues: "tai_delivery_long,long,default,short"
+        frappe_enable_delivery_watcher_queue: true
+        frappe_common_site_config:
+          scheduler_tick_interval: 60
+          workers:
+            tai_delivery_short:
+              timeout: 300
+            tai_delivery_long:
+              timeout: 1500
+            tai_delivery_watcher:
+              timeout: 1500
         frappe_apps:
           - frappe_ext
           - tbi

@@ -15,3 +15,7 @@ frappe_pull_policy: always
 frappe_apps: []
 frappe_secret_files: {}
 frappe_site_config: {}
+frappe_common_site_config: {}
+frappe_queue_short_queues: "short,default"
+frappe_queue_long_queues: "long,default,short"
+frappe_enable_delivery_watcher_queue: false

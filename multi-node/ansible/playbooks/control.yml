@@ -31,6 +31,13 @@
              if image_delivery_mode == 'local_bundle'
              else control_frappe_image }}
         frappe_pull_policy: "{{ 'never' if image_delivery_mode == 'local_bundle' else 'always' }}"
+        # Control 发出的模型与执行范围投影走专用可靠队列；必须由
+        # queue-short 一并消费，不能只保留 Frappe 默认 short/default。
+        frappe_queue_short_queues: "tai_control_delivery,short,default"
+        frappe_common_site_config:
+          workers:
+            tai_control_delivery:
+              timeout: 300
         frappe_apps:
           - tai_control
         frappe_db_password: "{{ vault_control_db_password }}"

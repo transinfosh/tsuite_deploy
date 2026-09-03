@@ -257,6 +257,20 @@
   changed_when: false
   no_log: true
 
+- name: 写入全局站点配置
+  ansible.builtin.command: >-
+    docker compose --env-file {{ frappe_stack_root }}/.env
+    -p frappe-{{ frappe_stack_name }}
+    -f {{ frappe_stack_root }}/frappe_docker/compose.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.redis.yaml
+    -f {{ frappe_stack_root }}/frappe_docker/overrides/compose.postgres.yaml
+    -f {{ frappe_stack_root }}/compose.generated.yml
+    exec -T backend bench set-config -g
+    {{ item.key }} {{ item.value | to_json | quote }} --parse
+  loop: "{{ frappe_common_site_config | dict2items }}"
+  changed_when: false
+  no_log: true
+
 - name: 迁移 Frappe 站点
   ansible.builtin.command: >-
     docker compose --env-file {{ frappe_stack_root }}/.env
