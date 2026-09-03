@@ -82,7 +82,10 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: transinfosh/tsuite_deploy
-          ref: ${{ github.workflow_sha }}
+          # Reusable workflows execute with the caller's workflow SHA. Pin the
+          # deployment definitions explicitly so a service release never tries
+          # to fetch its own commit from this repository.
+          ref: 41f62476d119ec258e80ea7721cb73498a90efad
           token: ${{ env.SOURCE_TOKEN }}
           path: .ci-deploy
 
