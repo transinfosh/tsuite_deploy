@@ -21,9 +21,9 @@ tai_service_release_lock: true
 tai_service_release_version: 0.1.23
 tai_service_source_commit: ec7da39d9593772bd16404b48e3b67afcde42198
 tai_service_image: "ghcr.io/transinfosh/tai-service@sha256:2cfedbd49f03bd3840bd9b370866df84ebdfa1af9d00a029477b70ad884b4e02"
-tbi_engine_release_version: 0.1.9
-tbi_engine_source_commit: 56061e59eb076c23d247994a6e693ea0981835b5
-tbi_engine_image: "ghcr.io/transinfosh/tbi-engine@sha256:9962d6a3ccff654f2ad90ed11e8c5ed36fe1d381261fe5e23e2ccbe73a1ec8cf"
+tbi_engine_release_version: 0.1.10
+tbi_engine_source_commit: a79195e8d6784bf1003fb57dadb0ee46eb39a004
+tbi_engine_image: "ghcr.io/transinfosh/tbi-engine@sha256:d39fbf03c63018e1945c04b8c9174fb83413d8e067c210772677a6979706cdc9"
 tai_auth_image: "ghcr.io/transinfosh/tai-auth:{{ deployment_image_tag }}"
 frappe_docker_repo: https://github.com/transinfosh/frappe_docker.git
 frappe_docker_ref: main
