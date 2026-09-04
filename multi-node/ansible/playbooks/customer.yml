@@ -7,6 +7,24 @@
   roles:
     - role: common
     - role: docker
+    - role: deployment_backup
+      vars:
+        deployment_backup_component: customer
+        deployment_backup_database_name: "{{ customer_database_name }}"
+        deployment_backup_database_host: "{{ external_database_host | default('') }}"
+        deployment_backup_database_port: "{{ external_database_port | default(5432) }}"
+        deployment_backup_database_admin_password: >-
+          {{ vault_runtime_db_admin_password if external_database_enabled | default(false) | bool else '' }}
+        deployment_backup_external: "{{ external_database_enabled | default(false) | bool }}"
+        deployment_backup_container: frappe-customer-db-1
+        deployment_backup_running_containers:
+          - frappe-customer-backend-1
+          - tai-tbi-engine-service-1
+        deployment_backup_release_metadata:
+          customer_image: "{{ customer_frappe_image }}"
+          customer_source_commit: "{{ customer_source_commit | default('') }}"
+          tbi_engine_image: "{{ tbi_engine_image }}"
+          tbi_engine_source_commit: "{{ tbi_engine_source_commit | default('') }}"
     - role: source_snapshot
       when: image_delivery_mode == 'local_bundle'
     - role: frappe_local_image

@@ -1,0 +1,12 @@
+---
+deployment_backup_root: /opt/tsuite-deploy/backups/releases
+deployment_backup_component: ""
+deployment_backup_database_name: ""
+deployment_backup_database_host: ""
+deployment_backup_database_port: 5432
+deployment_backup_database_admin_user: postgres
+deployment_backup_database_admin_password: ""
+deployment_backup_external: false
+deployment_backup_container: ""
+deployment_backup_running_containers: []
+deployment_backup_release_metadata: {}

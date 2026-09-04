@@ -1,5 +1,16 @@
 # 多节点部署
 
+## 发布前数据库备份
+
+`customer.yml`、`control.yml` 和 `runtime.yml` 在修改服务前都会执行强制数据库备份。
+已有数据库备份失败、文件为空或 SHA-256 校验失败时，发布立即中止；首次安装尚无内置数据库
+容器时会记录 `not_installed` 后继续。
+
+备份默认保存在数据库所在主机的
+`/opt/tsuite-deploy/backups/releases/<UTC 时间>/`。每个组件同时写入一份 JSON 清单，记录
+目标环境、部署节点、数据库、备份文件、校验值、发布前运行镜像及本次目标版本；全局历史追加到
+`/opt/tsuite-deploy/backups/releases/history.jsonl`，用于定位可回退的数据库与镜像组合。
+
 `ansible/` 是多节点部署 Adapter，按 Control、Runtime、Customer 角色编排，并可配置独立 PostgreSQL 与入口节点。
 
 从旧目录布局升级时，Git 不会自动移动未跟踪的 Inventory、Vault 或源码归档。先复制到新位置，确认可用后再自行处理旧副本；命令使用 `-n`，不会覆盖已有文件：

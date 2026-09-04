@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "backup_id": {{ deployment_backup_run_id | to_json }},
+  "environment": {{ deployment_environment | to_json }},
+  "component": {{ deployment_backup_component | to_json }},
+  "deployment_host": {{ inventory_hostname | to_json }},
+  "backup_host": {{ deployment_backup_host | to_json }},
+  "database": {
+    "name": {{ deployment_backup_database_name | to_json }},
+    "host": {{ (deployment_backup_database_host if deployment_backup_external | bool else deployment_backup_container) | to_json }},
+    "mode": {{ ('external' if deployment_backup_external | bool else 'container') | to_json }}
+  },
+  "status": {{ ('created' if deployment_backup_database_present | bool else 'not_installed') | to_json }},
+  "backup": {
+    "file": {{ ((deployment_backup_directory ~ '/' ~ deployment_backup_filename) if deployment_backup_database_present | bool else '') | to_json }},
+    "size": {{ (deployment_backup_file.stat.size if deployment_backup_database_present | bool else 0) | int }},
+    "sha256": {{ (deployment_backup_file.stat.checksum if deployment_backup_database_present | bool else '') | to_json }}
+  },
+  "release_target": {{ deployment_backup_release_metadata | to_nice_json }},
+  "running_images": [
+{% for result in deployment_backup_running_images.results | default([]) %}
+    {
+      "container": {{ result.item | to_json }},
+      "available": {{ (result.rc == 0) | to_json }},
+      "image": {{ ((result.stdout.split('|')[0]) if result.rc == 0 else '') | to_json }},
+      "image_id": {{ ((result.stdout.split('|')[1]) if result.rc == 0 and '|' in result.stdout else '') | to_json }}
+    }{% if not loop.last %},{% endif %}
+{% endfor %}
+  ]
+}

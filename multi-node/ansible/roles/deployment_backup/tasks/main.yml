@@ -1,0 +1,223 @@
+---
+- name: 校验部署前数据库备份参数
+  ansible.builtin.assert:
+    that:
+      - deployment_backup_component | length > 0
+      - deployment_backup_database_name | length > 0
+      - >-
+        (deployment_backup_external | bool and
+         deployment_backup_database_host | length > 0 and
+         deployment_backup_database_admin_password | length > 0 and
+         groups.get('database_nodes', []) | length > 0)
+        or
+        (not (deployment_backup_external | bool) and
+         deployment_backup_container | length > 0)
+    fail_msg: 部署前数据库备份参数不完整。
+  no_log: true
+
+- name: 固定本次数据库备份标识
+  ansible.builtin.set_fact:
+    deployment_backup_run_id: "{{ lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ') }}"
+    deployment_backup_host: >-
+      {{ (groups.get('database_nodes', []) | first)
+         if deployment_backup_external | bool
+         else inventory_hostname }}
+
+- name: 固定数据库备份路径
+  ansible.builtin.set_fact:
+    deployment_backup_directory: >-
+      {{ deployment_backup_root }}/{{ deployment_backup_run_id }}
+    deployment_backup_filename: >-
+      {{ deployment_backup_component }}-{{ deployment_backup_database_name }}.dump
+
+- name: 创建部署前数据库备份目录
+  ansible.builtin.file:
+    path: "{{ deployment_backup_directory }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  delegate_to: "{{ deployment_backup_host }}"
+
+- name: 检查内置数据库容器
+  ansible.builtin.command:
+    argv:
+      - docker
+      - container
+      - inspect
+      - "{{ deployment_backup_container }}"
+  register: deployment_backup_container_check
+  changed_when: false
+  failed_when: false
+  when: not (deployment_backup_external | bool)
+
+- name: 检查外部 PostgreSQL 数据库
+  ansible.builtin.command:
+    argv:
+      - "/usr/lib/postgresql/{{ postgresql_host_version }}/bin/psql"
+      - "--host={{ deployment_backup_database_host }}"
+      - "--port={{ deployment_backup_database_port }}"
+      - "--username={{ deployment_backup_database_admin_user }}"
+      - --dbname=postgres
+      - --tuples-only
+      - --no-align
+      - "--set=target_database={{ deployment_backup_database_name }}"
+      - "--command=SELECT 1 FROM pg_database WHERE datname = :'target_database';"
+  environment:
+    PGPASSWORD: "{{ deployment_backup_database_admin_password }}"
+  register: deployment_backup_external_database_check
+  changed_when: false
+  delegate_to: "{{ deployment_backup_host }}"
+  no_log: true
+  when: deployment_backup_external | bool
+
+- name: 确认数据库是否已安装
+  ansible.builtin.set_fact:
+    deployment_backup_database_present: >-
+      {{ ((deployment_backup_external_database_check.stdout | default('') | trim) == '1')
+         if deployment_backup_external | bool
+         else (deployment_backup_container_check.rc | default(1) == 0) }}
+
+- name: 导出外部 PostgreSQL 数据库
+  ansible.builtin.command:
+    argv:
+      - "/usr/lib/postgresql/{{ postgresql_host_version }}/bin/pg_dump"
+      - --format=custom
+      - --no-owner
+      - --no-acl
+      - "--host={{ deployment_backup_database_host }}"
+      - "--port={{ deployment_backup_database_port }}"
+      - "--username={{ deployment_backup_database_admin_user }}"
+      - "--file={{ deployment_backup_directory }}/{{ deployment_backup_filename }}.partial"
+      - "{{ deployment_backup_database_name }}"
+  environment:
+    PGPASSWORD: "{{ deployment_backup_database_admin_password }}"
+  delegate_to: "{{ deployment_backup_host }}"
+  no_log: true
+  when:
+    - deployment_backup_external | bool
+    - deployment_backup_database_present | bool
+
+- name: 导出内置 PostgreSQL 数据库
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ deployment_backup_container }}"
+      - pg_dump
+      - --format=custom
+      - --no-owner
+      - --no-acl
+      - "--username={{ deployment_backup_database_admin_user }}"
+      - "--file=/tmp/{{ deployment_backup_filename }}.partial"
+      - "{{ deployment_backup_database_name }}"
+  no_log: true
+  when:
+    - not (deployment_backup_external | bool)
+    - deployment_backup_database_present | bool
+
+- name: 复制内置数据库备份到宿主机
+  ansible.builtin.command:
+    argv:
+      - docker
+      - cp
+      - "{{ deployment_backup_container }}:/tmp/{{ deployment_backup_filename }}.partial"
+      - "{{ deployment_backup_directory }}/{{ deployment_backup_filename }}.partial"
+  changed_when: true
+  when:
+    - not (deployment_backup_external | bool)
+    - deployment_backup_database_present | bool
+
+- name: 清理数据库容器内临时备份
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ deployment_backup_container }}"
+      - rm
+      - -f
+      - "/tmp/{{ deployment_backup_filename }}.partial"
+  changed_when: false
+  when:
+    - not (deployment_backup_external | bool)
+    - deployment_backup_database_present | bool
+
+- name: 原子完成数据库备份文件
+  ansible.builtin.command:
+    argv:
+      - mv
+      - "{{ deployment_backup_directory }}/{{ deployment_backup_filename }}.partial"
+      - "{{ deployment_backup_directory }}/{{ deployment_backup_filename }}"
+  delegate_to: "{{ deployment_backup_host }}"
+  changed_when: true
+  when: deployment_backup_database_present | bool
+
+- name: 检查部署前数据库备份
+  ansible.builtin.stat:
+    path: "{{ deployment_backup_directory }}/{{ deployment_backup_filename }}"
+    checksum_algorithm: sha256
+  register: deployment_backup_file
+  delegate_to: "{{ deployment_backup_host }}"
+  when: deployment_backup_database_present | bool
+
+- name: 拒绝空的数据库备份
+  ansible.builtin.assert:
+    that:
+      - deployment_backup_file.stat.exists
+      - deployment_backup_file.stat.size | int > 0
+      - deployment_backup_file.stat.checksum | length == 64
+    fail_msg: 部署前数据库备份为空或校验失败，已中止发布。
+  when: deployment_backup_database_present | bool
+
+- name: 读取发布前运行镜像
+  ansible.builtin.command:
+    argv:
+      - docker
+      - inspect
+      - --format
+      - "{{ '{{.Config.Image}}|{{.Image}}' }}"
+      - "{{ item }}"
+  loop: "{{ deployment_backup_running_containers }}"
+  register: deployment_backup_running_images
+  changed_when: false
+  failed_when: false
+
+- name: 写入部署前数据库备份清单
+  ansible.builtin.template:
+    src: manifest.json.j2
+    dest: >-
+      {{ deployment_backup_directory }}/{{ deployment_backup_component }}-manifest.json
+    owner: root
+    group: root
+    mode: "0600"
+  delegate_to: "{{ deployment_backup_host }}"
+
+- name: 记录部署前数据库备份历史
+  ansible.builtin.lineinfile:
+    path: "{{ deployment_backup_root }}/history.jsonl"
+    line: >-
+      {{ {
+           'schema_version': 1,
+           'backup_id': deployment_backup_run_id,
+           'environment': deployment_environment,
+           'component': deployment_backup_component,
+           'deployment_host': inventory_hostname,
+           'backup_host': deployment_backup_host,
+           'database': deployment_backup_database_name,
+           'status': ('created' if deployment_backup_database_present | bool else 'not_installed'),
+           'backup_file': (
+             deployment_backup_directory ~ '/' ~ deployment_backup_filename
+             if deployment_backup_database_present | bool else ''
+           ),
+           'sha256': (
+             deployment_backup_file.stat.checksum
+             if deployment_backup_database_present | bool else ''
+           ),
+           'release_target': deployment_backup_release_metadata
+         } | to_json }}
+    create: true
+    owner: root
+    group: root
+    mode: "0600"
+    insertafter: EOF
+  delegate_to: "{{ deployment_backup_host }}"

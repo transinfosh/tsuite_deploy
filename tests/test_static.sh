@@ -42,6 +42,47 @@ for name in ("preflight.yml", "relay.yml", "customer.yml", "control.yml", "runti
             f"{name} 中的每个 play 都必须加载当前 inventory 的 vault.yml"
         )
 
+for name in ("customer.yml", "control.yml", "runtime.yml"):
+    deployment_playbook = yaml.safe_load((playbook_dir / name).read_text(encoding="utf-8"))
+    deployment_roles = [
+        role
+        for play in deployment_playbook
+        for role in play.get("roles", [])
+    ]
+    backup_roles = [
+        role
+        for role in deployment_roles
+        if isinstance(role, dict) and role.get("role") == "deployment_backup"
+    ]
+    assert backup_roles, f"{name} 必须在发布前执行数据库备份"
+    first_backup_index = next(
+        index
+        for index, role in enumerate(deployment_roles)
+        if isinstance(role, dict) and role.get("role") == "deployment_backup"
+    )
+    first_mutation_index = next(
+        index
+        for index, role in enumerate(deployment_roles)
+        if isinstance(role, dict)
+        and role.get("role")
+        in {"source_snapshot", "runtime_postgres", "frappe_local_image", "frappe_stack", "python_container"}
+    )
+    assert first_backup_index < first_mutation_index, f"{name} 必须先备份再修改服务"
+
+deployment_backup_tasks = (
+    pathlib.Path(sys.argv[1]) / "roles/deployment_backup/tasks/main.yml"
+).read_text(encoding="utf-8")
+deployment_backup_manifest = (
+    pathlib.Path(sys.argv[1]) / "roles/deployment_backup/templates/manifest.json.j2"
+).read_text(encoding="utf-8")
+assert "pg_dump" in deployment_backup_tasks
+assert "pg_database" in deployment_backup_tasks
+assert ".partial" in deployment_backup_tasks
+assert "拒绝空的数据库备份" in deployment_backup_tasks
+assert "history.jsonl" in deployment_backup_tasks
+assert '"release_target"' in deployment_backup_manifest
+assert '"running_images"' in deployment_backup_manifest
+
 verify_playbook = (playbook_dir / "verify.yml").read_text(encoding="utf-8")
 assert "验证客户 Frappe 到 tBI Engine 的容器网络" in verify_playbook
 assert "http://tbi-engine:{{ tbi_engine_port }}/readyz" in verify_playbook

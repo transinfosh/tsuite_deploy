@@ -8,6 +8,40 @@
   roles:
     - role: common
     - role: docker
+    - role: deployment_backup
+      vars:
+        deployment_backup_component: control
+        deployment_backup_database_name: "{{ control_database_name }}"
+        deployment_backup_database_host: "{{ external_database_host | default('') }}"
+        deployment_backup_database_port: "{{ external_database_port | default(5432) }}"
+        deployment_backup_database_admin_password: >-
+          {{ vault_runtime_db_admin_password if external_database_enabled | default(false) | bool else '' }}
+        deployment_backup_external: "{{ external_database_enabled | default(false) | bool }}"
+        deployment_backup_container: frappe-control-db-1
+        deployment_backup_running_containers:
+          - frappe-control-backend-1
+          - tai-tai-auth-service-1
+        deployment_backup_release_metadata:
+          control_image: "{{ control_frappe_image }}"
+          control_source_commit: "{{ control_source_commit | default('') }}"
+          tai_auth_image: "{{ tai_auth_image }}"
+    - role: deployment_backup
+      when: enable_phoenix | bool
+      vars:
+        deployment_backup_component: phoenix
+        deployment_backup_database_name: phoenix
+        deployment_backup_database_host: "{{ external_database_host | default('') }}"
+        deployment_backup_database_port: "{{ external_database_port | default(5432) }}"
+        deployment_backup_database_admin_user: >-
+          {{ 'postgres' if external_database_enabled | default(false) | bool else 'phoenix' }}
+        deployment_backup_database_admin_password: >-
+          {{ vault_runtime_db_admin_password if external_database_enabled | default(false) | bool else '' }}
+        deployment_backup_external: "{{ external_database_enabled | default(false) | bool }}"
+        deployment_backup_container: tai-phoenix-db-1
+        deployment_backup_running_containers:
+          - tai-phoenix-phoenix-1
+        deployment_backup_release_metadata:
+          phoenix_image: "{{ phoenix_image }}"
     - role: source_snapshot
       when: image_delivery_mode == 'local_bundle'
     - role: frappe_local_image

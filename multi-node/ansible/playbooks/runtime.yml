@@ -7,6 +7,23 @@
   roles:
     - role: common
     - role: docker
+    - role: deployment_backup
+      vars:
+        deployment_backup_component: runtime
+        deployment_backup_database_name: "{{ runtime_database_name }}"
+        deployment_backup_database_host: "{{ external_database_host | default('') }}"
+        deployment_backup_database_port: >-
+          {{ external_database_port | default(5432) }}
+        deployment_backup_database_admin_password: >-
+          {{ vault_runtime_db_admin_password if external_database_enabled | default(false) | bool else '' }}
+        deployment_backup_external: "{{ external_database_enabled | default(false) | bool }}"
+        deployment_backup_container: tai-runtime-postgres
+        deployment_backup_running_containers:
+          - tai-tai-service-service-1
+          - tai-tai-service-worker-1
+        deployment_backup_release_metadata:
+          tai_service_image: "{{ tai_service_image }}"
+          tai_service_source_commit: "{{ tai_service_source_commit | default('') }}"
     - role: source_snapshot
       when: image_delivery_mode == 'local_bundle'
     - role: runtime_postgres
