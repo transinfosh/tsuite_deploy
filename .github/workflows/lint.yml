@@ -20,10 +20,23 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y python3-yaml shellcheck
 
       - name: Check shell syntax
-        run: bash -n single-node/deploy.sh install.sh multi-node/tools/create-source-bundle.sh
+        run: >-
+          bash -n single-node/deploy.sh install.sh multi-node/tools/create-source-bundle.sh
+          support-session/bastion/install.sh support-session/customer/bootstrap.sh
+          support-session/operator/install.sh tests/test_single_node_adopt.sh
+          support-session/tests/test_ssh_restrictions.sh
 
       - name: Run ShellCheck
-        run: shellcheck single-node/deploy.sh install.sh multi-node/tools/create-source-bundle.sh tests/test_static.sh
+        run: >-
+          shellcheck single-node/deploy.sh install.sh multi-node/tools/create-source-bundle.sh
+          support-session/bastion/install.sh support-session/customer/bootstrap.sh
+          support-session/operator/install.sh tests/test_static.sh tests/test_single_node_adopt.sh
+          support-session/tests/test_ssh_restrictions.sh
+
+      - name: Check Python syntax
+        run: >-
+          python3 -m py_compile support-session/bastion/tsuite_support_session.py
+          support-session/operator/tsuite-support
 
       - name: Run static tests
         run: tests/test_static.sh

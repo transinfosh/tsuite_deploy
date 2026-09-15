@@ -6,12 +6,24 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 bash -n "$repo_root/single-node/deploy.sh"
 bash -n "$repo_root/install.sh"
 bash -n "$repo_root/multi-node/tools/create-source-bundle.sh"
+bash -n "$repo_root/support-session/bastion/install.sh"
+bash -n "$repo_root/support-session/customer/bootstrap.sh"
+bash -n "$repo_root/support-session/operator/install.sh"
+python3 -m py_compile \
+	"$repo_root/support-session/bastion/tsuite_support_session.py" \
+	"$repo_root/support-session/operator/tsuite-support"
+python3 -m unittest discover -s "$repo_root/support-session/tests" -p 'test_*.py'
+"$repo_root/tests/test_single_node_adopt.sh"
+"$repo_root/support-session/tests/test_ssh_restrictions.sh"
 "$repo_root/single-node/deploy.sh" --help | grep -q -- "--dry-run"
 grep -q "single-node/deploy.sh" "$repo_root/install.sh"
 grep -q "github.workflow_sha" "$repo_root/.github/workflows/build-images.yml"
 
 if command -v shellcheck >/dev/null 2>&1; then
 	shellcheck "$repo_root/single-node/deploy.sh" "$repo_root/install.sh" "$repo_root/multi-node/tools/create-source-bundle.sh"
+	shellcheck "$repo_root/support-session/bastion/install.sh" \
+		"$repo_root/support-session/customer/bootstrap.sh" \
+		"$repo_root/support-session/operator/install.sh"
 fi
 
 python3 - "$repo_root/multi-node/ansible" "$repo_root/single-node/deploy.sh" "$repo_root/install.sh" <<'PY'
@@ -463,6 +475,7 @@ install_script = pathlib.Path(sys.argv[3]).read_text(encoding="utf-8")
 assert 'DEFAULT_DEPLOY_DIR="/opt/tsuite-deploy"' in deploy_script
 assert '复用已有 PostgreSQL 部署方式：$DB_MODE' in deploy_script
 assert '"$EXISTING_DB_MODE" =~ ^(container|local|adopt)$' in deploy_script
+assert 'if [[ "$DB_MODE" == "adopt" ]]; then' in deploy_script
 assert 'LEGACY_DEPLOY_DIR="/opt/tsuie-deploy"' in deploy_script
 assert "migrate_legacy_deployment" in deploy_script
 assert 'mv "$LEGACY_DEPLOY_DIR" "$DEFAULT_DEPLOY_DIR"' in deploy_script
@@ -472,6 +485,10 @@ assert "BEGIN tsuite_deploy" in deploy_script
 assert "backup_postgres_with_compatible_client" in deploy_script
 assert "SHOW server_version_num;" in deploy_script
 assert '"postgres:$server_major"' in deploy_script
+assert 'backup_adopted_database_with_postgres_client "$backend_container"' in deploy_script
+assert 'bash -o pipefail -ceu' in deploy_script
+assert '--add-host "host.docker.internal:host-gateway"' in deploy_script
+assert 'partial="$backup_dir/$6.partial"' in deploy_script
 assert '--volumes-from "$backend_id"' in deploy_script
 assert 'backend_network="$(docker inspect' in deploy_script
 assert '--network "$backend_network"' in deploy_script
