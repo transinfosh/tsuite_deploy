@@ -11,7 +11,10 @@ bash -n "$repo_root/support-session/customer/bootstrap.sh"
 bash -n "$repo_root/support-session/operator/install.sh"
 python3 -m py_compile \
 	"$repo_root/support-session/bastion/tsuite_support_session.py" \
-	"$repo_root/support-session/operator/tsuite-support"
+	"$repo_root/support-session/operator/tsuite-support" \
+	"$repo_root/patch-deploy/patch.py" \
+	"$repo_root/patch-deploy/remote.py"
+python3 -m unittest discover -s "$repo_root/patch-deploy/tests" -p 'test_*.py'
 python3 -m unittest discover -s "$repo_root/support-session/tests" -p 'test_*.py'
 "$repo_root/tests/test_single_node_adopt.sh"
 "$repo_root/support-session/tests/test_ssh_restrictions.sh"

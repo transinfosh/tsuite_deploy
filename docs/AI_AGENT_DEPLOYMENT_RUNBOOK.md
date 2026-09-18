@@ -442,3 +442,16 @@ Agent 每次开始部署时应先检查这些事项的当前状态。若缺项�
 - [单机部署](../single-node/README.md)
 - [多节点部署](../multi-node/README.md)
 - [共享部署契约](../shared/contracts/README.md)
+- [临时 Python / 提示词补丁](../patch-deploy/README.md)
+
+## 15. 临时补丁与正式升级衔接
+
+不改变依赖、数据库结构或前端资源的小范围 Python / 提示词修复，可在控制机使用
+`patch-deploy/patch.py` 的 `check`、`apply`、`status` 和 `rollback`，遵循专项文档的维护窗口要求。
+指定已推送 commit；先核对全部应用容器，再保存目标宿主机和控制机备份。
+不能通过只修改 backend、执行整套 `bench update` 或重建容器来应用临时补丁。
+
+正式升级前先查询补丁台账。存在活跃补丁时，为每个涉及 app 执行 `verify-upgrade`，
+证明正式源码提交包含修复；未完成或回滚失败的补丁先处理，不继续升级。
+镜像准备就绪后，在同一维护窗口撤回补丁，再按现有正式升级流程执行迁移与验证。
+这一步需要明确执行；第一版未自动嵌入全部历史单机与 Ansible 部署入口。
