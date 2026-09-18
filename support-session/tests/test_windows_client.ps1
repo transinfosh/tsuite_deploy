@@ -44,6 +44,7 @@ function Remove-Item { param($LiteralPath, [switch]$Recurse, [switch]$Force)
 }
 function Remove-CimInstance { param([Parameter(ValueFromPipeline=$true)]$InputObject) }
 
+$originalSystemRoot = $env:SystemRoot
 try {
     Remove-SupportSession $id
     Assert-True ($script:events[0] -eq 'disable-user') 'Cleanup must disable login first.'
@@ -104,5 +105,6 @@ try {
     Assert-True ($script:events.Contains('rollback')) 'Temporary deletion failure must not skip rollback.'
     Write-Output 'PowerShell syntax and isolated lifecycle tests passed.'
 } finally {
+    $env:SystemRoot = $originalSystemRoot
     [IO.Directory]::Delete($script:testRoot, $true)
 }

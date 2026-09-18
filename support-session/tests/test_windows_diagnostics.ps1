@@ -21,6 +21,8 @@ try {
     $env:SystemRoot = $testDirectory
     Write-Utf8 (Join-Path $sessionDirectory 'client.ps1') "throw 'fixture: temporary SSH listener startup failure'"
     Register-SupportTask $id 'Sshd' ([datetime]::Now.AddHours(1))
+    # Windows PowerShell needs the real system directory during child startup.
+    $env:SystemRoot = $originalSystemRoot
     $executable = (Get-Process -Id $PID).Path
     $process = Start-Process -FilePath $executable -ArgumentList $script:capturedAction.Argument `
         -PassThru -Wait -RedirectStandardError (Join-Path $testDirectory 'stderr') `
