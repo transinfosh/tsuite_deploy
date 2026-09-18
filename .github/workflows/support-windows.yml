@@ -1,12 +1,16 @@
 name: Windows support client
 on:
   push:
+    branches:
+      - main
     paths:
-      - 'support-session/**'
+      - 'support-session/customer/*.ps1'
+      - 'support-session/tests/*.ps1'
       - '.github/workflows/support-windows.yml'
   pull_request:
     paths:
-      - 'support-session/**'
+      - 'support-session/customer/*.ps1'
+      - 'support-session/tests/*.ps1'
       - '.github/workflows/support-windows.yml'
 permissions:
   contents: read
