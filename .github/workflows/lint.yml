@@ -4,7 +4,29 @@ on:
   push:
     branches:
       - main
+    paths:
+      - "**/*.sh"
+      - "**/*.py"
+      - "**/*.yml"
+      - "**/*.yaml"
+      - "**/*.j2"
+      - "**/*.ps1"
+      - "support-session/operator/tsuite-support"
+      - "support-session/bastion/tsuite-support-operator-shell"
+      - "tests/**"
+      - ".shellcheckrc"
   pull_request:
+    paths:
+      - "**/*.sh"
+      - "**/*.py"
+      - "**/*.yml"
+      - "**/*.yaml"
+      - "**/*.j2"
+      - "**/*.ps1"
+      - "support-session/operator/tsuite-support"
+      - "support-session/bastion/tsuite-support-operator-shell"
+      - "tests/**"
+      - ".shellcheckrc"
 
 permissions:
   contents: read

@@ -36,6 +36,29 @@ try {
     try { Set-SupportExpiry $state 300 } catch { $failed = $true }
     Assert-True $failed 'A native expiry failure must not be ignored.'
     Assert-True ((Get-Content (Join-Path $directory 'session.json') -Raw | ConvertFrom-Json).expires_at -eq 200) 'Partial failure must keep last confirmed watchdog expiry.'
+
+    $script:failAccount = $false
+    $state | Add-Member -NotePropertyName portable_operator -NotePropertyValue $false
+    Set-SupportExpiry $state 400
+    Assert-True ((Get-Content (Join-Path $directory 'session.json') -Raw | ConvertFrom-Json).expires_at -eq 400) 'Explicit non-portable sessions must renew with one key.'
+    $state.portable_operator = $true
+    $script:events = @()
+    $failed = $false
+    try { Set-SupportExpiry $state 500 } catch {
+        if ($_.Exception.Message -ne 'Invalid key expiry.') { throw }
+        $failed = $true
+    }
+    Assert-True $failed 'Portable sessions must reject a missing second key.'
+    Assert-True ($script:events.Count -eq 0 -and $state.expires_at -eq 400) 'Invalid keys must not update native or watchdog expiry.'
+    Assert-True ((Get-Content (Join-Path $directory 'session.json') -Raw | ConvertFrom-Json).expires_at -eq 400) 'Rejected renewal must retain confirmed expiry on disk.'
+    Write-Utf8 $keyPath ('expiry-time="20260909000000Z" ssh-ed25519 fixture' + "`n" +
+        'expiry-time="20260909000000Z" cert-authority ssh-ed25519 fixture-ca')
+    Set-SupportExpiry $state 500
+    $expectedExpiry = [DateTimeOffset]::FromUnixTimeSeconds(500).UtcDateTime.ToString('yyyyMMddHHmmssZ')
+    Assert-True ([regex]::Matches((Get-Content $keyPath -Raw), ('expiry-time="' + $expectedExpiry + '"')).Count -eq 2) 'Portable renewal must update both key deadlines.'
+    Assert-True ((Get-Content (Join-Path $directory 'session.json') -Raw | ConvertFrom-Json).expires_at -eq 500) 'Portable renewal must persist confirmed expiry.'
+    Assert-True ($script:events -join ',' -eq 'acl,account') 'Portable renewal must apply native restrictions before committing state.'
+
     $state.expires_at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 300
     $script:leaseActivities = @()
     function Read-SupportState { param($Id) return $state }

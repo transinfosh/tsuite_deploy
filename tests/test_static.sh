@@ -24,7 +24,24 @@ python3 -m unittest discover -s "$repo_root/support-session/tests" -p 'test_*.py
 "$repo_root/support-session/tests/test_ssh_restrictions.sh"
 "$repo_root/single-node/deploy.sh" --help | grep -q -- "--dry-run"
 grep -q "single-node/deploy.sh" "$repo_root/install.sh"
-grep -q "github.workflow_sha" "$repo_root/.github/workflows/build-images.yml"
+python3 - "$repo_root/.github/workflows/build-images.yml" <<'PY'
+import pathlib
+import re
+import sys
+
+import yaml
+
+workflow = yaml.safe_load(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+checkouts = [
+    step["with"]
+    for step in workflow["jobs"]["build"]["steps"]
+    if step.get("uses", "").startswith("actions/checkout@")
+    and step.get("with", {}).get("repository") == "transinfosh/tsuite_deploy"
+]
+assert len(checkouts) == 1, "Expected one deployment build definitions checkout"
+# The caller's SHA belongs to the service repo, not the deployment repo.
+assert re.fullmatch(r"[a-f0-9]{40}", checkouts[0]["ref"]), "Pin deployment definitions to their own commit"
+PY
 
 if command -v shellcheck >/dev/null 2>&1; then
 	shellcheck "$repo_root/single-node/deploy.sh" "$repo_root/install.sh" "$repo_root/multi-node/tools/create-source-bundle.sh"

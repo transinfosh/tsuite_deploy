@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Fixture globals are consumed by dynamically loaded deploy.sh functions.
+# shellcheck disable=SC2034
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -142,4 +144,6 @@ FRAPPE_DOCKER_REF="$(git -C "$repo" rev-parse HEAD)"
 FRAPPE_DOCKER_REPO="https://github.com/transinfosh/frappe_docker.git"
 download_frappe_docker >/dev/null
 [[ "$FRAPPE_DOCKER_COMMIT" == "$FRAPPE_DOCKER_REF" ]]
+# Match the literal variable reference in the deployment script.
+# shellcheck disable=SC2016
 grep -Fq 'bench --site "$SITE_NAME" set-maintenance-mode off' "$repo_root/single-node/deploy.sh"
