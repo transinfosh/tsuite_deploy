@@ -13,6 +13,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 
 
 CONFIG = "/etc/tsuite-support/config.json"
@@ -52,11 +53,17 @@ def manager_output(*arguments: str) -> str:
 	return result.stdout
 
 
-def relay_session() -> int:
+def relay_session(bound_session: str | None = None) -> int:
 	try:
 		arguments = shlex.split(os.environ.get("SSH_ORIGINAL_COMMAND", ""))
 	except ValueError as error:
 		raise ActionError("代理命令格式无效") from error
+	if bound_session is not None:
+		if arguments == ["show", bound_session]:
+			sys.stdout.write(manager_output("show", bound_session, "--json"))
+			return 0
+		if arguments != ["proxy", bound_session]:
+			raise ActionError("凭据仅允许访问绑定会话")
 	if arguments == ["self-test"]:
 		manager_output("list")
 		return 0
@@ -69,7 +76,8 @@ def relay_session() -> int:
 		raise ActionError("会话状态格式无效") from error
 	if not isinstance(session, dict) or session.get("id") != session_id:
 		raise ActionError("会话状态与代理请求不一致")
-	if session.get("status") != "enrolled" or not session.get("tunnel_reachable"):
+	if (session.get("status") != "enrolled" or not session.get("tunnel_reachable")
+		or int(time.time()) >= session.get("expires_at", 0)):
 		raise ActionError("支持会话当前不可达")
 	port = int(session.get("remote_port", 0))
 	if not 1024 <= port <= 65535:
@@ -133,6 +141,9 @@ def read_create_request() -> dict[str, str]:
 	if platform not in ("linux", "windows"):
 		raise ActionError("客户操作系统无效")
 	fields["platform"] = platform
+	if type(value.get("portable_operator", False)) is not bool:
+		raise ActionError("操作端模式无效")
+	fields["portable_operator"] = value.get("portable_operator", False)
 	return fields
 
 
@@ -166,6 +177,8 @@ def parser() -> argparse.ArgumentParser:
 
 def main(arguments: list[str] | None = None) -> int:
 	arguments = list(sys.argv[1:] if arguments is None else arguments)
+	if len(arguments) == 2 and arguments[0] == "--session-proxy":
+		return relay_session(session_id(arguments[1]))
 	if arguments == ["--proxy"]:
 		return relay_session()
 	if arguments == ["--forced"]:
@@ -184,6 +197,7 @@ def main(arguments: list[str] | None = None) -> int:
 			"--purpose", request["purpose"],
 			"--platform", request["platform"],
 			"--json",
+			*(("--portable-operator",) if request["portable_operator"] else ()),
 			input_text=request["operator_public_key"],
 		)
 	if args.action == "show":

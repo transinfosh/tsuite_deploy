@@ -115,6 +115,15 @@ sudo -n -u tsuite-support-operator tsuite-support-console-action force-close SES
 风险时，运维人员才能显式使用带 `--reason` 的 `force-close`；Web 页面没有该权限。关闭方式、关闭人和
 原因会保留在 edge 会话历史中。
 
+## 便携支持机授权
+
+新建支持会话同时生成客户命令和 Linux 支持机命令。支持机自动通过公开域名的 HTTPS
+`/support/operator-claim` 领取会话专属证书，无需到控制机的 SSH 权限或额外 GitHub 登录。
+控制机只参与授权；终端数据经 Edge 直接到客户。页面 sudoers 增加无参数 `claim`，请求正文
+经 stdin 交给 broker；broker 保存凭据哈希并在文件锁内单次消费，不向页面暴露任何私钥。
+`install-support-console.sh` 同时安装公开的 portable client 和活动上报模块。
+详见 [临时支持会话](../support-session/README.md#任意-linux-支持机接入)。
+
 ## 安全约束
 
 - 不把 GitHub Token、OAuth Secret、FRP Token、Vault 密码或客户私钥提交到 Git；

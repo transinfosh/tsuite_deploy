@@ -75,6 +75,59 @@ Host Key 和专用 bridge key 调用堡垒机，bridge key 不能获得普通 Sh
 页面、bridge、broker 和 CLI 的用途校验同步放宽，填写时仍限制为最多 200 个可见字符；关闭原因仍必填。
 首页只展示尚未结束的会话及对应客户环境，统计也只计这些会话；已关闭/已过期记录保留供详情及后台审计查询。
 
+## 任意 Linux 支持机接入
+
+网页创建会话时同时显示客户执行命令和支持机执行命令，两条命令绑定同一个已经生成的完整
+会话 ID，并使用独立凭据。先执行客户命令，再在支持机执行支持命令即可；支持机先执行时会
+自动等待客户接入。支持机无需再次登录 GitHub，无需到部署控制机的 SSH 权限，也无需手工
+输入会话 ID、生成密钥或修改 SSH 配置。支持机需要 Python 3、OpenSSH Client、curl 和可用终端。
+
+授权请求经 `https://edge.trinfo.net/support/operator-claim` 转到控制机；终端输入输出直接经
+Edge 的受限 SSH 代理到客户，不经过控制机。公开 `/support/operator-client` 只提供通用程序，
+不包含会话秘密。支持命令中的 256-bit 随机授权通过标准输入交给程序，并作为 HTTPS POST
+正文提交；不出现在 URL、客户端 Python 进程参数或普通服务日志中。完整支持命令仍是临时
+密码，会留在执行者的 Shell 历史中，不可公开或转交未授权人员。
+
+支持机自动生成 Ed25519 私钥并保存在本机。控制机仅保存公钥，原始领取凭据只在创建结果
+显示一次，持久状态保存其 SHA-256；领取期限与客户领取期限相同，默认 15 分钟，但两者
+独立消费。并发领取由会话文件锁保护，只有一次成功领取；领取成功后不能换绑到另一把密钥。
+如领取响应丢失且本机未保存证书，关闭旧会话后重新创建，不回退到共享私钥或重复授权。
+
+每个新会话的控制机 operator key 同时作为该会话专属 SSH CA。客户仍保留原 operator 公钥，
+供控制机完成普通关闭；新增 CA 信任只接受完整会话 ID principal。Edge 的 CA 信任同样限定
+principal，并强制执行该会话的 show/proxy，禁止 Shell、任意端口及转发。证书本身不设固定
+总时长，实际有效期由 Edge/客户 CA 行的原生 `expiry-time` 和客户账号期限限制，跟随现有
+闲置租约更新；没有全局 CA 信任。关闭开始时删除 Edge CA 信任，撤销隧道；客户清理删除
+整个临时账号及两条授权记录。状态查询、等待和后台清理轮询均不续期。
+
+本机连接程序会显示再次连接命令，例如：
+
+```bash
+python3 ~/.config/tsuite-support/portable/SESSION_ID/support.py --resume
+# 执行一条远端 Shell 命令（Windows 使用 PowerShell 命令）
+python3 ~/.config/tsuite-support/portable/SESSION_ID/support.py --resume 'hostname'
+```
+
+本机后台清理程序每 30 秒核对会话状态，确认结束或超过最后确认租约时删除本次会话目录。
+网络不可用时按最后确认期限清理，不自行续期；支持机休眠或进程退出会延迟本机文件删除，
+但服务端到期/撤销仍生效。如已领取授权而客户没有接入，授权随客户领取窗口结束。
+
+兼容影响：create 结果新增 `operator_claim_token`（只在创建返回），会话及 enrollment 增加
+`portable_operator`；原 ID、原有命令和字段保持兼容。公司旧 CLI 创建的会话默认不启用 CA。
+已接入会话不补发支持授权、不改客户信任；升级后新建会话才启用此功能。需要同步更新 Edge
+manager/bridge/受限 Shell、Linux/Windows bootstrap/续期程序、控制机 broker/页面及精确 sudoers
+中的 `claim` 动作。页面仅能请求签发会话证书，仍不能读取私钥或执行 ssh/run/force-close。
+
+验证范围：网页两条命令、先后执行顺序、错误/过期/重复及并发领取、跨会话隔离、Edge Shell
+拒绝、原生到期、租约同步及普通关闭。真实 OpenSSH 验证命令：
+
+```bash
+python3 support-session/tests/verify_portable_ssh.py
+```
+
+该检查用本机临时目录和两个仅监听回环的独立 sshd，需免密 sudo，不修改系统 SSH 配置或账号。
+Windows 专属 CA 信任和双授权记录续期还需在可丢弃 Windows Server 上完成真实验证。
+
 ## 安装公司端 CLI
 
 ```bash

@@ -67,7 +67,8 @@ class WindowsBrokerTest(unittest.TestCase):
 
 	def test_windows_creation_passes_platform_without_persisting_secrets(self):
 		created = {'id': '012345abcdef', 'platform': 'windows', 'token': 'DO-NOT-STORE',
-			'customer_command': 'powershell.exe download', 'expires_at': int(time.time()) + 7200}
+			'customer_command': 'powershell.exe download', 'expires_at': int(time.time()) + 7200,
+            'token_expires_at': int(time.time()) + 900, 'portable_operator': True}
 		with mock.patch.object(REMOTE, 'remote_action', return_value=subprocess.CompletedProcess([], 0, json.dumps(created))) as action:
 			REMOTE.create_session(self.settings, 'windows-one', 'alice', 'maintenance', 'windows')
 		self.assertEqual(json.loads(action.call_args.kwargs['input_text'])['platform'], 'windows')

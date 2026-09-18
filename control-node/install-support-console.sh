@@ -87,6 +87,9 @@ install -m 0755 -o root -g root \
 	"$REPO_ROOT/support-session/console/tsuite_support_console.py" \
 	"$INSTALL_ROOT/tsuite-support-console"
 
+install -m 0644 -o root -g root "$REPO_ROOT/support-session/operator/tsuite_support_portable.py" "$INSTALL_ROOT/tsuite_support_portable.py"
+install -m 0644 -o root -g root "$REPO_ROOT/support-session/operator/tsuite_support_activity.py" "$INSTALL_ROOT/tsuite_support_activity.py"
+
 config_temporary="$(mktemp "$CONFIG_DIR/.config.json.XXXXXX")"
 trap 'rm -f -- "$config_temporary"' EXIT
 python3 - "$config_temporary" "$GITHUB_CLIENT_ID" "$GITHUB_CLIENT_SECRET_FILE" \

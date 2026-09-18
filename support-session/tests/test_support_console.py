@@ -379,6 +379,7 @@ class SupportConsoleTest(unittest.TestCase):
 			"id": "012345abcdef",
 			"status": "enrolled",
 			"tunnel_reachable": True,
+			"expires_at": int(time.time()) + 900,
 			"remote_port": 22000,
 		})
 		with mock.patch.dict(BASTION_ACTION.os.environ, {"SSH_ORIGINAL_COMMAND": "proxy 012345abcdef"}), \
@@ -397,6 +398,7 @@ class SupportConsoleTest(unittest.TestCase):
 			"id": "012345abcdef",
 			"status": "revoking",
 			"tunnel_reachable": True,
+			"expires_at": int(time.time()) + 900,
 			"remote_port": 22000,
 		})
 		with mock.patch.dict(BASTION_ACTION.os.environ, {"SSH_ORIGINAL_COMMAND": "proxy 012345abcdef"}), \
@@ -442,6 +444,8 @@ class SupportOperatorBrokerTest(unittest.TestCase):
 					"token": "token",
 					"customer_command": "curl https://example.invalid | sudo bash",
 					"expires_at": int(time.time()) + 7200,
+					"token_expires_at": int(time.time()) + 900,
+					"portable_operator": True,
 				}), "",
 			)
 
@@ -466,6 +470,7 @@ class SupportOperatorBrokerTest(unittest.TestCase):
 			"id": session_id,
 			"status": "revoking",
 			"tunnel_reachable": True,
+			"expires_at": int(time.time()) + 900,
 			"remote_port": 22000,
 			"customer_host_key": "ssh-ed25519 " + "A" * 44,
 		}
@@ -490,6 +495,7 @@ class SupportOperatorBrokerTest(unittest.TestCase):
 			"id": session_id,
 			"status": "enrolled",
 			"tunnel_reachable": True,
+			"expires_at": int(time.time()) + 900,
 			"remote_port": 22000,
 			"customer_host_key": "ssh-ed25519 " + "A" * 44,
 		}
@@ -524,6 +530,7 @@ class SupportOperatorBrokerTest(unittest.TestCase):
 			"id": session_id,
 			"status": "enrolled",
 			"tunnel_reachable": True,
+			"expires_at": int(time.time()) + 900,
 			"remote_port": 22000,
 			"customer_host_key": "ssh-ed25519 " + "A" * 44,
 		}
@@ -588,6 +595,7 @@ class SupportOperatorBrokerTest(unittest.TestCase):
 			"id": session_id,
 			"status": "enrolled",
 			"tunnel_reachable": True,
+			"expires_at": int(time.time()) + 900,
 			"remote_port": 22000,
 			"customer_host_key": "ssh-ed25519 " + "A" * 44,
 		}
@@ -699,6 +707,7 @@ class CompanyCliCloseTest(unittest.TestCase):
 			"id": self.session_id,
 			"status": "revoking",
 			"tunnel_reachable": True,
+			"expires_at": int(time.time()) + 900,
 			"remote_port": 22000,
 			"customer_host_key": "ssh-ed25519 " + "A" * 44,
 		}

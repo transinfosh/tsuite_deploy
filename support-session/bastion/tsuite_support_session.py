@@ -328,6 +328,7 @@ def create_session(
 	created_by: str,
 	purpose: str = "",
 	platform: str = "linux",
+	portable_operator: bool = False,
 ) -> tuple[dict[str, Any], str]:
 	if not CUSTOMER_RE.fullmatch(customer):
 		raise SupportError("客户标识仅允许小写字母、数字和连字符")
@@ -379,12 +380,15 @@ def create_session(
 				"tunnel_user": username,
 				"tunnel_private_key": private_key,
 				"operator_public_key": key_without_comment(operator_public_key),
+				"portable_operator": portable_operator,
 				"enrollment_private_key": enrollment_private_key,
 				"enrollment_public_key": enrollment_public_key,
 			}
 			store.save(session)
 			rewrite_enrollment_authorized_keys(store)
 			write_customer_script(settings, session)
+			if portable_operator:
+				rewrite_portable_authorized_keys(store)
 		except Exception:
 			with contextlib.suppress(FileNotFoundError):
 				authorized_keys_path.unlink()
@@ -396,6 +400,9 @@ def create_session(
 				(settings.downloads_dir / download_id).unlink()
 			with contextlib.suppress(Exception):
 				rewrite_enrollment_authorized_keys(store)
+			if portable_operator:
+				with contextlib.suppress(Exception):
+					rewrite_portable_authorized_keys(store)
 			raise
 	return session, token
 
@@ -407,6 +414,35 @@ def public_session(session: dict[str, Any]) -> dict[str, Any]:
 		"lease_private_key", "lease_public_key",
 	}
 	return {key: value for key, value in session.items() if key not in secret_fields}
+
+
+def rewrite_portable_authorized_keys(store: SessionStore) -> None:
+	"""Preserve fixed bridge keys; each session CA can only invoke its own proxy."""
+	account = pwd.getpwnam("tsuite-operator")
+	path = pathlib.Path(account.pw_dir) / ".ssh/authorized_keys"
+	existing = path.read_text(encoding="utf-8").splitlines(keepends=True)
+	existing = [line for line in existing if " tsuite-portable:" not in line]
+	for session in store.all():
+		if not session.get("portable_operator") or session["status"] not in {"issued", "enrolled"}:
+			continue
+		existing.append(
+			f'cert-authority,principals="{session["id"]}",restrict,'
+			f'expiry-time="{ssh_expiry(session["expires_at"])}",'
+			f'command="/usr/local/sbin/tsuite-support-console-action --session-proxy {session["id"]}" '
+			f'{session["operator_public_key"]} tsuite-portable:{session["id"]}\n'
+		)
+	fd, temporary = tempfile.mkstemp(prefix=".authorized_keys.", dir=path.parent)
+	try:
+		with os.fdopen(fd, "w", encoding="utf-8") as output:
+			output.writelines(existing)
+			output.flush()
+			os.fsync(output.fileno())
+		os.chmod(temporary, 0o600)
+		os.chown(temporary, account.pw_uid, account.pw_gid)
+		os.replace(temporary, path)
+	finally:
+		with contextlib.suppress(FileNotFoundError):
+			os.unlink(temporary)
 
 
 def enrollment_payload(session: dict[str, Any], settings: Settings) -> dict[str, Any]:
@@ -425,6 +461,7 @@ def enrollment_payload(session: dict[str, Any], settings: Settings) -> dict[str,
 		"tunnel_user": session["tunnel_user"],
 		"tunnel_private_key": session["tunnel_private_key"],
 		"operator_public_key": session["operator_public_key"],
+		"portable_operator": session.get("portable_operator", False),
 	}
 
 
@@ -467,6 +504,8 @@ def renew_lease(store: SessionStore, session_id: str, active: bool) -> dict[str,
 			rewrite_tunnel_expiry(store, session)
 			store.save(session)
 			rewrite_enrollment_authorized_keys(store)
+			if session.get("portable_operator"):
+				rewrite_portable_authorized_keys(store)
 		return {"session_id": session_id, "expires_at": session["expires_at"],
 			"idle_timeout_seconds": session["idle_timeout_seconds"]}
 
@@ -552,6 +591,8 @@ def enroll(store: SessionStore, token: str, nonce: str, customer_host_key: str, 
 		if session.get("idle_timeout_seconds"):
 			rewrite_enrollment_authorized_keys(store)
 			remove_customer_script(store.settings, session)
+		if session.get("portable_operator"):
+			rewrite_portable_authorized_keys(store)
 	return enrollment_payload(session, store.settings)
 
 
@@ -576,6 +617,8 @@ def terminate_session(
 		remove_customer_script(store.settings, session)
 		store.save(session)
 		rewrite_enrollment_authorized_keys(store)
+	if session.get("portable_operator"):
+		rewrite_portable_authorized_keys(store)
 	with contextlib.suppress(subprocess.CalledProcessError):
 		run("pkill", "-KILL", "-u", session["tunnel_user"])
 	authorized_key_path = store.settings.authorized_keys_dir / session["tunnel_user"]
@@ -726,6 +769,7 @@ def build_parser() -> argparse.ArgumentParser:
 	create.add_argument("--purpose", default="")
 	create.add_argument("--platform", choices=("linux", "windows"), default="linux")
 	create.add_argument("--json", action="store_true")
+	create.add_argument("--portable-operator", action="store_true")
 	show = subparsers.add_parser("show")
 	show.add_argument("session_id")
 	show.add_argument("--json", action="store_true")
@@ -757,6 +801,7 @@ def main() -> int:
 				args.created_by,
 				args.purpose,
 				args.platform,
+				args.portable_operator,
 			)
 			result = public_session(session) | {"token": token}
 			result["customer_command"] = customer_command(settings, session)

@@ -12,6 +12,10 @@ bash -n "$repo_root/support-session/operator/install.sh"
 python3 -m py_compile \
 	"$repo_root/support-session/bastion/tsuite_support_session.py" \
 	"$repo_root/support-session/operator/tsuite-support" \
+	"$repo_root/support-session/operator/tsuite_support_portable.py" \
+	"$repo_root/support-session/console/tsuite_support_console.py" \
+	"$repo_root/support-session/console/tsuite_support_remote_action.py" \
+	"$repo_root/support-session/bastion/tsuite_support_console_action.py" \
 	"$repo_root/patch-deploy/patch.py" \
 	"$repo_root/patch-deploy/remote.py"
 python3 -m unittest discover -s "$repo_root/patch-deploy/tests" -p 'test_*.py'

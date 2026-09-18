@@ -247,6 +247,10 @@ key_expiry="$(date -u -d "@$expires_at" +%Y%m%d%H%M%SZ)"
 [[ "$key_expiry" =~ ^[0-9]{14}Z$ ]] || die "无法生成临时 SSH Key 过期时间"
 printf 'expiry-time="%s",from="127.0.0.1",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-user-rc %s tsuite-support:%s\n' \
 	"$key_expiry" "$operator_public_key" "$session_id" >"$ops_home/.ssh/authorized_keys"
+if python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("portable_operator") is True else 1)' "$work_dir/payload.json"; then
+	printf 'cert-authority,principals="%s",expiry-time="%s",from="127.0.0.1",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-user-rc %s tsuite-portable:%s\n' \
+		"$session_id" "$key_expiry" "$operator_public_key" "$session_id" >>"$ops_home/.ssh/authorized_keys"
+fi
 chown "$ops_user:$ops_group" "$ops_home/.ssh/authorized_keys"
 chmod 0600 "$ops_home/.ssh/authorized_keys"
 printf '%s ALL=(root) NOPASSWD: ALL\n' "$ops_user" >"/etc/sudoers.d/tsuite-support-$session_id"

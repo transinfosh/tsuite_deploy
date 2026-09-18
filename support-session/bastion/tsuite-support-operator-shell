@@ -10,6 +10,13 @@ if [ "$#" -eq 2 ] && [ "$1" = "-c" ]; then
 		"/usr/local/sbin/tsuite-support-console-action --proxy")
 			exec /usr/local/sbin/tsuite-support-console-action --proxy
 			;;
+		"/usr/local/sbin/tsuite-support-console-action --session-proxy "*)
+			bound_session=${2##* }
+			case "$bound_session" in *[!a-f0-9]*|"") exit 1 ;; esac
+			[ "${#bound_session}" -eq 12 ] || exit 1
+			[ "$2" = "/usr/local/sbin/tsuite-support-console-action --session-proxy $bound_session" ] || exit 1
+			exec /usr/local/sbin/tsuite-support-console-action --session-proxy "$bound_session"
+			;;
 	esac
 fi
 

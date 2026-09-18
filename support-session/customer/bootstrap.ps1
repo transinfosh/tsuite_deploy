@@ -97,6 +97,7 @@ try {
         $listener.Stop()
         $state = @{
             session_id = $id; ops_user = $opsUser; expires_at = $payload.expires_at
+            portable_operator = ($payload.portable_operator -eq $true)
             idle_timeout_seconds = $payload.idle_timeout_seconds
             bastion_host = $payload.bastion_host; bastion_port = $payload.bastion_port
             remote_port = $payload.remote_port; local_port = $localPort; tunnel_user = $payload.tunnel_user
@@ -114,6 +115,12 @@ try {
         Write-Utf8 (Join-Path $directory 'authorized_keys') (
             'expiry-time="{0}",from="127.0.0.1",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-user-rc {1}' -f `
                 $keyExpiry, $payload.operator_public_key)
+        if ($payload.portable_operator -eq $true) {
+            $keysPath = Join-Path $directory 'authorized_keys'
+            $keys = [IO.File]::ReadAllText($keysPath)
+            $keys += "`n" + ('cert-authority,principals="{0}",expiry-time="{1}",from="127.0.0.1",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-user-rc {2}' -f $id, $keyExpiry, $payload.operator_public_key)
+            Write-Utf8 $keysPath $keys
+        }
         # Isolated sshd: no shared administrators_authorized_keys or changes to the existing sshd service.
         $sshDirectoryPath = $directory.Replace('\', '/')
         $sshdConfiguration = @"

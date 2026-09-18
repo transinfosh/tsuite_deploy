@@ -11,6 +11,7 @@ import json
 import os
 import pathlib
 import secrets
+import shlex
 import sqlite3
 import subprocess
 import sys
@@ -268,11 +269,11 @@ def github_identity(settings: Settings, code: str, verifier: str) -> tuple[str, 
 	return login, name
 
 
-def manager(*arguments: str) -> str:
+def manager(*arguments: str, input_text: str | None = None) -> str:
 	try:
 		result = subprocess.run(
 				["sudo", "-n", "-u", BROKER_USER, ACTION, *arguments],
-			check=False, capture_output=True, text=True, timeout=30,
+			check=False, capture_output=True, text=True, timeout=30, input=input_text,
 		)
 	except (OSError, subprocess.TimeoutExpired) as error:
 		raise ConsoleError("支持会话服务暂时不可用") from error
@@ -534,6 +535,22 @@ class Application:
 		path = environ.get("PATH_INFO", "/")
 		method = environ.get("REQUEST_METHOD", "GET")
 		try:
+			if path == "/operator-client" and method == "GET":
+				root = pathlib.Path(__file__).resolve().parent
+				if not (root / "tsuite_support_portable.py").is_file():
+					root = root.parent / "operator"
+				source = (root / "tsuite_support_portable.py").read_text(encoding="utf-8")
+				activity = (root / "tsuite_support_activity.py").read_text(encoding="utf-8")
+				body = ("CLIENT_SOURCE = " + repr(source) + "\nACTIVITY_SOURCE = " + repr(activity) + "\n" + source).encode()
+				start_response("200 OK", [("Content-Type", "text/plain; charset=utf-8"), ("Content-Length", str(len(body))), ("Cache-Control", "no-store"), ("X-Content-Type-Options", "nosniff")])
+				return [body]
+			if path == "/operator-claim" and method == "POST":
+				length = int(environ.get("CONTENT_LENGTH", "0"))
+				if not 0 < length <= MAX_BODY_BYTES:
+					raise ConsoleError("授权请求大小无效")
+				body = environ["wsgi.input"].read(length).decode("utf-8")
+				result = json.loads(manager("claim", input_text=body))
+				return self.json_response(start_response, result)
 			if path == "/login" and method == "GET":
 				state, verifier = self.store.new_oauth_state()
 				query = urllib.parse.urlencode({"client_id": self.settings.client_id, "redirect_uri": self.settings.callback_url, "scope": "read:org", "state": state, "code_challenge": code_challenge(verifier), "code_challenge_method": "S256"})
@@ -587,6 +604,11 @@ class Application:
 				))
 				if not isinstance(created, dict) or not isinstance(created.get("token"), str):
 					raise ConsoleError("支持会话服务返回无效数据")
+				operator_section = ""
+				if isinstance(created.get("operator_claim_token"), str):
+					grant = json.dumps({"id": created["id"], "token": created["operator_claim_token"], "url": self.settings.public_url}, separators=(",", ":"))
+					command = "printf '%s\n' " + shlex.quote(grant) + ' | python3 -c "$(curl -fsSL --proto =https --tlsv1.2 ' + shlex.quote(self.settings.public_url + "/operator-client") + ')"'
+					operator_section = '<div class="secret-section"><div class="secret-heading"><h2>支持机执行命令（Linux 终端）</h2><button type="button" class="copy-button" data-copy-target="operator-command">复制</button></div><div id="operator-command" class="secret">' + html.escape(command) + '</div><p class="muted">自动生成本机密钥并领取一次性授权，无需登录 GitHub 或部署控制机。客户尚未接入时自动等待。请勿分享此命令。</p></div>'
 				legacy_code = ""
 				if created.get("auth_mode") != "enrollment-key":
 					legacy_code = f'<div class="secret-section"><h2>一次性支持会话码</h2><button type="button" class="copy-button" data-copy-target="support-token">复制</button><div id="support-token" class="secret token">{html.escape(created["token"])}</div></div>'
@@ -594,7 +616,7 @@ class Application:
 					if created.get("auth_mode") == "enrollment-key" else "请将命令和会话码通过两个独立安全渠道发送给客户。")
 				content = f"""<header><h1>支持会话已创建</h1><a href="/support/">返回会话列表</a></header><section class="card"><p>会话 ID：<code>{html.escape(str(created['id']))}</code>。以下内容仅显示一次，且不会被管理页面持久保存。</p>
 <div class="secret-section"><div class="secret-heading"><h2>客户执行命令（{"管理员 PowerShell" if platform == "windows" else "Linux 终端"}）</h2><button type="button" class="copy-button" data-copy-target="customer-command">复制</button></div><div id="customer-command" class="secret">{html.escape(str(created['customer_command']))}</div></div>
-{legacy_code}<p class="muted">{instructions}</p></section>"""
+{operator_section}{legacy_code}<p class="muted">{instructions}</p></section>"""
 				return self.response(start_response, HTTPStatus.OK, page("会话已创建", content))
 			if path.startswith("/session/") and path.endswith("/close") and method == "POST":
 				target = path.removeprefix("/session/").removesuffix("/close")
@@ -646,7 +668,7 @@ class Application:
 					)
 					return self.response(start_response, HTTPStatus.OK, page("会话详情", content))
 			return self.response(start_response, HTTPStatus.NOT_FOUND, page("未找到", "<h1>未找到页面</h1>"))
-		except (ConsoleError, json.JSONDecodeError):
+		except (ConsoleError, ValueError, TypeError):
 			return self.response(start_response, HTTPStatus.BAD_REQUEST, page("操作失败", "<h1>操作失败</h1><p class=\"error\">请求未完成。请刷新后重试；如仍失败，请查看堡垒机服务日志。</p>"))
 
 

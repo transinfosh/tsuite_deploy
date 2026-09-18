@@ -154,7 +154,7 @@ chown root:"$BROKER_GROUP" "$CONFIG_DIR/action.json"
 sudoers_temporary="$(mktemp /etc/sudoers.d/.tsuite-deploy-operator.XXXXXX)"
 trap 'unlink "$sudoers_temporary" 2>/dev/null || true' EXIT
 cat >"$sudoers_temporary" <<EOF
-Cmnd_Alias TSUITE_SUPPORT_WEB = /usr/local/bin/tsuite-support-console-action create *, /usr/local/bin/tsuite-support-console-action show *, /usr/local/bin/tsuite-support-console-action list, /usr/local/bin/tsuite-support-console-action close *
+Cmnd_Alias TSUITE_SUPPORT_WEB = /usr/local/bin/tsuite-support-console-action create *, /usr/local/bin/tsuite-support-console-action show *, /usr/local/bin/tsuite-support-console-action list, /usr/local/bin/tsuite-support-console-action close *, /usr/local/bin/tsuite-support-console-action claim
 Cmnd_Alias TSUITE_SUPPORT_OPERATOR = /usr/local/bin/tsuite-support-console-action show *, /usr/local/bin/tsuite-support-console-action list, /usr/local/bin/tsuite-support-console-action close *, /usr/local/bin/tsuite-support-console-action force-close *, /usr/local/bin/tsuite-support-console-action ssh *, /usr/local/bin/tsuite-support-console-action run *
 Cmnd_Alias TSUITE_CONTROL_SERVICES = /usr/bin/systemctl restart nginx.service, /usr/bin/systemctl restart tsuite-frpc.service, /usr/bin/systemctl restart tsuite-support-console.service, /usr/bin/systemctl restart tsuite-github-egress.service
 $CONSOLE_USER ALL=($BROKER_USER) NOPASSWD: TSUITE_SUPPORT_WEB

@@ -64,7 +64,7 @@ def apply_expiry(state, expiry):
     keys = pathlib.Path(account.pw_dir) / '.ssh/authorized_keys'
     stamp = time.strftime('%Y%m%d%H%M%SZ', time.gmtime(expiry))
     updated, count = re.subn(r'expiry-time="[0-9]{14}Z"', f'expiry-time="{stamp}"', keys.read_text())
-    if count != 1:
+    if count != (2 if state.get("portable_operator") else 1):
         raise ValueError('Invalid support authorized_keys')
     atomic_write(keys, updated, owner=(account.pw_uid, account.pw_gid))
     configuration = ROOT / 'session.conf'

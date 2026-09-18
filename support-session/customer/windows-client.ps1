@@ -308,7 +308,8 @@ function Set-SupportExpiry($State, [long]$Expiry) {
     if ($user.Description -cne "TSuite temporary support $($State.session_id)") { throw 'Account ownership mismatch.' }
     $path = Join-Path $directory 'authorized_keys'
     $keys = Get-Content -LiteralPath $path -Raw
-    if ([regex]::Matches($keys, 'expiry-time="[0-9]{14}Z"').Count -ne 1) { throw 'Invalid key expiry.' }
+    $expectedKeys = if ($State.portable_operator -eq $true) { 2 } else { 1 }
+    if ([regex]::Matches($keys, 'expiry-time="[0-9]{14}Z"').Count -ne $expectedKeys) { throw 'Invalid key expiry.' }
     $keys = $keys -replace 'expiry-time="[0-9]{14}Z"', ('expiry-time="' + $date.UtcDateTime.ToString('yyyyMMddHHmmssZ') + '"')
     # Native restrictions first; commit the watchdog deadline only after both succeed.
     Write-Utf8 $path $keys

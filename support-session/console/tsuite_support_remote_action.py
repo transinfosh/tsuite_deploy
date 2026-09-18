@@ -6,6 +6,9 @@ from __future__ import annotations
 import argparse
 import base64
 import contextlib
+import fcntl
+import hashlib
+import secrets
 import json
 import os
 import pathlib
@@ -258,6 +261,7 @@ def create_session(
 		request = json.dumps({
 			"customer": customer,
 			"platform": platform,
+			"portable_operator": True,
 			"operator_public_key": public_key,
 			"created_by": created_by,
 			"purpose": purpose,
@@ -276,9 +280,14 @@ def create_session(
 		if not isinstance(created.get("token"), str) or not isinstance(created.get("customer_command"), str):
 			close_remote(settings, session_id, "system:broker", "force", "堡垒机返回的会话凭据无效")
 			raise RemoteActionError("堡垒机返回的会话凭据无效")
+		if (created.get("portable_operator") is not True or type(created.get("token_expires_at")) is not int
+			or created["token_expires_at"] <= int(time.time())):
+			close_remote(settings, session_id, "system:broker", "force", "堡垒机未启用支持机授权")
+			raise RemoteActionError("请同步升级堡垒机支持机授权模块")
 		if not isinstance(created.get("expires_at"), int) or created["expires_at"] <= int(time.time()):
 			close_remote(settings, session_id, "system:broker", "force", "堡垒机返回的会话到期时间无效")
 			raise RemoteActionError("堡垒机返回的会话到期时间无效")
+		claim_token = secrets.token_urlsafe(32)
 		try:
 			atomic_write(identity_path(settings, session_id), key_path.read_text(encoding="utf-8"))
 			atomic_write(
@@ -292,12 +301,15 @@ def create_session(
 					"expires_at": created["expires_at"],
 					"idle_timeout_seconds": created.get("idle_timeout_seconds"),
 					"identity_file": str(identity_path(settings, session_id)),
+					"claim_hash": hashlib.sha256(claim_token.encode()).hexdigest(),
+					"claim_expires_at": created["token_expires_at"],
 				}, ensure_ascii=False, sort_keys=True) + "\n",
 			)
 		except Exception:
 			close_remote(settings, session_id, "system:broker", "force", "控制机无法保存会话独立私钥")
 			remove_local_session(settings, session_id)
 			raise
+	created["operator_claim_token"] = claim_token
 	return created
 
 
@@ -463,6 +475,51 @@ def garbage_collect(settings: Settings) -> None:
 				key_path.unlink()
 
 
+def claim_operator(settings: Settings, request: dict[str, Any]) -> dict[str, Any]:
+	"""Consume a bearer grant under a per-session lock, sign only its bound principal."""
+	session_id = request.get("id", "")
+	token = request.get("token", "")
+	public_key = request.get("public_key", "")
+	if (not isinstance(session_id, str) or not SESSION_RE.fullmatch(session_id)
+		or not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", token)
+		or not isinstance(public_key, str) or not re.fullmatch(r"ssh-ed25519 [A-Za-z0-9+/=]+", public_key)):
+		raise RemoteActionError("授权请求无效")
+	if not session_state_path(settings, session_id).is_file():
+		raise RemoteActionError("授权请求无效")
+	lock_path = settings.state_dir / "sessions" / f"{session_id}.claim.lock"
+	with lock_path.open("a", encoding="utf-8") as lock:
+		fcntl.flock(lock, fcntl.LOCK_EX)
+		local = load_local_session(settings, session_id)
+		if (local.get("claim_consumed_at") or int(time.time()) >= local.get("claim_expires_at", 0)
+			or not secrets.compare_digest(local.get("claim_hash", ""), hashlib.sha256(token.encode()).hexdigest())):
+			raise RemoteActionError("授权已经领取或失效")
+		remote = remote_session(settings, session_id)
+		if (not remote.get("portable_operator") or remote.get("status") not in {"issued", "enrolled"}
+			or int(time.time()) >= remote.get("expires_at", 0)):
+			raise RemoteActionError("会话已经结束或不支持操作端接入")
+		with tempfile.TemporaryDirectory(prefix="tsuite-support-sign.") as temporary:
+			key = pathlib.Path(temporary) / "operator.pub"
+			key.write_text(public_key + "\n", encoding="utf-8")
+			# The per-session CA trust lines carry the renewable native expiry.
+			# No global CA trust exists; deleting those lines revokes this certificate.
+			ensure_success(run([
+				"ssh-keygen", "-q", "-s", str(identity_path(settings, session_id)),
+				"-I", f"tsuite-portable:{session_id}", "-n", session_id,
+				"-V", "-1m:forever", "-O", "clear", "-O", "permit-pty", str(key),
+			]), "无法签发操作端证书")
+			certificate = key.with_name("operator-cert.pub").read_text(encoding="utf-8").strip()
+		local["claim_consumed_at"] = int(time.time())
+		local["claimed_public_key"] = public_key
+		local.pop("claim_hash", None)
+		atomic_write(session_state_path(settings, session_id), json.dumps(local, ensure_ascii=False) + "\n")
+		return {
+			"id": session_id, "certificate": certificate, "host": settings.host,
+			"port": settings.port, "user": settings.user,
+			"known_hosts": settings.known_hosts_file.read_text(encoding="utf-8"),
+			"expires_at": remote["expires_at"],
+		}
+
+
 def parser() -> argparse.ArgumentParser:
 	root = argparse.ArgumentParser(description=__doc__)
 	subparsers = root.add_subparsers(dest="action", required=True)
@@ -488,12 +545,22 @@ def parser() -> argparse.ArgumentParser:
 	subparsers.add_parser("list")
 	subparsers.add_parser("gc")
 	subparsers.add_parser("self-test")
+	subparsers.add_parser("claim")
 	return root
 
 
 def main() -> int:
 	args = parser().parse_args()
 	settings = Settings.load()
+	if args.action == "claim":
+		body = sys.stdin.buffer.read(8193)
+		if len(body) > 8192:
+			raise RemoteActionError("授权请求过大")
+		request = json.loads(body)
+		if not isinstance(request, dict):
+			raise RemoteActionError("授权请求无效")
+		print(json.dumps(claim_operator(settings, request), ensure_ascii=False))
+		return 0
 	if args.action == "create":
 		created = create_session(settings, args.customer, args.created_by, args.purpose, args.platform)
 		print(json.dumps(created, ensure_ascii=False, separators=(",", ":")))
