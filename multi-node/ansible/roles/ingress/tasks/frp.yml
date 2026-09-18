@@ -43,6 +43,7 @@
     owner: root
     group: root
     mode: "0600"
+    validate: /usr/local/bin/frpc verify -c %s
   no_log: true
   notify: 重启 FRP Client
 

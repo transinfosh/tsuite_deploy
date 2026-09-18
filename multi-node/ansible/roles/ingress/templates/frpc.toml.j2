@@ -11,6 +11,9 @@ type = "http"
 localIP = "127.0.0.1"
 localPort = {{ route.local_port }}
 customDomains = ["{{ route.hostname }}"]
+{% for header, value in (route.request_headers | default({})).items() %}
+requestHeaders.set.{{ header | to_json }} = {{ value | to_json }}
+{% endfor %}
 
 {% endfor %}
 {% for route in ingress_stcp_routes %}

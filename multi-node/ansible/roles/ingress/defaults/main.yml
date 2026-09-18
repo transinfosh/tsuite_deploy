@@ -2,5 +2,10 @@
 ingress_routes:
   - hostname: "{{ ingress_hostname }}"
     local_port: "{{ ingress_local_url.rsplit(':', 1)[1] | int }}"
+    request_headers:
+      X-Forwarded-Proto: "{{ ingress_forwarded_proto }}"
+# Public FRP ingress terminates TLS before forwarding to the local HTTP listener.
+# Set to http when the public entry point does not use HTTPS.
+ingress_forwarded_proto: https
 ingress_stcp_routes: []
 direct_caddy_email: ""
