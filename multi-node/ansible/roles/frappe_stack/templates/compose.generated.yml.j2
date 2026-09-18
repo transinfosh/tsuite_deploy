@@ -2,6 +2,10 @@ services:
   db:
     image: {{ frappe_postgres_image | to_json }}
     restart: unless-stopped
+{% if frappe_postgres_data_dir | default('') %}
+    environment:
+      PGDATA: {{ frappe_postgres_data_dir | to_json }}
+{% endif %}
 {% if not frappe_manage_postgres | bool %}
     profiles:
       - local-database
