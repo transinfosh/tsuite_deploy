@@ -18,6 +18,16 @@ class WindowsSessionTest(unittest.TestCase):
 	setUp = sessions.SupportSessionTest.setUp
 	tearDown = sessions.SupportSessionTest.tearDown
 
+	def test_windows_bootstrap_repairs_missing_windows_openssh_components(self):
+		bootstrap = (sessions.ROOT / 'customer' / 'bootstrap.ps1').read_text(encoding='utf-8')
+		self.assertIn('Assert-SupportedWindowsHost', bootstrap)
+		self.assertIn('Win32_ComputerSystem', bootstrap)
+		self.assertIn("Install-OpenSshCapability 'OpenSSH.Server~~~~0.0.1.0'", bootstrap)
+		self.assertIn("Install-OpenSshCapability 'OpenSSH.Client~~~~0.0.1.0'", bootstrap)
+		self.assertIn('Add-WindowsCapability -Online -Name $Name', bootstrap)
+		self.assertIn("sftp_path = $sftpPath", bootstrap)
+		self.assertNotIn('Install OpenSSH Server first.', bootstrap)
+
 	def test_windows_bundle_contains_pinned_configuration_and_no_linux_commands(self):
 		for name in ('bootstrap.ps1', 'windows-client.ps1'):
 			self.settings.bootstrap_path.with_name(name).write_bytes((sessions.ROOT / 'customer' / name).read_bytes())

@@ -13,22 +13,79 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 foreach ($command in @('New-LocalUser', 'Register-ScheduledTask', 'Get-CimInstance')) {
     Get-Command $command -ErrorAction Stop | Out-Null
 }
+
+function Assert-SupportedWindowsHost {
+    $operatingSystem = Get-CimInstance Win32_OperatingSystem
+    $computerSystem = Get-CimInstance Win32_ComputerSystem
+    if ($operatingSystem.ProductType -ne 3 -or
+        ([version]$operatingSystem.Version) -lt ([version]'10.0.17763')) {
+        throw 'TSuite support requires Windows Server 2019 or later.'
+    }
+    if ($computerSystem.DomainRole -in @(4, 5)) {
+        throw 'TSuite support does not create temporary local administrators on a domain controller.'
+    }
+}
+
+Assert-SupportedWindowsHost
 Assert-SessionId $configuration.session_id
 if ($configuration.bastion_host -cnotmatch '^[a-zA-Z0-9.-]+$' -or
     $configuration.bastion_port -lt 1 -or $configuration.bastion_port -gt 65535) {
     throw 'Invalid bastion configuration.'
 }
-$service = Get-CimInstance Win32_Service -Filter "Name='sshd'"
-if (-not $service -or $service.PathName -notmatch '^\s*(?:"([^"]+)"|(\S+))') {
-    throw 'Install OpenSSH Server first.'
+
+function Get-OpenSshServicePath {
+    $service = Get-CimInstance Win32_Service -Filter "Name='sshd'"
+    if (-not $service -or $service.PathName -notmatch '^\s*(?:"([^"]+)"|(\S+))') { return $null }
+    if ($Matches[1]) { return $Matches[1] }
+    return $Matches[2]
 }
-$sshdPath = if ($Matches[1]) { $Matches[1] } else { $Matches[2] }
-$sshDirectory = Split-Path -Parent $sshdPath
-$sshPath = Join-Path $sshDirectory 'ssh.exe'
-$keygenPath = Join-Path $sshDirectory 'ssh-keygen.exe'
-foreach ($path in @($sshdPath, $sshPath, $keygenPath)) {
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw 'Install OpenSSH Client and Server together.' }
+
+function Install-OpenSshCapability([string]$Name) {
+    $capability = Get-WindowsCapability -Online -Name $Name -ErrorAction Stop
+    if ($capability.State -ne 'Installed') {
+        Write-Host "Installing $Name from Windows Features on Demand..."
+        Add-WindowsCapability -Online -Name $Name -ErrorAction Stop | Out-Null
+    }
 }
+
+function Get-OpenSshBinaries {
+    $sshd = Get-OpenSshServicePath
+    $directory = if ($sshd) { Split-Path -Parent $sshd } else { $null }
+    $needsClient = -not $directory -or -not (Test-Path -LiteralPath (Join-Path $directory 'ssh.exe') -PathType Leaf) -or
+        -not (Test-Path -LiteralPath (Join-Path $directory 'ssh-keygen.exe') -PathType Leaf)
+    if (-not $sshd -or $needsClient) {
+        # Windows Server 2019+ distributes OpenSSH as Features on Demand.  Use the
+        # OS package rather than downloading an unpinned third-party archive.
+        try {
+            if (-not $sshd) { Install-OpenSshCapability 'OpenSSH.Server~~~~0.0.1.0' }
+            if ($needsClient) { Install-OpenSshCapability 'OpenSSH.Client~~~~0.0.1.0' }
+        } catch {
+            throw "Could not install Windows OpenSSH automatically. Configure Windows Update/WSUS Features on Demand, then retry: $($_.Exception.Message)"
+        }
+        $sshd = Get-OpenSshServicePath
+    }
+    if (-not $sshd) { throw 'OpenSSH Server was installed but the sshd service was not registered.' }
+
+    $directory = Split-Path -Parent $sshd
+    $binaries = @{
+        sshd = $sshd
+        ssh = Join-Path $directory 'ssh.exe'
+        keygen = Join-Path $directory 'ssh-keygen.exe'
+        sftp = Join-Path $directory 'sftp-server.exe'
+    }
+    foreach ($name in $binaries.Keys) {
+        if (-not (Test-Path -LiteralPath $binaries[$name] -PathType Leaf)) {
+            throw "OpenSSH installation is incomplete; missing $name executable: $($binaries[$name])"
+        }
+    }
+    return $binaries
+}
+
+$openSsh = Get-OpenSshBinaries
+$sshdPath = $openSsh.sshd
+$sshPath = $openSsh.ssh
+$keygenPath = $openSsh.keygen
+$sftpPath = $openSsh.sftp
 
 function Invoke-Enrollment([string]$Action, $Request) {
     $json = $Request | ConvertTo-Json -Compress
@@ -101,7 +158,7 @@ try {
             idle_timeout_seconds = $payload.idle_timeout_seconds
             bastion_host = $payload.bastion_host; bastion_port = $payload.bastion_port
             remote_port = $payload.remote_port; local_port = $localPort; tunnel_user = $payload.tunnel_user
-            ssh_path = $sshPath; sshd_path = $sshdPath
+            ssh_path = $sshPath; sshd_path = $sshdPath; sftp_path = $sftpPath
         }
         Write-Utf8 (Join-Path $directory 'session.json') ($state | ConvertTo-Json -Compress)
         $stateWritten = $true
@@ -135,7 +192,7 @@ try {
     PermitEmptyPasswords no
     AllowTcpForwarding no
     AllowAgentForwarding no
-    Subsystem sftp "$($sshDirectory.Replace('\', '/'))/sftp-server.exe"
+    Subsystem sftp "$($sftpPath.Replace('\', '/'))"
 "@
         Write-Utf8 (Join-Path $directory 'sshd_config') $sshdConfiguration
         foreach ($serviceFile in @('ssh_host_ed25519_key', 'tunnel_ed25519', 'lease_ed25519', 'authorized_keys', 'sshd_config')) {

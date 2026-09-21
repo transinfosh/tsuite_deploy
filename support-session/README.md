@@ -223,10 +223,13 @@ Compose 容器和旧 volume 必须放在新部署健康检查、站点登录与�
 tsuite-support create zj-mes --platform windows --purpose "Windows Server 维护"
 ```
 
-前置条件：Windows Server 2019 或更新版本（成员服务器/独立服务器，域控制器不支持本地账号），
-已安装 Win32 OpenSSH Client 和 Server，包含 `ssh.exe`、`sshd.exe`、`ssh-keygen.exe`，
-可用的 LocalAccounts、ScheduledTasks 模块及出站 HTTPS/堡垒机 SSH 访问。应使用维护中的 Win32
-OpenSSH 版本；当前目标客户环境为 10.0p2。安装脚本从 `sshd` 服务路径定位同一套二进制，不依赖 PATH。
+前置条件：Windows Server 2019 或更新版本（成员服务器/独立服务器，域控制器不支持本地账号；脚本会自动核验），
+可用的 LocalAccounts、ScheduledTasks 模块及出站 HTTPS/堡垒机 SSH 访问。若未检测到 `sshd` 服务，
+接入脚本会自动通过 Windows Features on Demand 安装系统自带的 OpenSSH Server 与 Client；如果已有
+`sshd` 但同目录缺少客户端二进制，也会补装 Client。该操作需要 Windows Update/WSUS 能提供对应功能包；
+受策略限制时脚本会给出原因，不会下载第三方 SSH 包。脚本从 `sshd` 服务路径定位同一套
+`ssh.exe`、`sshd.exe`、`ssh-keygen.exe` 和 `sftp-server.exe`，不依赖 PATH，也不会启动、修改或重配
+客户已有的系统 `sshd` 服务。应使用维护中的 Win32 OpenSSH 版本；当前目标客户环境为 10.0p2。
 接入前检查本机 SSH 登录与系统时钟。
 
 Windows 会话的行为与边界：
