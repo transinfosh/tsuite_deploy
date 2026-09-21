@@ -25,6 +25,8 @@ class WindowsSessionTest(unittest.TestCase):
 		self.assertIn("Install-OpenSshCapability 'OpenSSH.Server~~~~0.0.1.0'", bootstrap)
 		self.assertIn("Install-OpenSshCapability 'OpenSSH.Client~~~~0.0.1.0'", bootstrap)
 		self.assertIn('Add-WindowsCapability -Online -Name $Name', bootstrap)
+		self.assertIn('Disable-NewOpenSshFirewallRule', bootstrap)
+		self.assertIn("OpenSSH-Server-In-TCP", bootstrap)
 		self.assertIn("sftp_path = $sftpPath", bootstrap)
 		self.assertNotIn('Install OpenSSH Server first.', bootstrap)
 

@@ -48,17 +48,32 @@ function Install-OpenSshCapability([string]$Name) {
     }
 }
 
+function Disable-NewOpenSshFirewallRule([bool]$RuleExistedBeforeInstall) {
+    if ($RuleExistedBeforeInstall) { return }
+    # Adding the Windows OpenSSH Server capability creates and enables this
+    # port-22 rule. This support channel starts its own sshd only on loopback,
+    # so it must not leave a new public SSH listener path behind.
+    $rule = Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue
+    if ($rule) { Disable-NetFirewallRule -InputObject $rule -ErrorAction Stop | Out-Null }
+}
+
 function Get-OpenSshBinaries {
     $sshd = Get-OpenSshServicePath
     $directory = if ($sshd) { Split-Path -Parent $sshd } else { $null }
     $needsClient = -not $directory -or -not (Test-Path -LiteralPath (Join-Path $directory 'ssh.exe') -PathType Leaf) -or
         -not (Test-Path -LiteralPath (Join-Path $directory 'ssh-keygen.exe') -PathType Leaf)
+    $firewallRuleExisted = [bool](Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue)
+    $installedServer = $false
     if (-not $sshd -or $needsClient) {
         # Windows Server 2019+ distributes OpenSSH as Features on Demand.  Use the
         # OS package rather than downloading an unpinned third-party archive.
         try {
-            if (-not $sshd) { Install-OpenSshCapability 'OpenSSH.Server~~~~0.0.1.0' }
+            if (-not $sshd) {
+                Install-OpenSshCapability 'OpenSSH.Server~~~~0.0.1.0'
+                $installedServer = $true
+            }
             if ($needsClient) { Install-OpenSshCapability 'OpenSSH.Client~~~~0.0.1.0' }
+            if ($installedServer) { Disable-NewOpenSshFirewallRule $firewallRuleExisted }
         } catch {
             throw "Could not install Windows OpenSSH automatically. Configure Windows Update/WSUS Features on Demand, then retry: $($_.Exception.Message)"
         }

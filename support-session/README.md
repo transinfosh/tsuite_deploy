@@ -229,7 +229,8 @@ tsuite-support create zj-mes --platform windows --purpose "Windows Server 维护
 `sshd` 但同目录缺少客户端二进制，也会补装 Client。该操作需要 Windows Update/WSUS 能提供对应功能包；
 受策略限制时脚本会给出原因，不会下载第三方 SSH 包。脚本从 `sshd` 服务路径定位同一套
 `ssh.exe`、`sshd.exe`、`ssh-keygen.exe` 和 `sftp-server.exe`，不依赖 PATH，也不会启动、修改或重配
-客户已有的系统 `sshd` 服务。应使用维护中的 Win32 OpenSSH 版本；当前目标客户环境为 10.0p2。
+客户已有的系统 `sshd` 服务。系统安装 OpenSSH Server 时新建的 TCP/22 防火墙规则会立即禁用；
+安装前已存在的规则保持不变。应使用维护中的 Win32 OpenSSH 版本；当前目标客户环境为 10.0p2。
 接入前检查本机 SSH 登录与系统时钟。
 
 Windows 会话的行为与边界：
@@ -239,7 +240,8 @@ Windows 会话的行为与边界：
 - 每会话目录为 `%ProgramData%\TSuiteSupport\<完整会话ID>`，仅 SYSTEM 和 Administrators 可访问。
   会话登记私钥只写入临时受限目录，结束引导时删除；登记私钥不进入命令参数，独立续期私钥仅保存在本机受限目录。
 - SYSTEM 计划任务运行独立 `sshd -D`，只监听 `127.0.0.1` 上的临时端口，只允许本会话账号及公钥。
-  反向隧道指向该端口。不会修改现有 `sshd_config`、管理员共享公钥文件、默认 Shell 或公网防火墙。
+  反向隧道指向该端口。不会修改现有 `sshd_config`、管理员共享公钥文件或默认 Shell；本次自动安装
+  OpenSSH 新建的 TCP/22 入站防火墙规则会被立即禁用，既有规则不会被改写。
   会话使用独立 Host Key，并通过原有登记协议固定到运维端。
 - Sshd/Tunnel 任务在启动后和机器重启后运行，连接失败每 5 秒重试，过期后不重连。
   Cleanup 任务从初始期限起每分钟复查最新到期时间，并在重启时补做过期清理。账号与公钥同时设置并更新原生过期时间。
