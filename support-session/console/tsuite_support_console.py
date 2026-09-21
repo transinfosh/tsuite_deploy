@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import hashlib
+import hmac
 import html
 import json
 import os
@@ -15,6 +16,7 @@ import shlex
 import sqlite3
 import subprocess
 import sys
+import struct
 import time
 import urllib.error
 import urllib.parse
@@ -85,6 +87,9 @@ class Settings:
 	state_dir: pathlib.Path
 	listen_host: str = "127.0.0.1"
 	listen_port: int = 8765
+	local_admin_user: str | None = None
+	local_password_hash: str | None = None
+	local_totp_secret: str | None = None
 
 	@classmethod
 	def load(cls, path: pathlib.Path) -> "Settings":
@@ -101,6 +106,9 @@ class Settings:
 			state_dir=pathlib.Path(value["state_dir"]),
 			listen_host=str(value.get("listen_host", "127.0.0.1")),
 			listen_port=int(value.get("listen_port", 8765)),
+			local_admin_user=(str(value["local_admin_user"]) if value.get("local_admin_user") else None),
+			local_password_hash=(str(value["local_password_hash"]) if value.get("local_password_hash") else None),
+			local_totp_secret=(str(value["local_totp_secret"]) if value.get("local_totp_secret") else None),
 		)
 		settings.validate()
 		return settings
@@ -117,6 +125,18 @@ class Settings:
 			raise ConsoleError("GitHub 团队 slug 无效")
 		if not 1 <= self.listen_port <= 65535:
 			raise ConsoleError("监听端口无效")
+		local_values = (self.local_admin_user, self.local_password_hash, self.local_totp_secret)
+		if any(local_values) and not all(local_values):
+			raise ConsoleError("本地管理员认证配置不完整")
+		if self.local_admin_user and not self.local_admin_user.replace("-", "").replace("_", "").isalnum():
+			raise ConsoleError("本地管理员用户名无效")
+		if self.local_password_hash and not self.local_password_hash.startswith("scrypt$"):
+			raise ConsoleError("本地管理员密码哈希无效")
+		if self.local_totp_secret:
+			try:
+				base64.b32decode(self.local_totp_secret.upper() + "=" * (-len(self.local_totp_secret) % 8), casefold=True)
+			except (ValueError, base64.binascii.Error) as error:
+				raise ConsoleError("本地管理员 TOTP 密钥无效") from error
 
 	@property
 	def callback_url(self) -> str:
@@ -269,6 +289,29 @@ def github_identity(settings: Settings, code: str, verifier: str) -> tuple[str, 
 	return login, name
 
 
+def verify_password(password: str, encoded: str) -> bool:
+	try:
+		_, salt_hex, digest_hex = encoded.split("$", 2)
+		digest = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt_hex), n=2**14, r=8, p=1, dklen=32)
+		return hmac.compare_digest(digest.hex(), digest_hex)
+	except (ValueError, TypeError):
+		return False
+
+
+def verify_totp(secret: str, code: str, now: int | None = None) -> bool:
+	if not code.isdigit() or len(code) != 6:
+		return False
+	key = base64.b32decode(secret.upper() + "=" * (-len(secret) % 8), casefold=True)
+	timestep = int(time.time() if now is None else now) // 30
+	for counter in (timestep - 1, timestep, timestep + 1):
+		mac = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
+		offset = mac[-1] & 15
+		value = (struct.unpack(">I", mac[offset:offset + 4])[0] & 0x7fffffff) % 1000000
+		if hmac.compare_digest(f"{value:06d}", code):
+			return True
+	return False
+
+
 def manager(*arguments: str, input_text: str | None = None) -> str:
 	try:
 		result = subprocess.run(
@@ -318,7 +361,8 @@ def status_badge(status: str) -> str:
 	return f'<span class="badge badge-{style}">{html.escape(label)}</span>'
 
 
-def login_content() -> str:
+def login_content(local_enabled: bool = False) -> str:
+	local_login = "" if not local_enabled else """<form method="post" action="/support/login/local" style="display:grid;gap:10px;margin:18px 0;text-align:left"><label>账号<input name="username" required autocomplete="username"></label><label>密码<input name="password" type="password" required autocomplete="current-password"></label><label>动态验证码<input name="totp" inputmode="numeric" pattern="[0-9]{6}" required autocomplete="one-time-code"></label><button class="primary">本地登录</button></form>"""
 	return """<style>
 .login-shell{min-height:calc(100svh - 100px);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 0;gap:26px}
 .login-card{width:min(440px,100%);padding:40px;background:#fff;border:1px solid #dbe2ea;border-radius:20px;box-shadow:0 16px 48px -24px rgb(15 23 42 / 24%);text-align:center}
@@ -340,11 +384,12 @@ a.login-button:focus-visible{outline:3px solid #38bdf8;outline-offset:4px}
 <div class="login-brand"><span class="login-mark" aria-hidden="true">TS</span><span>TSuite</span></div>
 <h1 id="login-title">远程支持会话</h1>
 <p class="login-description">通过 SSH 跨局域网连接客户环境，<br>建立临时远程支持会话，开展协作与维护。</p>
+{local_login}
 <a class="login-button" href="/support/login"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.438 9.8 8.205 11.385.6.11.82-.26.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.043-1.61-4.043-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.09-.745.083-.73.083-.73 1.205.085 1.84 1.237 1.84 1.237 1.07 1.835 2.807 1.305 3.492.998.108-.776.418-1.305.76-1.605-2.665-.305-5.467-1.333-5.467-5.93 0-1.31.467-2.382 1.235-3.222-.124-.303-.535-1.523.117-3.176 0 0 1.008-.322 3.3 1.23A11.5 11.5 0 0 1 12 6.3c1.02.005 2.047.138 3.006.404 2.29-1.552 3.296-1.23 3.296-1.23.654 1.653.243 2.873.12 3.176.77.84 1.233 1.912 1.233 3.222 0 4.61-2.807 5.622-5.48 5.92.43.37.814 1.102.814 2.222 0 1.606-.015 2.896-.015 3.29 0 .32.216.694.825.576C20.565 22.296 24 17.797 24 12.5 24 5.87 18.627.5 12 .5Z"/></svg><span>使用 GitHub 登录</span></a>
-<p class="login-note">请使用已获授权的 GitHub 账号登录</p>
+<p class="login-note">本地登录需要账号密码和验证器动态码；GitHub 登录保留为备用。</p>
 </section>
 <p class="login-footer">TSuite · 远程支持工作台</p>
-</main>"""
+</main>""".replace("{local_login}", local_login)
 
 
 def page(title: str, content: str) -> bytes:
@@ -556,6 +601,19 @@ class Application:
 				query = urllib.parse.urlencode({"client_id": self.settings.client_id, "redirect_uri": self.settings.callback_url, "scope": "read:org", "state": state, "code_challenge": code_challenge(verifier), "code_challenge_method": "S256"})
 				oauth_cookie = f"tsuite_support_oauth={state}; Path=/support/auth/github/callback; Secure; HttpOnly; SameSite=Lax; Max-Age={OAUTH_STATE_TTL_SECONDS}"
 				return self.redirect(start_response, f"https://github.com/login/oauth/authorize?{query}", [("Set-Cookie", oauth_cookie)])
+			if path == "/login/local" and method == "POST":
+				form = form_data(environ)
+				if not (self.settings.local_admin_user and self.settings.local_password_hash and self.settings.local_totp_secret):
+					raise ConsoleError("本地登录尚未配置")
+				if not (
+					secrets.compare_digest(form.get("username", ""), self.settings.local_admin_user)
+					and verify_password(form.get("password", ""), self.settings.local_password_hash)
+					and verify_totp(self.settings.local_totp_secret, form.get("totp", ""))
+				):
+					raise ConsoleError("账号、密码或动态验证码无效")
+				session_id, _ = self.store.new_session(self.settings.local_admin_user, self.settings.local_admin_user)
+				cookie = f"tsuite_support_session={session_id}; Path=/support; Secure; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL_SECONDS}"
+				return self.redirect(start_response, "/support/", [("Set-Cookie", cookie)])
 			if path == "/auth/github/callback" and method == "GET":
 				query = urllib.parse.parse_qs(environ.get("QUERY_STRING", ""))
 				state, code = query.get("state", [""])[-1], query.get("code", [""])[-1]
@@ -578,7 +636,7 @@ class Application:
 				self.store.delete_session(session_id)
 				return self.redirect(start_response, "/support/", [("Set-Cookie", "tsuite_support_session=; Path=/support; Secure; HttpOnly; SameSite=Lax; Max-Age=0")])
 			if session is None:
-				return self.response(start_response, HTTPStatus.UNAUTHORIZED, page("登录", login_content()))
+				return self.response(start_response, HTTPStatus.UNAUTHORIZED, page("登录", login_content(bool(self.settings.local_admin_user))))
 			if path == "/" and method == "GET":
 				return self.dashboard(start_response, session)
 			if path == "/sessions" and method == "GET":

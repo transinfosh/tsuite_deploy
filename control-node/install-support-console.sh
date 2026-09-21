@@ -16,6 +16,9 @@ GITHUB_CLIENT_SECRET_FILE=""
 GITHUB_ALLOWED_ORG="transinfosh"
 GITHUB_ALLOWED_TEAM=""
 PUBLIC_HOST="edge.trinfo.net"
+LOCAL_ADMIN_USER=""
+LOCAL_ADMIN_PASSWORD_FILE=""
+LOCAL_ADMIN_TOTP_SECRET_FILE=""
 
 die() {
 	printf '错误: %s\n' "$*" >&2
@@ -34,6 +37,9 @@ usage() {
   --github-allowed-org ORG         允许登录的组织，默认 transinfosh
   --github-allowed-team SLUG       可选：限制到组织团队 slug
   --public-host HOST               公网域名，默认 edge.trinfo.net
+  --local-admin-user USER          启用本地管理员账号
+  --local-admin-password-file FILE 仅 root 可读、只包含本地管理员密码
+  --local-admin-totp-secret-file FILE 仅 root 可读、只包含 Base32 TOTP 密钥
 EOF
 }
 
@@ -44,6 +50,9 @@ while (($#)); do
 		--github-allowed-org) GITHUB_ALLOWED_ORG="${2:-}"; shift ;;
 		--github-allowed-team) GITHUB_ALLOWED_TEAM="${2:-}"; shift ;;
 		--public-host) PUBLIC_HOST="${2:-}"; shift ;;
+		--local-admin-user) LOCAL_ADMIN_USER="${2:-}"; shift ;;
+		--local-admin-password-file) LOCAL_ADMIN_PASSWORD_FILE="${2:-}"; shift ;;
+		--local-admin-totp-secret-file) LOCAL_ADMIN_TOTP_SECRET_FILE="${2:-}"; shift ;;
 		--help | -h) usage; exit 0 ;;
 		*) die "未知参数: $1" ;;
 	esac
@@ -61,6 +70,10 @@ fi
 [[ "$GITHUB_ALLOWED_ORG" =~ ^[A-Za-z0-9-]{1,100}$ ]] || die "GitHub 组织名无效"
 [[ -z "$GITHUB_ALLOWED_TEAM" || "$GITHUB_ALLOWED_TEAM" =~ ^[A-Za-z0-9-]{1,100}$ ]] || die "GitHub 团队 slug 无效"
 [[ "$PUBLIC_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || die "公网域名无效"
+if [[ -n "$LOCAL_ADMIN_USER$LOCAL_ADMIN_PASSWORD_FILE$LOCAL_ADMIN_TOTP_SECRET_FILE" ]]; then
+	[[ "$LOCAL_ADMIN_USER" =~ ^[A-Za-z0-9_-]{3,64}$ ]] || die "本地管理员用户名无效"
+	[[ -f "$LOCAL_ADMIN_PASSWORD_FILE" && -f "$LOCAL_ADMIN_TOTP_SECRET_FILE" ]] || die "本地管理员密码和 TOTP 密钥文件必须同时提供"
+fi
 [[ -f /etc/tsuite-support-control/action.json ]] || die "请先运行 prepare-support-access.sh"
 [[ -x /usr/local/bin/tsuite-support-console-action ]] || die "缺少控制台远程操作程序"
 id "$BROKER_USER" >/dev/null 2>&1 || die "缺少支持会话 broker 用户"
@@ -94,12 +107,14 @@ config_temporary="$(mktemp "$CONFIG_DIR/.config.json.XXXXXX")"
 trap 'rm -f -- "$config_temporary"' EXIT
 python3 - "$config_temporary" "$GITHUB_CLIENT_ID" "$GITHUB_CLIENT_SECRET_FILE" \
 	"$GITHUB_ALLOWED_ORG" "$GITHUB_ALLOWED_TEAM" "$PUBLIC_HOST" "$STATE_DIR" \
-	"$CONFIG_DIR/config.json" <<'PY'
+	"$CONFIG_DIR/config.json" "$LOCAL_ADMIN_USER" "$LOCAL_ADMIN_PASSWORD_FILE" "$LOCAL_ADMIN_TOTP_SECRET_FILE" <<'PY'
 import json
+import hashlib
+import os
 import pathlib
 import sys
 
-path, client_id, secret_path, allowed_org, allowed_team, host, state_dir, existing_path = sys.argv[1:]
+path, client_id, secret_path, allowed_org, allowed_team, host, state_dir, existing_path, local_user, password_path, totp_path = sys.argv[1:]
 if secret_path:
     secret = pathlib.Path(secret_path).read_text(encoding="utf-8")
 else:
@@ -119,6 +134,18 @@ value = {
 }
 if allowed_team:
     value["github_allowed_team"] = allowed_team
+if local_user:
+    password = pathlib.Path(password_path).read_text(encoding="utf-8").strip()
+    totp_secret = pathlib.Path(totp_path).read_text(encoding="utf-8").strip().upper().replace(" ", "")
+    if len(password) < 16 or "\n" in password or not totp_secret:
+        raise SystemExit("本地管理员密码至少 16 位，且 TOTP 密钥不能为空")
+    salt = os.urandom(16)
+    digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1, dklen=32)
+    value.update({"local_admin_user": local_user, "local_password_hash": f"scrypt${salt.hex()}${digest.hex()}", "local_totp_secret": totp_secret})
+elif pathlib.Path(existing_path).is_file():
+    for key in ("local_admin_user", "local_password_hash", "local_totp_secret"):
+        if existing.get(key):
+            value[key] = existing[key]
 pathlib.Path(path).write_text(json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
 PY
 install -m 0640 -o root -g "$SERVICE_GROUP" "$config_temporary" "$CONFIG_DIR/config.json"
