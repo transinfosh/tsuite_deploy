@@ -41,11 +41,18 @@ try {
     }
     Write-Utf8 (Join-Path $sessionDirectory 'session.json') 'TEST-SECRET-MUST-NOT-BE-EXPORTED'
     Write-Utf8 (Join-Path $sessionDirectory 'tunnel_ed25519') 'TEST-PRIVATE-KEY-MUST-NOT-BE-EXPORTED'
-    Save-StartupDiagnostics $id
+    $nativeLog = Join-Path $sessionDirectory 'Sshd.native.log'
+    Write-Utf8 $nativeLog 'fixture: active sshd diagnostic log'
+    # sshd -E keeps this file open on Windows. Diagnostics must preserve the
+    # original authentication failure even when that one log cannot be read.
+    $nativeLogLock = [IO.File]::Open($nativeLog, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    try { Save-StartupDiagnostics $id }
+    finally { $nativeLogLock.Dispose() }
     [IO.Directory]::Delete($sessionDirectory, $true)
     $saved = Get-Content (Join-Path $testDirectory "diagnostics/$id-startup.log") -Raw
     if (-not $saved.Contains('last_result=1')) { throw 'Task result code missing from diagnostics.' }
     if (-not $saved.Contains('fixture: temporary SSH listener startup failure')) { throw 'Rollback lost the diagnostic.' }
+    if (-not $saved.Contains('Sshd.native.log unavailable')) { throw 'Locked native log was not reported safely.' }
     if ($saved.Contains('TEST-SECRET') -or $saved.Contains('TEST-PRIVATE-KEY')) { throw 'Diagnostics exported credentials.' }
     Write-Output 'Task startup failure capture and diagnostics surviving rollback passed.'
 } finally {

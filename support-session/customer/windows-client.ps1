@@ -213,8 +213,16 @@ function Save-StartupDiagnostics([string]$Id) {
         $path = Join-Path $directory $name
         if (Test-Path -LiteralPath $path) {
             $lines.Add("--- $name ---")
-            foreach ($line in Get-Content -LiteralPath $path -Tail 30 -ErrorAction Stop) {
-                $lines.Add([string]$line)
+            try {
+                foreach ($line in Get-Content -LiteralPath $path -Tail 30 -ErrorAction Stop) {
+                    $lines.Add([string]$line)
+                }
+            } catch [IO.IOException] {
+                # sshd -E can keep its native log exclusively open on Windows.
+                # Preserve the other diagnostics instead of hiding the original failure.
+                $lines.Add("$name unavailable because it is still in use.")
+            } catch [UnauthorizedAccessException] {
+                $lines.Add("$name unavailable because access was denied.")
             }
         }
     }
