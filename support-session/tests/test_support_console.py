@@ -1,6 +1,7 @@
 import importlib.util
 from importlib.machinery import SourceFileLoader
 import io
+import hashlib
 import json
 import os
 import pathlib
@@ -78,6 +79,21 @@ class SupportConsoleTest(unittest.TestCase):
 		result = b"".join(app(environ, lambda status, headers: captured.update(status=status, headers=headers)))
 		return captured, result.decode()
 
+	def local_settings(self):
+		salt = b"0123456789abcdef"
+		digest = hashlib.scrypt(b"correct horse battery staple", salt=salt, n=2**14, r=8, p=1, dklen=32)
+		return CONSOLE.Settings(
+			client_id=self.settings.client_id,
+			client_secret=self.settings.client_secret,
+			allowed_org=self.settings.allowed_org,
+			allowed_team=self.settings.allowed_team,
+			public_url=self.settings.public_url,
+			state_dir=self.settings.state_dir,
+			local_admin_user="support-admin",
+			local_password_hash=f"scrypt${salt.hex()}${digest.hex()}",
+			local_totp_secret="JBSWY3DPEHPK3PXP",
+		)
+
 	def test_callback_url_and_pkce_challenge_are_deterministic(self):
 		self.assertEqual(self.settings.callback_url, "https://edge.example.com/support/auth/github/callback")
 		self.assertEqual(CONSOLE.code_challenge("abc"), "ungWv48Bz-pBQUDeXa4iI7ADYaOWF3qctBD_YfIAFa0")
@@ -115,6 +131,40 @@ class SupportConsoleTest(unittest.TestCase):
 		self.assertIn("使用 GitHub 登录", content)
 		self.assertIn('href="/support/login"', content)
 		self.assertIn(("Cache-Control", "no-store"), captured["headers"])
+
+	def test_local_login_asks_for_totp_only_after_password(self):
+		app = CONSOLE.Application(self.local_settings())
+		captured, content = self.call(app, "/")
+		self.assertTrue(captured["status"].startswith("401"))
+		self.assertIn('name="username"', content)
+		self.assertIn('name="password"', content)
+		self.assertNotIn('name="totp"', content)
+		self.assertIn('class="github-login"', content)
+		captured, content = self.call(
+			app, "/login/local", "POST",
+			urllib.parse.urlencode({"username": "support-admin", "password": "correct horse battery staple"}),
+		)
+		self.assertTrue(captured["status"].startswith("200"))
+		self.assertIn('name="totp"', content)
+		challenge_cookie = next(
+			value.split(";", 1)[0] for key, value in captured["headers"]
+			if key == "Set-Cookie" and value.startswith("tsuite_support_local=")
+		)
+		with mock.patch.object(CONSOLE, "verify_totp", return_value=True):
+			captured, _ = self.call(
+				app, "/login/local/totp", "POST", "totp=123456", challenge_cookie,
+			)
+		self.assertTrue(captured["status"].startswith("303"))
+		self.assertIn(("Location", "/support/"), captured["headers"])
+
+	def test_local_login_rejects_bad_password_before_totp(self):
+		app = CONSOLE.Application(self.local_settings())
+		captured, content = self.call(
+			app, "/login/local", "POST", "username=support-admin&password=wrong",
+		)
+		self.assertTrue(captured["status"].startswith("401"))
+		self.assertIn("账号或密码不正确", content)
+		self.assertNotIn('name="totp"', content)
 
 	def test_dashboard_uses_the_public_support_prefix(self):
 		app = CONSOLE.Application(self.settings)

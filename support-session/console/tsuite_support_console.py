@@ -32,6 +32,7 @@ from wsgiref.simple_server import WSGIRequestHandler, make_server
 MAX_BODY_BYTES = 8192
 SESSION_TTL_SECONDS = 8 * 60 * 60
 OAUTH_STATE_TTL_SECONDS = 10 * 60
+LOCAL_LOGIN_TTL_SECONDS = 5 * 60
 ACTION = "/usr/local/bin/tsuite-support-console-action"
 BROKER_USER = "tsuite-support-operator"
 ACTIVE_STATUSES = {"issued", "enrolled", "revoking"}
@@ -162,6 +163,12 @@ class Store:
 					csrf TEXT NOT NULL,
 					expires_at INTEGER NOT NULL
 				);
+				CREATE TABLE IF NOT EXISTS local_login_challenge (
+					id TEXT PRIMARY KEY,
+					login TEXT NOT NULL,
+					attempts INTEGER NOT NULL DEFAULT 0,
+					created_at INTEGER NOT NULL
+				);
 				"""
 			)
 
@@ -184,6 +191,34 @@ class Store:
 		with self.connection() as connection:
 			connection.execute("DELETE FROM oauth_state WHERE created_at < ?", (now - OAUTH_STATE_TTL_SECONDS,))
 			connection.execute("DELETE FROM web_session WHERE expires_at < ?", (now,))
+			connection.execute("DELETE FROM local_login_challenge WHERE created_at < ?", (now - LOCAL_LOGIN_TTL_SECONDS,))
+
+	def new_local_login_challenge(self, login: str) -> str:
+		challenge_id = secrets.token_urlsafe(32)
+		with self.connection() as connection:
+			connection.execute(
+				"INSERT INTO local_login_challenge(id, login, created_at) VALUES (?, ?, ?)",
+				(challenge_id, login, int(time.time())),
+			)
+		return challenge_id
+
+	def local_login_challenge(self, challenge_id: str | None) -> sqlite3.Row | None:
+		if not challenge_id:
+			return None
+		with self.connection() as connection:
+			return connection.execute(
+				"SELECT login, attempts, created_at FROM local_login_challenge "
+				"WHERE id = ? AND created_at >= ? AND attempts < 5",
+				(challenge_id, int(time.time()) - LOCAL_LOGIN_TTL_SECONDS),
+			).fetchone()
+
+	def fail_local_login_challenge(self, challenge_id: str) -> None:
+		with self.connection() as connection:
+			connection.execute("UPDATE local_login_challenge SET attempts = attempts + 1 WHERE id = ?", (challenge_id,))
+
+	def consume_local_login_challenge(self, challenge_id: str) -> None:
+		with self.connection() as connection:
+			connection.execute("DELETE FROM local_login_challenge WHERE id = ?", (challenge_id,))
 
 	def new_oauth_state(self) -> tuple[str, str]:
 		state, verifier = secrets.token_urlsafe(32), secrets.token_urlsafe(64)
@@ -361,35 +396,49 @@ def status_badge(status: str) -> str:
 	return f'<span class="badge badge-{style}">{html.escape(label)}</span>'
 
 
-def login_content(local_enabled: bool = False) -> str:
-	local_login = "" if not local_enabled else """<form method="post" action="/support/login/local" style="display:grid;gap:10px;margin:18px 0;text-align:left"><label>账号<input name="username" required autocomplete="username"></label><label>密码<input name="password" type="password" required autocomplete="current-password"></label><label>动态验证码<input name="totp" inputmode="numeric" pattern="[0-9]{6}" required autocomplete="one-time-code"></label><button class="primary">本地登录</button></form>"""
+def login_layout(content: str) -> str:
 	return """<style>
-.login-shell{min-height:calc(100svh - 100px);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 0;gap:26px}
-.login-card{width:min(440px,100%);padding:40px;background:#fff;border:1px solid #dbe2ea;border-radius:20px;box-shadow:0 16px 48px -24px rgb(15 23 42 / 24%);text-align:center}
-.login-brand{display:inline-flex;align-items:center;gap:10px;margin-bottom:32px;color:#334155;font-size:17px;font-weight:700;letter-spacing:-.02em}
-.login-mark{display:grid;place-items:center;width:36px;height:36px;border-radius:10px;color:#fff;background:#0369a1;font-size:14px;letter-spacing:-.06em}
-.login-card h1{font-size:28px;line-height:1.3;letter-spacing:-.035em}
-.login-description{margin:14px 0 30px;color:#64748b;line-height:1.8;font-size:14px}
-a.login-button{display:flex;align-items:center;justify-content:center;gap:11px;min-height:50px;width:100%;padding:12px 18px;border:1px solid #17212b;border-radius:10px;background:#17212b;color:#fff;font-size:15px;font-weight:600;text-decoration:none;transition:background .15s}
-a.login-button:hover{background:#334155;text-decoration:none}
-a.login-button:focus-visible{outline:3px solid #38bdf8;outline-offset:4px}
-.login-button svg{width:21px;height:21px;flex:none;fill:currentColor}
-.login-note{margin:22px 0 0;padding-top:22px;border-top:1px solid #edf1f5;color:#64748b;font-size:12px;line-height:1.8}
-.login-footer{margin:0;color:#64748b;font-size:12px;letter-spacing:.03em}
+.login-shell{min-height:calc(100svh - 100px);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 0;gap:22px}
+.login-card{width:min(420px,100%);padding:38px 40px;background:#fff;border:1px solid #dbe2ea;border-radius:20px;box-shadow:0 18px 50px -28px rgb(15 23 42 / 28%)}
+.login-brand{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:28px;color:#334155;font-size:17px;font-weight:700}
+.login-mark{display:grid;place-items:center;width:36px;height:36px;border-radius:10px;color:#fff;background:#0369a1;font-size:14px}
+.login-card h1{margin:0;text-align:center;font-size:27px;line-height:1.3;letter-spacing:-.035em}
+.login-description{margin:12px 0 28px;text-align:center;color:#64748b;line-height:1.7;font-size:14px}
+.login-form{display:grid;gap:17px}.login-form label{display:grid;gap:7px;color:#334155;font-size:13px;font-weight:650}.login-form input{width:100%;min-width:0;height:46px;border-radius:9px}.login-form button{min-height:46px;margin-top:3px;border-radius:9px;font-size:14px;font-weight:650}
+.login-error{margin:0 0 16px;padding:10px 12px;border-radius:8px;color:#991b1b;background:#fef2f2;font-size:13px;line-height:1.55}
+.login-divider{display:flex;align-items:center;gap:12px;margin:24px 0 16px;color:#94a3b8;font-size:12px}.login-divider::before,.login-divider::after{content:"";height:1px;flex:1;background:#e2e8f0}
+.social-login{display:flex;justify-content:center}.github-login{display:grid;place-items:center;width:44px;height:44px;border:1px solid #d5dce5;border-radius:50%;color:#17212b;background:#fff;transition:border-color .15s,box-shadow .15s,transform .15s}.github-login:hover{border-color:#94a3b8;box-shadow:0 5px 14px rgb(15 23 42 / 10%);transform:translateY(-1px)}.github-login:focus-visible{outline:3px solid #bae6fd;outline-offset:3px}.github-login svg{width:22px;height:22px;fill:currentColor}
+.login-note{margin:18px 0 0;text-align:center;color:#94a3b8;font-size:12px;line-height:1.65}.login-footer{margin:0;color:#64748b;font-size:12px;letter-spacing:.03em}.login-back{display:block;margin-top:18px;text-align:center;font-size:13px}
+.otp-input{text-align:center;font:600 22px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.28em;padding-left:calc(12px + .28em)}
 @media(max-width:480px){.login-shell{min-height:calc(100svh - 48px);padding:20px 0;width:100%}.login-card{padding:32px 24px}.login-card h1{font-size:25px}}
-@media(prefers-reduced-motion:reduce){a.login-button{transition:none}}
-</style>
-<main class="login-shell" aria-labelledby="login-title">
-<section class="login-card">
-<div class="login-brand"><span class="login-mark" aria-hidden="true">TS</span><span>TSuite</span></div>
+@media(prefers-reduced-motion:reduce){.github-login{transition:none}}
+</style><main class="login-shell"><section class="login-card">{content}</section><p class="login-footer">TSuite · 远程支持工作台</p></main>""".replace("{content}", content)
+
+
+def login_content(local_enabled: bool = False, error: str = "") -> str:
+	local_login = ""
+	if local_enabled:
+		error_html = f'<p class="login-error" role="alert">{html.escape(error)}</p>' if error else ""
+		local_login = error_html + """<form class="login-form" method="post" action="/support/login/local">
+<label>账号<input name="username" required autofocus autocomplete="username"></label>
+<label>密码<input name="password" type="password" required autocomplete="current-password"></label>
+<button class="primary">继续</button></form>"""
+	content = """<div class="login-brand"><span class="login-mark" aria-hidden="true">TS</span><span>TSuite</span></div>
 <h1 id="login-title">远程支持会话</h1>
-<p class="login-description">通过 SSH 跨局域网连接客户环境，<br>建立临时远程支持会话，开展协作与维护。</p>
-{local_login}
-<a class="login-button" href="/support/login"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.438 9.8 8.205 11.385.6.11.82-.26.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.043-1.61-4.043-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.09-.745.083-.73.083-.73 1.205.085 1.84 1.237 1.84 1.237 1.07 1.835 2.807 1.305 3.492.998.108-.776.418-1.305.76-1.605-2.665-.305-5.467-1.333-5.467-5.93 0-1.31.467-2.382 1.235-3.222-.124-.303-.535-1.523.117-3.176 0 0 1.008-.322 3.3 1.23A11.5 11.5 0 0 1 12 6.3c1.02.005 2.047.138 3.006.404 2.29-1.552 3.296-1.23 3.296-1.23.654 1.653.243 2.873.12 3.176.77.84 1.233 1.912 1.233 3.222 0 4.61-2.807 5.622-5.48 5.92.43.37.814 1.102.814 2.222 0 1.606-.015 2.896-.015 3.29 0 .32.216.694.825.576C20.565 22.296 24 17.797 24 12.5 24 5.87 18.627.5 12 .5Z"/></svg><span>使用 GitHub 登录</span></a>
-<p class="login-note">本地登录需要账号密码和验证器动态码；GitHub 登录保留为备用。</p>
-</section>
-<p class="login-footer">TSuite · 远程支持工作台</p>
-</main>""".replace("{local_login}", local_login)
+<p class="login-description">登录支持工作台，安全地创建和管理临时远程会话。</p>
+{local_login}<div class="login-divider"><span>其他登录方式</span></div>
+<div class="social-login"><a class="github-login" href="/support/login" aria-label="使用 GitHub 登录" title="使用 GitHub 登录"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.438 9.8 8.205 11.385.6.11.82-.26.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.043-1.61-4.043-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.09-.745.083-.73.083-.73 1.205.085 1.84 1.237 1.84 1.237 1.07 1.835 2.807 1.305 3.492.998.108-.776.418-1.305.76-1.605-2.665-.305-5.467-1.333-5.467-5.93 0-1.31.467-2.382 1.235-3.222-.124-.303-.535-1.523.117-3.176 0 0 1.008-.322 3.3 1.23A11.5 11.5 0 0 1 12 6.3c1.02.005 2.047.138 3.006.404 2.29-1.552 3.296-1.23 3.296-1.23.654 1.653.243 2.873.12 3.176.77.84 1.233 1.912 1.233 3.222 0 4.61-2.807 5.622-5.48 5.92.43.37.814 1.102.814 2.222 0 1.606-.015 2.896-.015 3.29 0 .32.216.694.825.576C20.565 22.296 24 17.797 24 12.5 24 5.87 18.627.5 12 .5Z"/></svg></a></div>
+<p class="login-note">GitHub 登录仅作为备用方式</p>""".replace("{local_login}", local_login)
+	return login_layout(content)
+
+
+def totp_content(error: str = "") -> str:
+	error_html = f'<p class="login-error" role="alert">{html.escape(error)}</p>' if error else ""
+	content = """<div class="login-brand"><span class="login-mark" aria-hidden="true">TS</span><span>TSuite</span></div>
+<h1 id="login-title">验证身份</h1><p class="login-description">账号密码已通过，请输入验证器中显示的 6 位动态验证码。</p>
+{error}<form class="login-form" method="post" action="/support/login/local/totp"><label>动态验证码<input class="otp-input" name="totp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autofocus autocomplete="one-time-code"></label><button class="primary">确认登录</button></form>
+<a class="login-back" href="/support/">返回重新登录</a>""".replace("{error}", error_html)
+	return login_layout(content)
 
 
 def page(title: str, content: str) -> bytes:
@@ -608,12 +657,32 @@ class Application:
 				if not (
 					secrets.compare_digest(form.get("username", ""), self.settings.local_admin_user)
 					and verify_password(form.get("password", ""), self.settings.local_password_hash)
-					and verify_totp(self.settings.local_totp_secret, form.get("totp", ""))
 				):
-					raise ConsoleError("账号、密码或动态验证码无效")
-				session_id, _ = self.store.new_session(self.settings.local_admin_user, self.settings.local_admin_user)
-				cookie = f"tsuite_support_session={session_id}; Path=/support; Secure; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL_SECONDS}"
-				return self.redirect(start_response, "/support/", [("Set-Cookie", cookie)])
+					return self.response(
+						start_response, HTTPStatus.UNAUTHORIZED,
+						page("登录", login_content(True, "账号或密码不正确")),
+					)
+				challenge_id = self.store.new_local_login_challenge(self.settings.local_admin_user)
+				cookie = f"tsuite_support_local={challenge_id}; Path=/support/login/local/totp; Secure; HttpOnly; SameSite=Strict; Max-Age={LOCAL_LOGIN_TTL_SECONDS}"
+				return self.response(start_response, HTTPStatus.OK, page("身份验证", totp_content()), [("Set-Cookie", cookie)])
+			if path == "/login/local/totp" and method == "POST":
+				challenge_id = parse_cookie(environ.get("HTTP_COOKIE"), "tsuite_support_local")
+				challenge = self.store.local_login_challenge(challenge_id)
+				if challenge is None or not challenge_id:
+					clear = "tsuite_support_local=; Path=/support/login/local/totp; Secure; HttpOnly; SameSite=Strict; Max-Age=0"
+					return self.redirect(start_response, "/support/", [("Set-Cookie", clear)])
+				form = form_data(environ)
+				if not self.settings.local_totp_secret or not verify_totp(self.settings.local_totp_secret, form.get("totp", "")):
+					self.store.fail_local_login_challenge(challenge_id)
+					return self.response(
+						start_response, HTTPStatus.UNAUTHORIZED,
+						page("身份验证", totp_content("动态验证码不正确或已过期")),
+					)
+				self.store.consume_local_login_challenge(challenge_id)
+				session_id, _ = self.store.new_session(str(challenge["login"]), str(challenge["login"]))
+				session_cookie = f"tsuite_support_session={session_id}; Path=/support; Secure; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL_SECONDS}"
+				clear = "tsuite_support_local=; Path=/support/login/local/totp; Secure; HttpOnly; SameSite=Strict; Max-Age=0"
+				return self.redirect(start_response, "/support/", [("Set-Cookie", session_cookie), ("Set-Cookie", clear)])
 			if path == "/auth/github/callback" and method == "GET":
 				query = urllib.parse.parse_qs(environ.get("QUERY_STRING", ""))
 				state, code = query.get("state", [""])[-1], query.get("code", [""])[-1]
