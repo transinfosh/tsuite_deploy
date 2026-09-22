@@ -128,6 +128,91 @@ function Assert-PrivateDirectory([string]$Path) {
     }
 }
 
+function Set-OpenSshRuntimePermissions([string]$Path, [bool]$Recursive) {
+    $item = Get-Item -LiteralPath $Path -Force
+    if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'OpenSSH runtime path must be a regular directory.'
+    }
+
+    $system = New-Object Security.Principal.SecurityIdentifier('S-1-5-18')
+    $administrators = New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')
+    $users = New-Object Security.Principal.SecurityIdentifier('S-1-5-32-545')
+
+    function Set-RuntimeDirectoryAcl([string]$Directory, [bool]$InheritReadAccess) {
+        $acl = New-Object Security.AccessControl.DirectorySecurity
+        $acl.SetAccessRuleProtection($true, $false)
+        $acl.SetOwner($administrators)
+        foreach ($identity in @($system, $administrators)) {
+            $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
+                $identity, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')))
+        }
+        $inheritance = if ($InheritReadAccess) { 'ContainerInherit,ObjectInherit' } else { 'None' }
+        $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
+            $users, 'ReadAndExecute', $inheritance, 'None', 'Allow')))
+        Set-Acl -LiteralPath $Directory -AclObject $acl
+    }
+
+    function Set-RuntimeFileAcl([string]$File) {
+        $acl = New-Object Security.AccessControl.FileSecurity
+        $acl.SetAccessRuleProtection($true, $false)
+        $acl.SetOwner($administrators)
+        foreach ($identity in @($system, $administrators)) {
+            $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
+                $identity, 'FullControl', 'Allow')))
+        }
+        $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
+            $users, 'ReadAndExecute', 'Allow')))
+        Set-Acl -LiteralPath $File -AclObject $acl
+    }
+
+    Set-RuntimeDirectoryAcl $Path $Recursive
+    if ($Recursive) {
+        foreach ($child in Get-ChildItem -LiteralPath $Path -Force -Recurse) {
+            if ($child.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw "OpenSSH runtime must not contain a reparse point: $($child.FullName)"
+            }
+            if ($child.PSIsContainer) { Set-RuntimeDirectoryAcl $child.FullName $true }
+            else { Set-RuntimeFileAcl $child.FullName }
+        }
+    }
+}
+
+function Assert-OpenSshRuntimePermissions([string]$Path) {
+    $item = Get-Item -LiteralPath $Path -Force
+    if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'OpenSSH runtime path must be a regular directory.'
+    }
+    $acl = Get-Acl -LiteralPath $Path
+    if (-not $acl.AreAccessRulesProtected -or
+        $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne 'S-1-5-32-544') {
+        throw 'OpenSSH runtime ownership or inheritance is unsafe.'
+    }
+    $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+    foreach ($rule in $rules) {
+        $sid = $rule.IdentityReference.Value
+        if ($rule.AccessControlType -ne 'Allow' -or $sid -notin @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-32-545')) {
+            throw 'OpenSSH runtime has unexpected permissions.'
+        }
+        if ($sid -eq 'S-1-5-32-545') {
+            $writeRights = [Security.AccessControl.FileSystemRights]::Write -bor
+                [Security.AccessControl.FileSystemRights]::Delete -bor
+                [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+                [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+                [Security.AccessControl.FileSystemRights]::TakeOwnership
+            if (($rule.FileSystemRights -band $writeRights) -ne 0 -or
+                ($rule.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadAndExecute) -ne
+                    [Security.AccessControl.FileSystemRights]::ReadAndExecute) {
+                throw 'OpenSSH runtime users must have read-execute access only.'
+            }
+        }
+    }
+    foreach ($sid in @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-32-545')) {
+        if (-not ($rules | Where-Object { $_.IdentityReference.Value -eq $sid })) {
+            throw "OpenSSH runtime is missing required access: $sid"
+        }
+    }
+}
+
 function Get-SupportRoot {
     $root = Join-Path $env:ProgramData 'TSuiteSupport'
     if (-not (Test-Path -LiteralPath $root)) { New-PrivateDirectory $root }

@@ -29,6 +29,8 @@ try {
         Get-ChildItem -LiteralPath $OpenSshDirectory -Force | ForEach-Object {
             Copy-Item -LiteralPath $_.FullName -Destination $privateRuntime -Recurse -Force
         }
+        Set-OpenSshRuntimePermissions $privateRuntime $true
+        Assert-OpenSshRuntimePermissions $privateRuntime
         $OpenSshDirectory = $privateRuntime
     }
     $sshd = Join-Path $OpenSshDirectory 'sshd.exe'
@@ -96,8 +98,7 @@ $runtimeOptions
         finally { $connection.Dispose() }
     }
     if ($CompatibilityRuntime) {
-        # OpenSSH 9.8 counts bare readiness probes as no-auth penalties. Make
-        # the production failure deterministic before testing authentication.
+        # Exercise repeated creation of the restricted OpenSSH 9.8 pre-auth child.
         foreach ($probe in 1..16) {
             $connection = New-Object Net.Sockets.TcpClient
             try { $connection.Connect('127.0.0.1', $port) }

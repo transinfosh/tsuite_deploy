@@ -92,12 +92,17 @@ function Get-CompatibilityOpenSshBinaries {
     }
     $runtimeRoot = Join-Path $env:ProgramData 'TSuiteSupportRuntime'
     if (-not (Test-Path -LiteralPath $runtimeRoot)) { New-PrivateDirectory $runtimeRoot }
-    Assert-PrivateDirectory $runtimeRoot
+    # OpenSSH 9.8 launches a restricted pre-authentication sshd-session child.
+    # Server 2016 must be able to load the signed runtime in that token, while
+    # only SYSTEM and Administrators retain write access.
+    Set-OpenSshRuntimePermissions $runtimeRoot $false
+    Assert-OpenSshRuntimePermissions $runtimeRoot
     $version = [string]$configuration.windows_openssh_version
     $target = Join-Path $runtimeRoot ("OpenSSH-" + $version)
     $marker = Join-Path $target 'package.sha256'
     if (Test-Path -LiteralPath $target) {
-        Assert-PrivateDirectory $target
+        Set-OpenSshRuntimePermissions $target $true
+        Assert-OpenSshRuntimePermissions $target
         if (-not (Test-Path -LiteralPath $marker -PathType Leaf) -or
             (Get-Content -LiteralPath $marker -Raw).Trim() -cne $configuration.windows_openssh_sha256) {
             throw "Existing OpenSSH compatibility runtime failed integrity metadata validation: $target"
@@ -112,7 +117,8 @@ function Get-CompatibilityOpenSshBinaries {
         catch [Threading.AbandonedMutexException] { $runtimeLockAcquired = $true }
         if (-not $runtimeLockAcquired) { throw 'Timed out waiting for another OpenSSH compatibility installation.' }
         if (Test-Path -LiteralPath $target) {
-            Assert-PrivateDirectory $target
+            Set-OpenSshRuntimePermissions $target $true
+            Assert-OpenSshRuntimePermissions $target
             if (-not (Test-Path -LiteralPath $marker -PathType Leaf) -or
                 (Get-Content -LiteralPath $marker -Raw).Trim() -cne $configuration.windows_openssh_sha256) {
                 throw "Existing OpenSSH compatibility runtime failed integrity metadata validation: $target"
@@ -144,8 +150,8 @@ function Get-CompatibilityOpenSshBinaries {
                 }
                 [void](Assert-OpenSshBinaries $target)
                 Write-Utf8 $marker ([string]$configuration.windows_openssh_sha256)
-                Set-ServiceFilePermissions $marker
-                Assert-PrivateDirectory $target
+                Set-OpenSshRuntimePermissions $target $true
+                Assert-OpenSshRuntimePermissions $target
             } catch {
                 if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
                 throw

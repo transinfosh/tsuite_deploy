@@ -231,6 +231,8 @@ LocalAccounts、ScheduledTasks 模块及出站 HTTPS/堡垒机 SSH 访问。
   或 Client 时自动安装。安装需要 Windows Update/WSUS 能提供对应功能包。
 - Windows Server 2016 使用由 edge HTTPS 下发的固定 Win64 OpenSSH 兼容运行时。堡垒机安装时固定版本、
   下载来源和 SHA-256；客户机再次校验 SHA-256 后解压到受限运行时目录，不注册系统服务、不开放 22 端口。
+- 兼容运行时中的厂商二进制对本地用户仅授予读取和执行权限，以便 Server 2016 的受限预认证子进程加载；
+  只有 SYSTEM 和 Administrators 可以修改。会话密钥、配置、状态和日志仍仅允许 SYSTEM 和 Administrators 访问。
 - 当前 Server 2016 兼容运行时固定为 Win32-OpenSSH `9.8.3.0p2-Preview`。它只用于本项目隔离的回环
   `sshd`，上线前仍必须完成 Server 2016 真实端到端验证；更新版本也必须先验证并更新哈希。
 

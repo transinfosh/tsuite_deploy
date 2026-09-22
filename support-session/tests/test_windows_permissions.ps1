@@ -35,7 +35,24 @@ try {
             throw "Missing service file access: $sid"
         }
     }
-    Write-Output 'Windows service-file ACL normalization and idempotency passed.'
+
+    $runtime = Join-Path $directory 'runtime'
+    [void][IO.Directory]::CreateDirectory($runtime)
+    $runtimeFile = Join-Path $runtime 'sshd-session.exe'
+    [IO.File]::WriteAllText($runtimeFile, 'public runtime fixture')
+    Set-OpenSshRuntimePermissions $runtime $true
+    Set-OpenSshRuntimePermissions $runtime $true
+    Assert-OpenSshRuntimePermissions $runtime
+    $runtimeRules = @((Get-Acl -LiteralPath $runtimeFile).GetAccessRules(
+        $true, $true, [Security.Principal.SecurityIdentifier]))
+    $usersRule = @($runtimeRules | Where-Object { $_.IdentityReference.Value -eq 'S-1-5-32-545' })
+    if ($usersRule.Count -ne 1 -or
+        ($usersRule[0].FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadAndExecute) -ne
+            [Security.AccessControl.FileSystemRights]::ReadAndExecute -or
+        ($usersRule[0].FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -ne 0) {
+        throw 'Restricted OpenSSH children do not have read-execute-only runtime access.'
+    }
+    Write-Output 'Windows service-file and OpenSSH runtime ACL normalization passed.'
 } finally {
     [IO.Directory]::Delete($directory, $true)
 }
