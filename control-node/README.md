@@ -57,6 +57,13 @@ sudo ./install.sh \
 控制机先创建专用 broker、每会话私钥目录、bridge key、edge 会话代理 key、固定 Host Key 和最小
 sudoers。Host Key 文件必须通过独立渠道核验，不能直接信任 `ssh-keyscan`：
 
+支持页面使用控制机本地的 `qrencode` 生成 TOTP 绑定二维码，二维码和密钥不会发送给第三方服务。
+安装支持页面前先安装该系统包：
+
+```bash
+sudo apt-get install qrencode
+```
+
 ```bash
 sudo ./prepare-support-access.sh \
   --bastion-host edge.trinfo.net \

@@ -77,7 +77,7 @@ fi
 [[ -f /etc/tsuite-support-control/action.json ]] || die "请先运行 prepare-support-access.sh"
 [[ -x /usr/local/bin/tsuite-support-console-action ]] || die "缺少控制台远程操作程序"
 id "$BROKER_USER" >/dev/null 2>&1 || die "缺少支持会话 broker 用户"
-for command_name in curl gpasswd getent groupadd install python3 ss sudo systemctl useradd usermod; do
+for command_name in curl gpasswd getent groupadd install python3 qrencode ss sudo systemctl useradd usermod; do
 	command -v "$command_name" >/dev/null 2>&1 || die "缺少命令: $command_name"
 done
 

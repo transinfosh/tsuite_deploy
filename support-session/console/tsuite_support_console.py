@@ -465,6 +465,19 @@ def verify_totp(secret: str, code: str, now: int | None = None) -> bool:
 	return False
 
 
+def totp_qr_data_uri(uri: str) -> str:
+	try:
+		result = subprocess.run(
+			["qrencode", "-t", "SVG", "-o", "-", "-m", "2", "-s", "5", "-l", "M"],
+			input=uri.encode(), capture_output=True, timeout=5, check=False,
+		)
+	except (OSError, subprocess.TimeoutExpired) as error:
+		raise ConsoleError("动态验证码二维码生成失败") from error
+	if result.returncode or not result.stdout.startswith(b"<?xml") or len(result.stdout) > 200_000:
+		raise ConsoleError("动态验证码二维码生成失败")
+	return "data:image/svg+xml;base64," + base64.b64encode(result.stdout).decode()
+
+
 def manager(*arguments: str, input_text: str | None = None) -> str:
 	try:
 		result = subprocess.run(
@@ -525,6 +538,7 @@ def login_layout(content: str) -> str:
 .login-form{display:grid;gap:17px}.login-form label{display:grid;gap:7px;color:#334155;font-size:13px;font-weight:650}.login-form input{width:100%;min-width:0;height:46px;border-radius:9px}.login-form button{min-height:46px;margin-top:3px;border-radius:9px;font-size:14px;font-weight:650}
 .login-error{margin:0 0 16px;padding:10px 12px;border-radius:8px;color:#991b1b;background:#fef2f2;font-size:13px;line-height:1.55}
 .login-card .secret{padding:13px;border:1px solid #dbe2ea;border-radius:9px;background:#f8fafc;font:600 14px ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}
+.totp-qr{display:grid;place-items:center;width:220px;height:220px;margin:0 auto 14px;padding:10px;border:1px solid #dbe2ea;border-radius:14px;background:#fff}.totp-qr img{display:block;width:100%;height:100%}.totp-fallback{margin:12px 0 18px}.totp-fallback summary{cursor:pointer;text-align:center;color:#64748b;font-size:13px}.totp-fallback .secret{margin-top:12px;text-align:center;letter-spacing:.08em}.totp-fallback p{margin:12px 0 0;text-align:center}
 .login-divider{display:flex;align-items:center;gap:12px;margin:24px 0 16px;color:#94a3b8;font-size:12px}.login-divider::before,.login-divider::after{content:"";height:1px;flex:1;background:#e2e8f0}
 .social-login{display:flex;justify-content:center}.github-login{display:grid;place-items:center;width:44px;height:44px;border:1px solid #d5dce5;border-radius:50%;color:#17212b;background:#fff;transition:border-color .15s,box-shadow .15s,transform .15s}.github-login:hover{border-color:#94a3b8;box-shadow:0 5px 14px rgb(15 23 42 / 10%);transform:translateY(-1px)}.github-login:focus-visible{outline:3px solid #bae6fd;outline-offset:3px}.github-login svg{width:22px;height:22px;fill:currentColor}
 .login-note{margin:18px 0 0;text-align:center;color:#94a3b8;font-size:12px;line-height:1.65}.login-footer{margin:0;color:#64748b;font-size:12px;letter-spacing:.03em}.login-back{display:block;margin-top:18px;text-align:center;font-size:13px}
@@ -575,10 +589,12 @@ def invite_password_content(token: str, username: str, error: str = "") -> str:
 def invite_totp_content(token: str, username: str, secret: str, error: str = "") -> str:
 	error_html = f'<p class="login-error" role="alert">{html.escape(error)}</p>' if error else ""
 	uri = "otpauth://totp/" + urllib.parse.quote(f"TSuite:{username}") + "?" + urllib.parse.urlencode({"secret": secret, "issuer": "TSuite"})
+	qr_data_uri = totp_qr_data_uri(uri)
 	content = f"""<div class="login-brand"><span class="login-mark" aria-hidden="true">TS</span><span>TSuite</span></div>
-<h1>绑定动态验证码</h1><p class="login-description">在验证器中手动添加密钥，或在手机上打开验证器链接，然后输入当前 6 位验证码完成绑定。</p>
-{error_html}<div class="secret" style="margin-bottom:14px;text-align:center;letter-spacing:.08em">{html.escape(secret)}</div>
-<p style="text-align:center"><a class="button" href="{html.escape(uri)}">在验证器中打开</a></p>
+<h1>绑定动态验证码</h1><p class="login-description">使用验证器 App 扫描二维码，然后输入当前显示的 6 位验证码完成绑定。</p>
+{error_html}<div class="totp-qr"><img src="{qr_data_uri}" alt="TSuite 动态验证码绑定二维码" width="200" height="200"></div>
+<details class="totp-fallback"><summary>无法扫码？使用其他绑定方式</summary><div class="secret">{html.escape(secret)}</div>
+<p><a class="button" href="{html.escape(uri)}">在本机验证器中打开</a></p></details>
 <form class="login-form" method="post" action="/support/invite/totp"><input type="hidden" name="token" value="{html.escape(token)}">
 <label>动态验证码<input class="otp-input" name="totp" inputmode="numeric" pattern="[0-9]{{6}}" maxlength="6" required autofocus autocomplete="one-time-code"></label>
 <button class="primary">完成绑定</button></form>"""

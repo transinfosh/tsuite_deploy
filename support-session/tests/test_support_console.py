@@ -188,12 +188,15 @@ class SupportConsoleTest(unittest.TestCase):
 		self.assertIsNotNone(token)
 		captured, content = self.call(app, "/invite", query=f"token={token}")
 		self.assertIn('name="password"', content)
-		captured, content = self.call(
-			app, "/invite/password", "POST",
-			urllib.parse.urlencode({"token": token, "password": "a secure password 123", "confirm_password": "a secure password 123"}),
-		)
+		with mock.patch.object(CONSOLE, "totp_qr_data_uri", return_value="data:image/svg+xml;base64,PHN2Zy8+"):
+			captured, content = self.call(
+				app, "/invite/password", "POST",
+				urllib.parse.urlencode({"token": token, "password": "a secure password 123", "confirm_password": "a secure password 123"}),
+			)
 		self.assertTrue(captured["status"].startswith("200"))
 		self.assertIn("绑定动态验证码", content)
+		self.assertIn('alt="TSuite 动态验证码绑定二维码"', content)
+		self.assertIn("无法扫码？使用其他绑定方式", content)
 		with mock.patch.object(CONSOLE, "verify_totp", return_value=True):
 			captured, content = self.call(
 				app, "/invite/totp", "POST", urllib.parse.urlencode({"token": token, "totp": "123456"}),
@@ -205,6 +208,15 @@ class SupportConsoleTest(unittest.TestCase):
 		self.assertFalse(bool(user["is_admin"]))
 		self.assertTrue(CONSOLE.verify_password("a secure password 123", str(user["password_hash"])))
 		self.assertIsNone(app.store.local_user_invite(token))
+
+	def test_totp_qr_is_generated_locally_without_exposing_secret_in_arguments(self):
+		completed = subprocess.CompletedProcess([], 0, b"<?xml version='1.0'?><svg/>", b"")
+		with mock.patch.object(CONSOLE.subprocess, "run", return_value=completed) as run:
+			value = CONSOLE.totp_qr_data_uri("otpauth://totp/TSuite%3Aalice?secret=TEST&issuer=TSuite")
+		self.assertTrue(value.startswith("data:image/svg+xml;base64,"))
+		self.assertNotIn("secret=TEST", " ".join(run.call_args.args[0]))
+		self.assertIn(b"secret=TEST", run.call_args.kwargs["input"])
+		self.assertEqual(run.call_args.kwargs["timeout"], 5)
 
 	def test_operator_cannot_manage_users(self):
 		app = CONSOLE.Application(self.local_settings())
