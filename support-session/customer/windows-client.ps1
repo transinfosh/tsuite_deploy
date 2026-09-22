@@ -491,7 +491,9 @@ switch ($Mode) {
         Write-Output "cleanup-scheduled:$SessionId"
     }
     'Cleanup' {
-        Start-Sleep -Seconds 3
+        # Leave enough time for the nested SSH/broker path to receive the
+        # cleanup-scheduled acknowledgement before this task stops sshd.
+        Start-Sleep -Seconds 10
         $mutex = Enter-SupportLock $SessionId 30000
         try {
             $state = Read-SupportState $SessionId

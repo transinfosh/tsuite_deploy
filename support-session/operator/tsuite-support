@@ -242,10 +242,9 @@ def close(args: argparse.Namespace) -> None:
 					[*ssh_args, "sudo", "-n", "/usr/local/sbin/tsuite-support-client", "close"],
 					check=False, capture_output=True, text=True,
 				)
-				cleanup_confirmed = (
-					cleanup.returncode == 0
-					and f"cleanup-scheduled:{args.session_id}" in cleanup.stdout
-				)
+				# Cleanup intentionally drops this SSH path. The acknowledgement is
+				# authoritative even when ssh subsequently exits for connection loss.
+				cleanup_confirmed = f"cleanup-scheduled:{args.session_id}" in cleanup.stdout
 			except CliError:
 				pass
 			if cleanup_confirmed:

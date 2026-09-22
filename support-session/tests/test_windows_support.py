@@ -118,18 +118,22 @@ class WindowsBrokerTest(unittest.TestCase):
 		self.assertNotIn('DO-NOT-STORE', state)
 
 	def test_windows_close_confirms_cleanup_before_revoking_and_preserves_failed_session(self):
-		for returncode in (0, 1):
-			with self.subTest(returncode=returncode):
+		for returncode, output, confirmed in (
+			(0, 'cleanup-scheduled:012345abcdef\n', True),
+			(255, 'cleanup-scheduled:012345abcdef\n', True),
+			(1, '', False),
+		):
+			with self.subTest(returncode=returncode, confirmed=confirmed):
 				session_id = '012345abcdef'
 				REMOTE.atomic_write(REMOTE.session_state_path(self.settings, session_id), json.dumps({'id': session_id, 'identity_file': str(REMOTE.identity_path(self.settings, session_id))}))
 				REMOTE.atomic_write(REMOTE.identity_path(self.settings, session_id), 'test private')
 				remote = {'id': session_id, 'platform': 'windows', 'status': 'enrolled'}
-				cleanup = subprocess.CompletedProcess([], returncode, f'cleanup-scheduled:{session_id}\n')
+				cleanup = subprocess.CompletedProcess([], returncode, output)
 				with mock.patch.object(REMOTE, 'remote_session', return_value=remote), \
 					mock.patch.object(REMOTE, 'customer_ssh_args', return_value=['ssh']), \
 					mock.patch.object(REMOTE, 'run', return_value=cleanup) as run, \
 					mock.patch.object(REMOTE, 'close_remote', return_value=subprocess.CompletedProcess([], 0, '')) as close:
-					if returncode:
+					if not confirmed:
 						with self.assertRaises(REMOTE.RemoteActionError):
 							REMOTE.close_session(self.settings, session_id, 'alice')
 						close.assert_not_called()

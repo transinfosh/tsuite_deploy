@@ -426,7 +426,10 @@ def close_session(
 					 else "sudo -n /usr/local/sbin/tsuite-support-client close"],
 					env=customer_proxy_environment(),
 				)
-				if cleanup.returncode != 0 or f"cleanup-scheduled:{session_id}" not in cleanup.stdout:
+				# The customer emits this marker only after its cleanup task starts.
+				# That task deliberately tears down the SSH tunnel, so the SSH process
+				# may report a connection-loss exit code after delivering the marker.
+				if f"cleanup-scheduled:{session_id}" not in cleanup.stdout:
 					raise RemoteActionError("客户侧清理未确认；会话未撤销，请重试或由运维显式 force-close")
 			local["cleanup_confirmed_at"] = int(time.time())
 			atomic_write(

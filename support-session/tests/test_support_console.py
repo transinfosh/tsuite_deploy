@@ -831,7 +831,9 @@ class CompanyCliCloseTest(unittest.TestCase):
 			"customer_host_key": "ssh-ed25519 " + "A" * 44,
 		}
 		remote_second = remote_first | {"status": "revoking", "tunnel_reachable": False}
-		cleanup = subprocess.CompletedProcess([], 0, f"cleanup-scheduled:{self.session_id}\n", "")
+		cleanup = subprocess.CompletedProcess(
+			[], 255, f"cleanup-scheduled:{self.session_id}\n", "connection closed"
+		)
 		with mock.patch.object(CLI, "CONFIG_PATH", self.config_path), \
 			mock.patch.object(CLI, "SESSIONS_DIR", self.sessions_dir), \
 			mock.patch.object(CLI, "show_remote", side_effect=[remote_first, remote_second]), \
