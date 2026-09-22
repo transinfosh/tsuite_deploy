@@ -17,16 +17,28 @@ foreach ($command in @('New-LocalUser', 'Register-ScheduledTask', 'Get-CimInstan
 function Assert-SupportedWindowsHost {
     $operatingSystem = Get-CimInstance Win32_OperatingSystem
     $computerSystem = Get-CimInstance Win32_ComputerSystem
-    if ($operatingSystem.ProductType -ne 3 -or
-        ([version]$operatingSystem.Version) -lt ([version]'10.0.17763')) {
-        throw 'TSuite support requires Windows Server 2019 or later.'
+    $build = [int]$operatingSystem.BuildNumber
+    if ($operatingSystem.ProductType -eq 3) {
+        if (([version]$operatingSystem.Version) -lt ([version]'10.0') -or $build -lt 14393) {
+            throw 'TSuite support requires Windows Server 2016 or later; older Windows Server releases are not supported.'
+        }
+    } elseif ($operatingSystem.ProductType -eq 1) {
+        if (([version]$operatingSystem.Version) -lt ([version]'10.0') -or $build -lt 17763) {
+            throw 'TSuite support requires Windows 10 build 1809 or later, or Windows 11.'
+        }
+    } else {
+        throw 'TSuite support does not run on Windows domain controllers.'
     }
     if ($computerSystem.DomainRole -in @(4, 5)) {
         throw 'TSuite support does not create temporary local administrators on a domain controller.'
     }
+    return @{
+        operating_system = $operatingSystem
+        use_compatibility_openssh = ($operatingSystem.ProductType -eq 3 -and $build -lt 17763)
+    }
 }
 
-Assert-SupportedWindowsHost
+$windowsHost = Assert-SupportedWindowsHost
 Assert-SessionId $configuration.session_id
 if ($configuration.bastion_host -cnotmatch '^[a-zA-Z0-9.-]+$' -or
     $configuration.bastion_port -lt 1 -or $configuration.bastion_port -gt 65535) {
@@ -57,7 +69,100 @@ function Disable-NewOpenSshFirewallRule([bool]$RuleExistedBeforeInstall) {
     if ($rule) { Disable-NetFirewallRule -InputObject $rule -ErrorAction Stop | Out-Null }
 }
 
-function Get-OpenSshBinaries {
+function Assert-OpenSshBinaries([string]$Directory) {
+    $binaries = @{
+        sshd = Join-Path $Directory 'sshd.exe'
+        ssh = Join-Path $Directory 'ssh.exe'
+        keygen = Join-Path $Directory 'ssh-keygen.exe'
+        sftp = Join-Path $Directory 'sftp-server.exe'
+    }
+    foreach ($name in $binaries.Keys) {
+        if (-not (Test-Path -LiteralPath $binaries[$name] -PathType Leaf)) {
+            throw "OpenSSH installation is incomplete; missing $name executable: $($binaries[$name])"
+        }
+    }
+    return $binaries
+}
+
+function Get-CompatibilityOpenSshBinaries {
+    if ($configuration.windows_openssh_url -cnotmatch '^https://[a-zA-Z0-9.-]+(?:/[A-Za-z0-9._~!$&''()*+,;=:@%/-]+)+$' -or
+        $configuration.windows_openssh_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
+        $configuration.windows_openssh_version -cnotmatch '^[A-Za-z0-9._-]{1,40}$') {
+        throw 'Windows Server 2016 requires a configured, pinned OpenSSH compatibility package.'
+    }
+    $runtimeRoot = Join-Path $env:ProgramData 'TSuiteSupportRuntime'
+    if (-not (Test-Path -LiteralPath $runtimeRoot)) { New-PrivateDirectory $runtimeRoot }
+    Assert-PrivateDirectory $runtimeRoot
+    $version = [string]$configuration.windows_openssh_version
+    $target = Join-Path $runtimeRoot ("OpenSSH-" + $version)
+    $marker = Join-Path $target 'package.sha256'
+    if (Test-Path -LiteralPath $target) {
+        Assert-PrivateDirectory $target
+        if (-not (Test-Path -LiteralPath $marker -PathType Leaf) -or
+            (Get-Content -LiteralPath $marker -Raw).Trim() -cne $configuration.windows_openssh_sha256) {
+            throw "Existing OpenSSH compatibility runtime failed integrity metadata validation: $target"
+        }
+        return Assert-OpenSshBinaries $target
+    }
+
+    $runtimeMutex = New-Object Threading.Mutex($false, 'Global\TSuiteSupport-OpenSSHRuntime')
+    $runtimeLockAcquired = $false
+    try {
+        try { $runtimeLockAcquired = $runtimeMutex.WaitOne(300000) }
+        catch [Threading.AbandonedMutexException] { $runtimeLockAcquired = $true }
+        if (-not $runtimeLockAcquired) { throw 'Timed out waiting for another OpenSSH compatibility installation.' }
+        if (Test-Path -LiteralPath $target) {
+            Assert-PrivateDirectory $target
+            if (-not (Test-Path -LiteralPath $marker -PathType Leaf) -or
+                (Get-Content -LiteralPath $marker -Raw).Trim() -cne $configuration.windows_openssh_sha256) {
+                throw "Existing OpenSSH compatibility runtime failed integrity metadata validation: $target"
+            }
+            return Assert-OpenSshBinaries $target
+        }
+
+        $staging = Join-Path $runtimeRoot ('install-' + [guid]::NewGuid().ToString('N'))
+        $archive = Join-Path $runtimeRoot ('download-' + [guid]::NewGuid().ToString('N') + '.zip')
+        New-PrivateDirectory $staging
+        try {
+            Write-Host "Installing pinned OpenSSH $version compatibility runtime for Windows Server 2016..."
+            $web = New-Object Net.WebClient
+            try { $web.DownloadFile([string]$configuration.windows_openssh_url, $archive) }
+            finally { $web.Dispose() }
+            $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualHash -cne $configuration.windows_openssh_sha256) {
+                throw 'Downloaded OpenSSH compatibility package failed SHA-256 validation.'
+            }
+            Expand-Archive -LiteralPath $archive -DestinationPath $staging
+            $servers = @(Get-ChildItem -LiteralPath $staging -Filter 'sshd.exe' -File -Recurse)
+            if ($servers.Count -ne 1) { throw 'OpenSSH compatibility package layout is invalid.' }
+            $source = $servers[0].Directory.FullName
+            [void](Assert-OpenSshBinaries $source)
+            New-PrivateDirectory $target
+            try {
+                Get-ChildItem -LiteralPath $source -Force | ForEach-Object {
+                    Copy-Item -LiteralPath $_.FullName -Destination $target -Recurse -Force
+                }
+                [void](Assert-OpenSshBinaries $target)
+                Write-Utf8 $marker ([string]$configuration.windows_openssh_sha256)
+                Set-ServiceFilePermissions $marker
+                Assert-PrivateDirectory $target
+            } catch {
+                if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+                throw
+            }
+        } finally {
+            if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force }
+            if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
+        }
+    } finally {
+        if ($runtimeLockAcquired) { $runtimeMutex.ReleaseMutex() }
+        $runtimeMutex.Dispose()
+    }
+    return Assert-OpenSshBinaries $target
+}
+
+function Get-OpenSshBinaries([bool]$UseCompatibilityRuntime) {
+    if ($UseCompatibilityRuntime) { return Get-CompatibilityOpenSshBinaries }
     $sshd = Get-OpenSshServicePath
     $directory = if ($sshd) { Split-Path -Parent $sshd } else { $null }
     $needsClient = -not $directory -or -not (Test-Path -LiteralPath (Join-Path $directory 'ssh.exe') -PathType Leaf) -or
@@ -65,8 +170,8 @@ function Get-OpenSshBinaries {
     $firewallRuleExisted = [bool](Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue)
     $installedServer = $false
     if (-not $sshd -or $needsClient) {
-        # Windows Server 2019+ distributes OpenSSH as Features on Demand.  Use the
-        # OS package rather than downloading an unpinned third-party archive.
+        # Supported modern Windows releases distribute OpenSSH as Features on
+        # Demand. Use the OS-serviced package rather than replacing it.
         try {
             if (-not $sshd) {
                 Install-OpenSshCapability 'OpenSSH.Server~~~~0.0.1.0'
@@ -81,22 +186,73 @@ function Get-OpenSshBinaries {
     }
     if (-not $sshd) { throw 'OpenSSH Server was installed but the sshd service was not registered.' }
 
-    $directory = Split-Path -Parent $sshd
-    $binaries = @{
-        sshd = $sshd
-        ssh = Join-Path $directory 'ssh.exe'
-        keygen = Join-Path $directory 'ssh-keygen.exe'
-        sftp = Join-Path $directory 'sftp-server.exe'
-    }
-    foreach ($name in $binaries.Keys) {
-        if (-not (Test-Path -LiteralPath $binaries[$name] -PathType Leaf)) {
-            throw "OpenSSH installation is incomplete; missing $name executable: $($binaries[$name])"
-        }
-    }
-    return $binaries
+    return Assert-OpenSshBinaries (Split-Path -Parent $sshd)
 }
 
-$openSsh = Get-OpenSshBinaries
+function New-OpenSshTestKey([string]$KeygenPath, [string]$Path) {
+    $process = Start-Process -FilePath $KeygenPath -ArgumentList (
+        '-q -t ed25519 -N "" -f "{0}"' -f $Path) -PassThru -Wait -NoNewWindow
+    try {
+        if ($process.ExitCode -ne 0) { throw 'Could not generate a local OpenSSH authentication test key.' }
+    } finally { $process.Dispose() }
+}
+
+function Test-LocalSshAuthentication(
+    [string]$SshPath, [string]$KeygenPath, [string]$Directory,
+    [string]$User, [int]$Port, [string]$SessionId
+) {
+    $authorizedKeysPath = Join-Path $Directory 'authorized_keys'
+    $realAuthorizedKeys = [IO.File]::ReadAllText($authorizedKeysPath)
+    $plainKey = Join-Path $Directory 'selftest_plain'
+    $caKey = Join-Path $Directory 'selftest_ca'
+    $certificateKey = Join-Path $Directory 'selftest_certificate'
+    $knownHostsPath = Join-Path $Directory 'selftest_known_hosts'
+    try {
+        New-OpenSshTestKey $KeygenPath $plainKey
+        New-OpenSshTestKey $KeygenPath $caKey
+        New-OpenSshTestKey $KeygenPath $certificateKey
+        $sign = Start-Process -FilePath $KeygenPath -ArgumentList (
+            '-q -s "{0}" -I tsuite-selftest -n "{1}" -V -1m:+5m "{2}.pub"' -f `
+                $caKey, $SessionId, $certificateKey) -PassThru -Wait -NoNewWindow
+        try {
+            if ($sign.ExitCode -ne 0) { throw 'Could not generate a local OpenSSH authentication test certificate.' }
+        } finally { $sign.Dispose() }
+
+        $plainPublic = ((Get-Content -LiteralPath "$plainKey.pub" -Raw).Trim() -split '\s+')[0..1] -join ' '
+        $caPublic = ((Get-Content -LiteralPath "$caKey.pub" -Raw).Trim() -split '\s+')[0..1] -join ' '
+        $testExpiry = [DateTimeOffset]::UtcNow.AddMinutes(10).UtcDateTime.ToString('yyyyMMddHHmmssZ')
+        $testKeys = (
+            'expiry-time="{0}",from="127.0.0.1",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-user-rc {1}' -f `
+                $testExpiry, $plainPublic) + "`n" + (
+            'cert-authority,principals="{0}",expiry-time="{1}",from="127.0.0.1",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-user-rc {2}' -f `
+                $SessionId, $testExpiry, $caPublic)
+        Write-Utf8 $authorizedKeysPath $testKeys
+        Set-ServiceFilePermissions $authorizedKeysPath
+        $hostPublic = ((Get-Content -LiteralPath (Join-Path $Directory 'ssh_host_ed25519_key.pub') -Raw).Trim() -split '\s+')[0..1] -join ' '
+        Write-Utf8 $knownHostsPath ("[127.0.0.1]:$Port $hostPublic`n")
+
+        foreach ($identity in @($plainKey, $certificateKey)) {
+            $output = & $SshPath -F none -T -i $identity -o IdentitiesOnly=yes -o BatchMode=yes `
+                -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$knownHostsPath" `
+                -o ClearAllForwardings=yes -o ConnectTimeout=10 -p $Port "$User@127.0.0.1" `
+                'cmd.exe /d /c exit 0' 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                throw "Local OpenSSH public-key/certificate authentication self-test failed: $($output -join ' ')"
+            }
+        }
+    } finally {
+        Write-Utf8 $authorizedKeysPath $realAuthorizedKeys
+        Set-ServiceFilePermissions $authorizedKeysPath
+        foreach ($path in @(
+            $plainKey, "$plainKey.pub", $caKey, "$caKey.pub", $certificateKey,
+            "$certificateKey.pub", "$certificateKey-cert.pub", $knownHostsPath
+        )) {
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+        }
+    }
+}
+
+$openSsh = Get-OpenSshBinaries ([bool]$windowsHost.use_compatibility_openssh)
 $sshdPath = $openSsh.sshd
 $sshPath = $openSsh.ssh
 $keygenPath = $openSsh.keygen
@@ -207,6 +363,7 @@ try {
     PermitEmptyPasswords no
     AllowTcpForwarding no
     AllowAgentForwarding no
+    LogLevel VERBOSE
     Subsystem sftp "$($sftpPath.Replace('\', '/'))"
 "@
         Write-Utf8 (Join-Path $directory 'sshd_config') $sshdConfiguration
@@ -241,6 +398,13 @@ try {
             try { Save-StartupDiagnostics $id }
             catch { Write-Warning ('Could not save startup diagnostics: ' + $_.Exception.Message) }
             throw 'The temporary SSH listener failed to start. See the startup diagnostics above.'
+        }
+        try {
+            Test-LocalSshAuthentication $sshPath $keygenPath $directory $opsUser $localPort $id
+        } catch {
+            try { Save-StartupDiagnostics $id }
+            catch { Write-Warning ('Could not save authentication diagnostics: ' + $_.Exception.Message) }
+            throw
         }
         Start-ScheduledTask -TaskName "TSuiteSupport-$id-Tunnel"
         Start-ScheduledTask -TaskName "TSuiteSupport-$id-Monitor"

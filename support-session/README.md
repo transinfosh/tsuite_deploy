@@ -214,23 +214,29 @@ tsuite-support close SESSION_ID --force --closed-by alice \
 PostgreSQL 版本。确认备份能够由与服务端同主版本的 `pg_dump` 完成后，再执行升级。删除旧
 Compose 容器和旧 volume 必须放在新部署健康检查、站点登录与后台任务验证之后。
 
-## Windows Server 接入
+## Windows 接入
 
-创建会话时选择 **Windows Server**，然后在客户机上以管理员身份打开 **64 位 Windows PowerShell
+创建会话时选择 **Windows**，然后在客户机上以管理员身份打开 **64 位 Windows PowerShell
 5.1**，执行页面的一次性命令，无需另输会话码。公司 CLI 同样支持：
 
 ```bash
 tsuite-support create zj-mes --platform windows --purpose "Windows Server 维护"
 ```
 
-前置条件：Windows Server 2019 或更新版本（成员服务器/独立服务器，域控制器不支持本地账号；脚本会自动核验），
-可用的 LocalAccounts、ScheduledTasks 模块及出站 HTTPS/堡垒机 SSH 访问。若未检测到 `sshd` 服务，
-接入脚本会自动通过 Windows Features on Demand 安装系统自带的 OpenSSH Server 与 Client；如果已有
-`sshd` 但同目录缺少客户端二进制，也会补装 Client。该操作需要 Windows Update/WSUS 能提供对应功能包；
-受策略限制时脚本会给出原因，不会下载第三方 SSH 包。脚本从 `sshd` 服务路径定位同一套
-`ssh.exe`、`sshd.exe`、`ssh-keygen.exe` 和 `sftp-server.exe`，不依赖 PATH，也不会启动、修改或重配
-客户已有的系统 `sshd` 服务。系统安装 OpenSSH Server 时新建的 TCP/22 防火墙规则会立即禁用；
-安装前已存在的规则保持不变。应使用维护中的 Win32 OpenSSH 版本；当前目标客户环境为 10.0p2。
+支持范围：Windows Server 2016、2019、2022、2025，以及 Windows 10 build 1809 或更新版本和 Windows 11。
+更早的 Windows Server、较早的 Windows 10、域控制器和 32 位 PowerShell 不支持。客户机需要可用的
+LocalAccounts、ScheduledTasks 模块及出站 HTTPS/堡垒机 SSH 访问。
+
+- Windows Server 2019+、Windows 10/11 使用微软随系统维护的 OpenSSH Features on Demand；缺少 Server
+  或 Client 时自动安装。安装需要 Windows Update/WSUS 能提供对应功能包。
+- Windows Server 2016 使用由 edge HTTPS 下发的固定 Win64 OpenSSH 兼容运行时。堡垒机安装时固定版本、
+  下载来源和 SHA-256；客户机再次校验 SHA-256 后解压到受限运行时目录，不注册系统服务、不开放 22 端口。
+- 当前 Server 2016 兼容运行时固定为 Win32-OpenSSH `9.8.3.0p2-Preview`。它只用于本项目隔离的回环
+  `sshd`，上线前仍必须完成 Server 2016 真实端到端验证；更新版本也必须先验证并更新哈希。
+
+脚本始终使用同一目录中的 `ssh.exe`、`sshd.exe`、`ssh-keygen.exe` 和 `sftp-server.exe`，不依赖 PATH，
+也不会启动、修改或重配客户已有的系统 `sshd` 服务。系统安装 OpenSSH Server 时新建的 TCP/22 防火墙
+规则会立即禁用；安装前已存在的规则保持不变。
 接入前检查本机 SSH 登录与系统时钟。
 
 Windows 会话的行为与边界：
@@ -243,6 +249,8 @@ Windows 会话的行为与边界：
   反向隧道指向该端口。不会修改现有 `sshd_config`、管理员共享公钥文件或默认 Shell；本次自动安装
   OpenSSH 新建的 TCP/22 入站防火墙规则会被立即禁用，既有规则不会被改写。
   会话使用独立 Host Key，并通过原有登记协议固定到运维端。
+- 建立反向隧道前，客户机在 `127.0.0.1` 上分别完成普通公钥和短期证书登录自检。自检密钥立即删除；
+  失败时不会建立隧道，并保存 VERBOSE 级别启动诊断，避免把本机认证失败误判为 edge/FRP 故障。
 - Sshd/Tunnel 任务在启动后和机器重启后运行，连接失败每 5 秒重试，过期后不重连。
   Cleanup 任务从初始期限起每分钟复查最新到期时间，并在重启时补做过期清理。账号与公钥同时设置并更新原生过期时间。
 - 普通关闭先请求 Windows SYSTEM 清理任务，收到确认后再撤销堡垒机。清理会禁用账号、停止任务、
@@ -280,7 +288,8 @@ pwsh -NoProfile -File support-session/tests/test_windows_lease.ps1
 ```
 
 PowerShell 测试使用隔离替身验证任务和清理行为，不创建真实账号或服务。正式使用前还需在可丢弃的
-Windows Server 上验证真实会话：领取、SSH 公钥登录、带空格/中文参数执行、网络恢复、普通关闭、
+Windows Server 2016、2019、2022、2025 和 Windows 10/11 上分别验证真实会话：领取、SSH 公钥与证书登录、
+带空格/中文参数执行、网络恢复、普通关闭、
 离线跨过期后重启清理，以及已有 SAP1 登录仍正常。Linux 上的语法/单元测试不能代替 Windows 系统集成验证。
 
 Windows API 依据：[计划任务](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/new-scheduledtasksettingsset)、

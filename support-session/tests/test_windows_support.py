@@ -1,4 +1,5 @@
 import base64
+import dataclasses
 import io
 import json
 import subprocess
@@ -18,17 +19,32 @@ class WindowsSessionTest(unittest.TestCase):
 	setUp = sessions.SupportSessionTest.setUp
 	tearDown = sessions.SupportSessionTest.tearDown
 
-	def test_windows_bootstrap_repairs_missing_windows_openssh_components(self):
+	def test_windows_bootstrap_supports_server_2016_and_modern_windows_openssh_paths(self):
 		bootstrap = (sessions.ROOT / 'customer' / 'bootstrap.ps1').read_text(encoding='utf-8')
 		self.assertIn('Assert-SupportedWindowsHost', bootstrap)
 		self.assertIn('Win32_ComputerSystem', bootstrap)
+		self.assertIn("$build -lt 14393", bootstrap)
+		self.assertIn("$build -lt 17763", bootstrap)
+		self.assertIn('Get-CompatibilityOpenSshBinaries', bootstrap)
+		self.assertIn('Get-FileHash -LiteralPath $archive -Algorithm SHA256', bootstrap)
 		self.assertIn("Install-OpenSshCapability 'OpenSSH.Server~~~~0.0.1.0'", bootstrap)
 		self.assertIn("Install-OpenSshCapability 'OpenSSH.Client~~~~0.0.1.0'", bootstrap)
 		self.assertIn('Add-WindowsCapability -Online -Name $Name', bootstrap)
 		self.assertIn('Disable-NewOpenSshFirewallRule', bootstrap)
 		self.assertIn("OpenSSH-Server-In-TCP", bootstrap)
 		self.assertIn("sftp_path = $sftpPath", bootstrap)
+		self.assertIn('Test-LocalSshAuthentication', bootstrap)
+		self.assertIn('cert-authority,principals=', bootstrap)
+		self.assertIn('LogLevel VERBOSE', bootstrap)
 		self.assertNotIn('Install OpenSSH Server first.', bootstrap)
+		self.assertNotIn('requires Windows Server 2019 or later', bootstrap)
+
+	def test_bastion_installer_pins_server_2016_openssh_asset(self):
+		installer = (sessions.ROOT / 'bastion' / 'install.sh').read_text(encoding='utf-8')
+		self.assertIn('WINDOWS_OPENSSH_VERSION="9.8.3.0p2-Preview"', installer)
+		self.assertIn('0ca131f3a78f404dc819a6336606caec0db1663a692ccc3af1e90232706ada54', installer)
+		self.assertIn("--windows-openssh-package", installer)
+		self.assertIn("sha256sum", installer)
 
 	def test_windows_bundle_contains_pinned_configuration_and_no_linux_commands(self):
 		for name in ('bootstrap.ps1', 'windows-client.ps1'):
@@ -36,7 +52,13 @@ class WindowsSessionTest(unittest.TestCase):
 		session = {'id': '012345abcdef', 'platform': 'windows', 'download_id': 'A' * 43,
 			'enrollment_private_key': 'TEST PRIVATE KEY'}
 		command = SUPPORT.customer_command(self.settings, session)
-		script = SUPPORT.customer_script(self.settings, session)
+		settings = dataclasses.replace(
+			self.settings,
+			windows_openssh_url='https://bastion.example.com/tsuite-support/assets/OpenSSH-Win64.zip',
+			windows_openssh_sha256='a' * 64,
+			windows_openssh_version='9.8.3.0p2-Preview',
+		)
+		script = SUPPORT.customer_script(settings, session)
 		self.assertIn('powershell.exe', command)
 		self.assertNotIn('sudo bash', command)
 		self.assertNotIn('PRIVATE KEY', command)
@@ -46,6 +68,12 @@ class WindowsSessionTest(unittest.TestCase):
 		configuration = json.loads(base64.b64decode(encoded))
 		self.assertEqual(configuration['session_id'], session['id'])
 		self.assertEqual(configuration['bastion_host_key'], self.settings.bastion_host_key)
+		self.assertEqual(configuration['windows_openssh_sha256'], 'a' * 64)
+		self.assertEqual(configuration['windows_openssh_version'], '9.8.3.0p2-Preview')
+		self.assertEqual(
+			configuration['windows_openssh_url'],
+			'https://bastion.example.com/tsuite-support/assets/OpenSSH-Win64.zip',
+		)
 		SUPPORT.write_customer_script(self.settings, session)
 		SUPPORT.remove_customer_script(self.settings, session)
 		self.assertFalse((self.settings.downloads_dir / session['download_id']).exists())

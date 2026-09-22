@@ -19,6 +19,10 @@ PORT_START="22000"
 PORT_END="22999"
 TOKEN_TTL_SECONDS="900"
 SESSION_TTL_SECONDS="7200"
+WINDOWS_OPENSSH_VERSION="9.8.3.0p2-Preview"
+WINDOWS_OPENSSH_SHA256="0ca131f3a78f404dc819a6336606caec0db1663a692ccc3af1e90232706ada54"
+WINDOWS_OPENSSH_URL="https://github.com/PowerShell/Win32-OpenSSH/releases/download/v9.8.3.0p2-Preview/OpenSSH-Win64.zip"
+WINDOWS_OPENSSH_PACKAGE=""
 
 die() {
 	printf '错误: %s\n' "$*" >&2
@@ -38,6 +42,8 @@ usage() {
   --port-range START-END       反向 SSH 回环端口范围，默认 22000-22999
   --token-ttl SECONDS          接入链接有效期，默认 900
   --session-ttl SECONDS        会话闲置超时，默认 7200
+  --windows-openssh-package FILE
+                              可选，本地 Win64 OpenSSH 兼容包；未指定时下载固定版本
 EOF
 }
 
@@ -59,6 +65,7 @@ while (($#)); do
 			;;
 		--token-ttl) TOKEN_TTL_SECONDS="${2:-}"; shift ;;
 		--session-ttl) SESSION_TTL_SECONDS="${2:-}"; shift ;;
+		--windows-openssh-package) WINDOWS_OPENSSH_PACKAGE="${2:-}"; shift ;;
 		--help | -h) usage; exit 0 ;;
 		*) die "未知参数: $1" ;;
 	esac
@@ -79,7 +86,7 @@ require_integer "会话有效期" "$SESSION_TTL_SECONDS" 300 28800
 for windows_script in bootstrap.ps1 windows-client.ps1; do
 	[[ -f "$SCRIPT_DIR/../customer/$windows_script" ]] || die "缺少客户 $windows_script"
 done
-for command_name in caddy getent groupadd id install passwd python3 ssh sshd ssh-keygen systemctl useradd usermod visudo; do
+for command_name in caddy curl getent groupadd id install passwd python3 sha256sum ssh sshd ssh-keygen systemctl useradd usermod visudo; do
 	command -v "$command_name" >/dev/null 2>&1 || die "缺少命令: $command_name"
 done
 id caddy >/dev/null 2>&1 || die "Caddy 服务用户不存在"
@@ -104,11 +111,35 @@ install -d -m 0755 "$INSTALL_ROOT"
 install -d -m 0755 -o root -g root "$CONFIG_DIR"
 install -d -m 2770 -o "$ENROLL_USER" -g "$ENROLL_USER" "$STATE_DIR" "$STATE_DIR/sessions"
 install -d -m 2750 -o root -g caddy "$DOWNLOADS_DIR"
+install -d -m 2750 -o root -g caddy "$DOWNLOADS_DIR/assets"
 install -d -m 0711 -o root -g root "$AUTHORIZED_KEYS_DIR"
 install -m 0755 "$SCRIPT_DIR/tsuite_support_session.py" "$INSTALL_ROOT/tsuite-support-session"
 install -m 0755 "$BOOTSTRAP_SOURCE" "$INSTALL_ROOT/bootstrap.sh"
 install -m 0644 "$SCRIPT_DIR/../customer/linux-client.py" "$INSTALL_ROOT/linux-client.py"
 install -m 0644 "$SCRIPT_DIR/../customer/bootstrap.ps1" "$SCRIPT_DIR/../customer/windows-client.ps1" "$INSTALL_ROOT/"
+
+windows_openssh_asset="$DOWNLOADS_DIR/assets/OpenSSH-Win64-$WINDOWS_OPENSSH_VERSION.zip"
+windows_openssh_temporary=""
+if [[ -n "$WINDOWS_OPENSSH_PACKAGE" ]]; then
+	[[ -f "$WINDOWS_OPENSSH_PACKAGE" ]] || die "Windows OpenSSH 兼容包不存在: $WINDOWS_OPENSSH_PACKAGE"
+	windows_openssh_source="$WINDOWS_OPENSSH_PACKAGE"
+elif [[ -f "$windows_openssh_asset" ]] && \
+	[[ "$(sha256sum "$windows_openssh_asset" | awk '{print $1}')" == "$WINDOWS_OPENSSH_SHA256" ]]; then
+	windows_openssh_source="$windows_openssh_asset"
+else
+	windows_openssh_temporary="$(mktemp "$DOWNLOADS_DIR/assets/.OpenSSH-Win64.XXXXXX")"
+	curl -fL --retry 3 --proto '=https' --tlsv1.2 -o "$windows_openssh_temporary" "$WINDOWS_OPENSSH_URL" || \
+		die "无法下载固定的 Windows OpenSSH 兼容包；可使用 --windows-openssh-package 提供本地文件"
+	windows_openssh_source="$windows_openssh_temporary"
+fi
+[[ "$(sha256sum "$windows_openssh_source" | awk '{print $1}')" == "$WINDOWS_OPENSSH_SHA256" ]] || \
+	die "Windows OpenSSH 兼容包 SHA-256 校验失败"
+if [[ "$windows_openssh_source" != "$windows_openssh_asset" ]]; then
+	install -m 0640 -o root -g caddy "$windows_openssh_source" "$windows_openssh_asset"
+fi
+if [[ -n "$windows_openssh_temporary" ]]; then
+	rm -f -- "$windows_openssh_temporary"
+fi
 ln -sfn "$INSTALL_ROOT/tsuite-support-session" /usr/local/sbin/tsuite-support-session
 install -m 0660 -o "$ENROLL_USER" -g "$ENROLL_USER" /dev/null "$STATE_DIR/.lock"
 if [[ ! -f "$AUTHORIZED_KEYS_DIR/$ENROLL_USER" ]]; then
@@ -126,7 +157,8 @@ host_key="$(awk 'NF >= 2 {print $1, $2; exit}' "$host_key_file")"
 python3 - "$CONFIG_DIR/config.json" "$STATE_DIR" "$AUTHORIZED_KEYS_DIR" "$DOWNLOADS_DIR" \
 	"$BASTION_HOST" "$BASTION_PORT" "$host_key" "$INSTALL_ROOT/bootstrap.sh" \
 	"$PORT_START" "$PORT_END" "$TOKEN_TTL_SECONDS" "$SESSION_TTL_SECONDS" \
-	"$TUNNEL_GROUP" <<'PY'
+	"$TUNNEL_GROUP" "$WINDOWS_OPENSSH_VERSION" "$WINDOWS_OPENSSH_SHA256" \
+	"OpenSSH-Win64-$WINDOWS_OPENSSH_VERSION.zip" <<'PY'
 import json
 import os
 import sys
@@ -134,7 +166,8 @@ import sys
 (
     path, state_dir, authorized_keys_dir, downloads_dir, bastion_host, bastion_port,
     host_key, bootstrap_path, port_start, port_end, token_ttl,
-    session_ttl, tunnel_group,
+    session_ttl, tunnel_group, windows_openssh_version, windows_openssh_sha256,
+    windows_openssh_filename,
 ) = sys.argv[1:]
 value = {
     "state_dir": state_dir,
@@ -150,6 +183,9 @@ value = {
     "token_ttl_seconds": int(token_ttl),
     "session_ttl_seconds": int(session_ttl),
     "tunnel_group": tunnel_group,
+    "windows_openssh_url": f"https://{bastion_host}/tsuite-support/assets/{windows_openssh_filename}",
+    "windows_openssh_sha256": windows_openssh_sha256,
+    "windows_openssh_version": windows_openssh_version,
 }
 temporary = path + ".tmp"
 with open(temporary, "w", encoding="utf-8") as handle:

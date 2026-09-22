@@ -116,6 +116,9 @@ class Settings:
 	token_ttl_seconds: int
 	session_ttl_seconds: int
 	tunnel_group: str = "tsuite-tunnel"
+	windows_openssh_url: str = ""
+	windows_openssh_sha256: str = ""
+	windows_openssh_version: str = ""
 
 	@classmethod
 	def load(cls, path: pathlib.Path) -> "Settings":
@@ -134,6 +137,9 @@ class Settings:
 			token_ttl_seconds=int(value.get("token_ttl_seconds", 900)),
 			session_ttl_seconds=int(value.get("session_ttl_seconds", 7200)),
 			tunnel_group=value.get("tunnel_group", "tsuite-tunnel"),
+			windows_openssh_url=value.get("windows_openssh_url", ""),
+			windows_openssh_sha256=value.get("windows_openssh_sha256", ""),
+			windows_openssh_version=value.get("windows_openssh_version", ""),
 		)
 
 	def validate(self) -> None:
@@ -151,6 +157,19 @@ class Settings:
 			raise SupportError("支持会话有效期无效")
 		if not self.bootstrap_path.is_file():
 			raise SupportError("bootstrap 脚本不存在")
+		windows_asset_values = (
+			self.windows_openssh_url, self.windows_openssh_sha256, self.windows_openssh_version,
+		)
+		if any(windows_asset_values) and not all(windows_asset_values):
+			raise SupportError("Windows Server 2016 OpenSSH 兼容包配置不完整")
+		if self.windows_openssh_url and not self.windows_openssh_url.startswith(
+			f"{self.download_base_url}/assets/"
+		):
+			raise SupportError("Windows OpenSSH 兼容包必须由堡垒机 HTTPS 下载路径提供")
+		if self.windows_openssh_sha256 and not re.fullmatch(r"[a-f0-9]{64}", self.windows_openssh_sha256):
+			raise SupportError("Windows OpenSSH 兼容包 SHA-256 无效")
+		if self.windows_openssh_version and not re.fullmatch(r"[A-Za-z0-9._-]{1,40}", self.windows_openssh_version):
+			raise SupportError("Windows OpenSSH 兼容包版本无效")
 
 
 class SessionStore:
@@ -691,6 +710,9 @@ def customer_script(settings: Settings, session: dict[str, Any]) -> str:
 			"bastion_port": settings.bastion_port,
 			"bastion_host_key": settings.bastion_host_key,
 			"enrollment_private_key": session["enrollment_private_key"],
+			"windows_openssh_url": settings.windows_openssh_url,
+			"windows_openssh_sha256": settings.windows_openssh_sha256,
+			"windows_openssh_version": settings.windows_openssh_version,
 		}
 		bootstrap = settings.bootstrap_path.with_name("bootstrap.ps1").read_text(encoding="utf-8")
 		client = settings.bootstrap_path.with_name("windows-client.ps1").read_bytes()
