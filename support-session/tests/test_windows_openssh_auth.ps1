@@ -9,13 +9,6 @@ Set-StrictMode -Version Latest
 
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'customer/windows-client.ps1') -Mode Library
 
-$sshd = Join-Path $OpenSshDirectory 'sshd.exe'
-$ssh = Join-Path $OpenSshDirectory 'ssh.exe'
-$keygen = Join-Path $OpenSshDirectory 'ssh-keygen.exe'
-foreach ($path in @($sshd, $ssh, $keygen)) {
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing OpenSSH test binary: $path" }
-}
-
 $id = [guid]::NewGuid().ToString('N').Substring(0, 8)
 $userName = "tsuite-ci-$id"
 $root = Join-Path $env:ProgramData "TSuiteSupportAuthTest-$id"
@@ -24,10 +17,26 @@ $clientKey = Join-Path $root 'client_ed25519'
 $authorizedKeys = Join-Path $root 'authorized_keys'
 $config = Join-Path $root 'sshd_config'
 $log = Join-Path $root 'sshd.log'
+$taskName = "TSuiteSupportAuthTest-$id"
 $process = $null
 $user = $null
+$taskRegistered = $false
 try {
     New-PrivateDirectory $root
+    if ($CompatibilityRuntime) {
+        $privateRuntime = Join-Path $root 'runtime'
+        New-PrivateDirectory $privateRuntime
+        Get-ChildItem -LiteralPath $OpenSshDirectory -Force | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination $privateRuntime -Recurse -Force
+        }
+        $OpenSshDirectory = $privateRuntime
+    }
+    $sshd = Join-Path $OpenSshDirectory 'sshd.exe'
+    $ssh = Join-Path $OpenSshDirectory 'ssh.exe'
+    $keygen = Join-Path $OpenSshDirectory 'ssh-keygen.exe'
+    foreach ($path in @($sshd, $ssh, $keygen)) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing OpenSSH test binary: $path" }
+    }
     foreach ($path in @($hostKey, $clientKey)) {
         $keygenProcess = Start-Process -FilePath $keygen -ArgumentList (
             '-q -t ed25519 -N "" -f "{0}"' -f $path) -PassThru -Wait -NoNewWindow
@@ -70,7 +79,16 @@ $runtimeOptions
 
     & $sshd -t -f $config
     if ($LASTEXITCODE -ne 0) { throw 'OpenSSH 8.1 rejected the support sshd configuration.' }
-    $process = Start-Process -FilePath $sshd -ArgumentList ('-D -E "{0}" -f "{1}"' -f $log, $config) -PassThru -NoNewWindow
+    if ($CompatibilityRuntime) {
+        $action = New-ScheduledTaskAction -Execute $sshd -Argument ('-D -E "{0}" -f "{1}"' -f $log, $config)
+        $principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -LogonType ServiceAccount -RunLevel Highest
+        $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero)
+        Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Settings $settings | Out-Null
+        $taskRegistered = $true
+        Start-ScheduledTask -TaskName $taskName
+    } else {
+        $process = Start-Process -FilePath $sshd -ArgumentList ('-D -E "{0}" -f "{1}"' -f $log, $config) -PassThru -NoNewWindow
+    }
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
         $connection = New-Object Net.Sockets.TcpClient
         try { $connection.Connect('127.0.0.1', $port); break }
@@ -91,15 +109,20 @@ $runtimeOptions
         -p $port "$userName@127.0.0.1" 'cmd.exe /d /c exit 0'
     $sshExitCode = $LASTEXITCODE
     if ($process -and -not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
+    if ($taskRegistered) {
+        Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 500
+    }
     $nativeLog = Get-Content -LiteralPath $log -Raw
     if ($nativeLog -match 'Couldn.t create pid file') {
         Write-Output $nativeLog
         throw 'Portable sshd fell back to an unusable package-default PID path.'
     }
-    # A foreground sshd on CI is elevated but not SYSTEM, so Win32-OpenSSH
-    # cannot create the user token after authentication. Production starts
-    # sshd as SYSTEM; the regression signal here is key acceptance itself.
-    if ($sshExitCode -ne 0 -and $nativeLog -notmatch 'Accepted publickey for ') {
+    # The system-task compatibility path must execute the command completely.
+    # A foreground native sshd cannot create a second user's token on CI, so
+    # that path uses key acceptance as its regression signal.
+    if (($CompatibilityRuntime -and $sshExitCode -ne 0) -or
+        (-not $CompatibilityRuntime -and $sshExitCode -ne 0 -and $nativeLog -notmatch 'Accepted publickey for ')) {
         Write-Output $nativeLog
         throw 'OpenSSH 8.1 rejected the support client public key.'
     }
@@ -109,6 +132,10 @@ $runtimeOptions
     if ($process) {
         if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
         $process.Dispose()
+    }
+    if ($taskRegistered) {
+        Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
     }
     if ($user) { Remove-LocalUser -SID $user.SID -ErrorAction SilentlyContinue }
     if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }

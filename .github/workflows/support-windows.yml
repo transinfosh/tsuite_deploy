@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - main
+      - codex/server2016-runtime-acl
     paths:
       - 'support-session/customer/*.ps1'
       - 'support-session/tests/*.ps1'
