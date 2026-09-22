@@ -54,7 +54,7 @@ try {
     Write-Utf8 $keyPath ('expiry-time="20260909000000Z" ssh-ed25519 fixture' + "`n" +
         'expiry-time="20260909000000Z" cert-authority ssh-ed25519 fixture-ca')
     Set-SupportExpiry $state 500
-    $expectedExpiry = [DateTimeOffset]::FromUnixTimeSeconds(500).UtcDateTime.ToString('yyyyMMddHHmmssZ')
+    $expectedExpiry = Format-WindowsOpenSshExpiry ([DateTimeOffset]::FromUnixTimeSeconds(500))
     Assert-True ([regex]::Matches((Get-Content $keyPath -Raw), ('expiry-time="' + $expectedExpiry + '"')).Count -eq 2) 'Portable renewal must update both key deadlines.'
     Assert-True ((Get-Content (Join-Path $directory 'session.json') -Raw | ConvertFrom-Json).expires_at -eq 500) 'Portable renewal must persist confirmed expiry.'
     Assert-True ($script:events -join ',' -eq 'acl,account') 'Portable renewal must apply native restrictions before committing state.'

@@ -47,6 +47,12 @@ function Write-Utf8([string]$Path, [string]$Value) {
     [IO.File]::WriteAllText($Path, $Value, (New-Object Text.UTF8Encoding($false)))
 }
 
+function Format-WindowsOpenSshExpiry([DateTimeOffset]$Value) {
+    # Win32-OpenSSH 8.1 accepts 8/12/14 local-time digits but not the newer
+    # UTC "Z" suffix. Keep this aligned with the local Windows account expiry.
+    return $Value.LocalDateTime.ToString('yyyyMMddHHmmss')
+}
+
 function Move-OpenSshHostKeyPair([string]$PrivateKeyPath, [string]$DestinationDirectory) {
     $publicKeyPath = "$PrivateKeyPath.pub"
     foreach ($path in @($PrivateKeyPath, $publicKeyPath)) {
@@ -331,8 +337,9 @@ function Set-SupportExpiry($State, [long]$Expiry) {
     # Sessions created before portable access have one key and no mode flag.
     $portableOperator = $State.PSObject.Properties['portable_operator']
     $expectedKeys = if ($portableOperator -and $portableOperator.Value -eq $true) { 2 } else { 1 }
-    if ([regex]::Matches($keys, 'expiry-time="[0-9]{14}Z"').Count -ne $expectedKeys) { throw 'Invalid key expiry.' }
-    $keys = $keys -replace 'expiry-time="[0-9]{14}Z"', ('expiry-time="' + $date.UtcDateTime.ToString('yyyyMMddHHmmssZ') + '"')
+    $expiryPattern = 'expiry-time="[0-9]{12}(?:[0-9]{2})?Z?"'
+    if ([regex]::Matches($keys, $expiryPattern).Count -ne $expectedKeys) { throw 'Invalid key expiry.' }
+    $keys = $keys -replace $expiryPattern, ('expiry-time="' + (Format-WindowsOpenSshExpiry $date) + '"')
     # Native restrictions first; commit the watchdog deadline only after both succeed.
     Write-Utf8 $path $keys
     Set-ServiceFilePermissions $path

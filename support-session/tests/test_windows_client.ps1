@@ -12,6 +12,9 @@ function Assert-True($Value, [string]$Message) { if (-not $Value) { throw $Messa
 $badIdRejected = $false
 try { Assert-SessionId '../not-a-session' } catch { $badIdRejected = $true }
 Assert-True $badIdRejected 'Invalid session ID must fail.'
+$expiryFixture = [DateTimeOffset]'2026-09-22T03:50:49Z'
+Assert-True ((Format-WindowsOpenSshExpiry $expiryFixture) -eq $expiryFixture.LocalDateTime.ToString('yyyyMMddHHmmss')) `
+    'Windows OpenSSH expiry must use local digits without a Z suffix for 8.1 compatibility.'
 
 $script:testRoot = Join-Path ([IO.Path]::GetTempPath()) ('tsuite-windows-test-' + [guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($script:testRoot)

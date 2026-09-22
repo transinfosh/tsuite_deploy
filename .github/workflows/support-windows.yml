@@ -19,6 +19,12 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Download pinned OpenSSH 8.1 authentication fixture
+        shell: powershell
+        run: |
+          Invoke-WebRequest -Uri 'https://github.com/PowerShell/Win32-OpenSSH/releases/download/v8.1.0.0p1-Beta/OpenSSH-Win64.zip' -OutFile "$env:RUNNER_TEMP/OpenSSH-Win64.zip"
+          if ((Get-FileHash -LiteralPath "$env:RUNNER_TEMP/OpenSSH-Win64.zip" -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'c99240af89452610f66b7ce54c4fa3180b66aae2bc326afc2aac8fc1dd48f488') { throw 'OpenSSH 8.1 test fixture hash mismatch.' }
+          Expand-Archive -LiteralPath "$env:RUNNER_TEMP/OpenSSH-Win64.zip" -DestinationPath "$env:RUNNER_TEMP/OpenSSH-8.1"
       - name: Windows PowerShell 5.1 syntax and lifecycle tests
         shell: powershell
         run: |
@@ -26,3 +32,4 @@ jobs:
           ./support-session/tests/test_windows_lease.ps1
           ./support-session/tests/test_windows_diagnostics.ps1
           ./support-session/tests/test_windows_permissions.ps1
+          ./support-session/tests/test_windows_openssh_auth.ps1 -OpenSshDirectory "$env:RUNNER_TEMP/OpenSSH-8.1/OpenSSH-Win64"

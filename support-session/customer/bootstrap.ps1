@@ -220,7 +220,7 @@ function Test-LocalSshAuthentication(
 
         $plainPublic = ((Get-Content -LiteralPath "$plainKey.pub" -Raw).Trim() -split '\s+')[0..1] -join ' '
         $caPublic = ((Get-Content -LiteralPath "$caKey.pub" -Raw).Trim() -split '\s+')[0..1] -join ' '
-        $testExpiry = [DateTimeOffset]::UtcNow.AddMinutes(10).UtcDateTime.ToString('yyyyMMddHHmmssZ')
+        $testExpiry = Format-WindowsOpenSshExpiry ([DateTimeOffset]::UtcNow.AddMinutes(10))
         $testKeys = (
             'expiry-time="{0}",from="127.0.0.1",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-user-rc {1}' -f `
                 $testExpiry, $plainPublic) + "`n" + (
@@ -357,7 +357,7 @@ try {
         Write-Utf8 (Join-Path $directory 'lease_ed25519') $payload.lease_private_key
         Move-OpenSshHostKeyPair $hostKeyPath $directory
         $expiry = [DateTimeOffset]::FromUnixTimeSeconds([long]$payload.expires_at)
-        $keyExpiry = $expiry.UtcDateTime.ToString('yyyyMMddHHmmssZ')
+        $keyExpiry = Format-WindowsOpenSshExpiry $expiry
         Write-Utf8 (Join-Path $directory 'authorized_keys') (
             'expiry-time="{0}",from="127.0.0.1",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-user-rc {1}' -f `
                 $keyExpiry, $payload.operator_public_key)
