@@ -47,6 +47,18 @@ function Write-Utf8([string]$Path, [string]$Value) {
     [IO.File]::WriteAllText($Path, $Value, (New-Object Text.UTF8Encoding($false)))
 }
 
+function Move-OpenSshHostKeyPair([string]$PrivateKeyPath, [string]$DestinationDirectory) {
+    $publicKeyPath = "$PrivateKeyPath.pub"
+    foreach ($path in @($PrivateKeyPath, $publicKeyPath)) {
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+        if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "Expected a regular SSH host key file: $path"
+        }
+    }
+    Move-Item -LiteralPath $PrivateKeyPath -Destination (Join-Path $DestinationDirectory 'ssh_host_ed25519_key')
+    Move-Item -LiteralPath $publicKeyPath -Destination (Join-Path $DestinationDirectory 'ssh_host_ed25519_key.pub')
+}
+
 function Set-ServiceFilePermissions([string]$Path) {
     $item = Get-Item -LiteralPath $Path -Force
     if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {

@@ -355,7 +355,7 @@ try {
         Write-Utf8 (Join-Path $directory 'known_hosts') $knownHosts
         Write-Utf8 (Join-Path $directory 'tunnel_ed25519') $payload.tunnel_private_key
         Write-Utf8 (Join-Path $directory 'lease_ed25519') $payload.lease_private_key
-        Move-Item -LiteralPath $hostKeyPath -Destination $directory
+        Move-OpenSshHostKeyPair $hostKeyPath $directory
         $expiry = [DateTimeOffset]::FromUnixTimeSeconds([long]$payload.expires_at)
         $keyExpiry = $expiry.UtcDateTime.ToString('yyyyMMddHHmmssZ')
         Write-Utf8 (Join-Path $directory 'authorized_keys') (

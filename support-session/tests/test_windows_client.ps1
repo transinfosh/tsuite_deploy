@@ -15,6 +15,16 @@ Assert-True $badIdRejected 'Invalid session ID must fail.'
 
 $script:testRoot = Join-Path ([IO.Path]::GetTempPath()) ('tsuite-windows-test-' + [guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($script:testRoot)
+$keySource = Join-Path $script:testRoot 'generated-host-key'
+$keyDestination = Join-Path $script:testRoot 'session-keypair'
+[void][IO.Directory]::CreateDirectory($keyDestination)
+[IO.File]::WriteAllText($keySource, 'private')
+[IO.File]::WriteAllText("$keySource.pub", 'public')
+Move-OpenSshHostKeyPair $keySource $keyDestination
+Assert-True (Test-Path -LiteralPath (Join-Path $keyDestination 'ssh_host_ed25519_key')) `
+    'Generated SSH host private key must be installed.'
+Assert-True (Test-Path -LiteralPath (Join-Path $keyDestination 'ssh_host_ed25519_key.pub')) `
+    'Generated SSH host public key must be installed for the authentication self-test.'
 $id = '012345abcdef'
 $script:testState = [pscustomobject]@{
     session_id = $id; ops_user = 'tsuite-ops-012345ab'; ssh_path = 'ssh.exe'; sshd_path = 'sshd.exe'
