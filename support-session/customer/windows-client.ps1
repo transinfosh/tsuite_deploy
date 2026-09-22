@@ -47,6 +47,18 @@ function Write-Utf8([string]$Path, [string]$Value) {
     [IO.File]::WriteAllText($Path, $Value, (New-Object Text.UTF8Encoding($false)))
 }
 
+function Read-Utf8WithRetry([string]$Path) {
+    # File.Replace is atomic, but on Windows a reader can briefly encounter a
+    # sharing violation while another support task swaps session.json.
+    for ($attempt = 1; $attempt -le 20; $attempt++) {
+        try { return [IO.File]::ReadAllText($Path, [Text.Encoding]::UTF8) }
+        catch [IO.IOException] {
+            if ($attempt -eq 20) { throw }
+            Start-Sleep -Milliseconds 50
+        }
+    }
+}
+
 function Format-WindowsOpenSshExpiry([DateTimeOffset]$Value) {
     # Win32-OpenSSH 8.1 accepts 8/12/14 local-time digits but not the newer
     # UTC "Z" suffix. Keep this aligned with the local Windows account expiry.
@@ -252,7 +264,7 @@ function Read-SupportState([string]$Id) {
     Assert-SessionId $Id
     $directory = Join-Path (Get-SupportRoot) $Id
     Assert-PrivateDirectory $directory
-    $state = Get-Content -LiteralPath (Join-Path $directory 'session.json') -Raw | ConvertFrom-Json
+    $state = Read-Utf8WithRetry (Join-Path $directory 'session.json') | ConvertFrom-Json
     if ($state.session_id -cne $Id -or $state.ops_user -cne "tsuite-ops-$($Id.Substring(0, 8))") {
         throw 'Support state does not match this session.'
     }

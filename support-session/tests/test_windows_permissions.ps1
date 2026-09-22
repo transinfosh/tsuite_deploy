@@ -52,7 +52,33 @@ try {
         ($usersRule[0].FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -ne 0) {
         throw 'Restricted OpenSSH children do not have read-execute-only runtime access.'
     }
-    Write-Output 'Windows service-file and OpenSSH runtime ACL normalization passed.'
+
+    $statePath = Join-Path $directory 'session.json'
+    $lockReady = Join-Path $directory 'lock-ready'
+    [IO.File]::WriteAllText($statePath, '{"session_id":"012345abcdef"}')
+    $lockScript = @"
+`$stream = [IO.File]::Open('$statePath', [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+[IO.File]::WriteAllText('$lockReady', 'ready')
+Start-Sleep -Milliseconds 300
+`$stream.Dispose()
+"@
+    $encodedLockScript = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($lockScript))
+    $locker = Start-Process -FilePath powershell.exe -ArgumentList (
+        '-NoProfile -NonInteractive -EncodedCommand {0}' -f $encodedLockScript) -PassThru
+    try {
+        for ($attempt = 0; $attempt -lt 20 -and -not (Test-Path -LiteralPath $lockReady); $attempt++) {
+            Start-Sleep -Milliseconds 50
+        }
+        if (-not (Test-Path -LiteralPath $lockReady)) { throw 'Could not establish the state-file lock fixture.' }
+        $stateText = Read-Utf8WithRetry $statePath
+        if ($stateText -cne '{"session_id":"012345abcdef"}') {
+            throw 'State-file retry returned unexpected content.'
+        }
+    } finally {
+        if (-not $locker.HasExited) { $locker.Kill(); $locker.WaitForExit() }
+        $locker.Dispose()
+    }
+    Write-Output 'Windows ACL normalization and locked state-file retry passed.'
 } finally {
     [IO.Directory]::Delete($directory, $true)
 }
