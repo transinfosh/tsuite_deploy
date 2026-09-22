@@ -34,7 +34,7 @@ Agent 应自行完成状态盘点、版本包含关系验证、构建跟踪、�
 | GitHub | `transinfosh/*` | 源码、不可变 Tag、Actions、GHCR | 远端仓库与 Actions 运行记录 |
 | 部署控制机 | `adam@192.168.2.52` | 部署仓库、Ansible、发布文件、支持页面、FRPC | `/srv/tsuite-deploy`、`/etc/frp`、`/etc/tsuite-support-control` |
 | 公网 edge | `edge.trinfo.net` | Caddy、FRPS、SSH enrollment 和反向隧道 | `/etc/caddy`、`/etc/frp`、`/etc/tsuite-support` |
-| 支持管理页 | `https://edge.trinfo.net/support/` | GitHub SSO、创建/查看/关闭支持会话 | 控制机 `tsuite-support-console.service` |
+| 支持管理页 | `https://edge.trinfo.net/support/` | 本地密码+TOTP（GitHub SSO 备用）、创建/查看/关闭支持会话 | 控制机 `tsuite-support-console.service` |
 | 客户单机部署 | 临时支持隧道内访问 | Frappe、Redis、队列、调度器及站点 | `/opt/tsuite-deploy/deployment.state` 和 Docker 实际状态 |
 
 部署控制机是唯一日常部署工作台。开发机可修改和推送代码，但不应作为长期发布制品、Vault、客户文件
@@ -195,7 +195,7 @@ gh run watch --repo transinfosh/<repo> <run-id> --exit-status
 
 ## 7. 创建客户临时支持会话
 
-1. 运维人员打开 `https://edge.trinfo.net/support/`，使用获准的 GitHub 组织账号登录；
+1. 运维人员打开 `https://edge.trinfo.net/support/`，使用获准的本地账号、密码和 TOTP 登录；GitHub 组织账号作为备用登录方式；
 2. 使用固定、可复用的客户环境标识，例如 `dtaut-srm-prod-01`；同一机器不要每次换名字；
 3. 点击“创建会话”；页面只显示一次客户执行命令和支持机执行命令，各自带独立随机凭据；
 4. 命令通过安全渠道交给客户；领取链接默认 15 分钟有效；

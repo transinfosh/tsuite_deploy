@@ -52,7 +52,7 @@ sudo ./install.sh \
 [edge-support.caddy](edge-support.caddy) 仅转发 `/support/*`、`/deploy-files/*` 和健康检查路径；
 原 `/tsuite-support/*` enrollment 文件仍由堡垒机本地提供。
 
-## GitHub 支持页面
+## 支持管理页面
 
 控制机先创建专用 broker、每会话私钥目录、bridge key、edge 会话代理 key、固定 Host Key 和最小
 sudoers。Host Key 文件必须通过独立渠道核验，不能直接信任 `ssh-keyscan`：
@@ -97,6 +97,13 @@ edge 上的 `tsuite-operator` 使用专用受限 Shell：只允许 sshd 已绑�
 不能进入交互式 Shell，也不能执行任意命令。
 控制机 broker 账号继续使用 `nologin`；仅在执行代码生成的 SSH `ProxyCommand` 子进程时局部使用
 `SHELL=/bin/sh`，不会开放 broker 登录能力。
+
+页面支持本地账号密码加 TOTP 登录，并保留 GitHub OAuth 作为备用。安装器使用
+`--local-admin-user`、`--local-admin-password-file` 和 `--local-admin-totp-secret-file` 初始化首个本地
+管理员；密码只保存 scrypt 哈希。管理员登录后可在“用户管理”中生成 30 分钟有效的一次性邀请链接。
+新用户通过邀请自行设置至少 16 位密码、添加 TOTP 密钥并输入动态码确认，验证成功后账号才启用。
+邀请链接只展示一次，不持久保存明文 Token；管理员也可生成一次性 TOTP 重绑链接。禁用用户或完成
+TOTP 重绑都会同步撤销该用户现有 Web 会话。
 
 安装器会同时验证 forced-command bridge 和 edge forced proxy 通道。代理 key 不能取得 edge Shell，也
 不能转发任意回环端口；edge 会根据会话 ID 只代理已接入会话登记的端口。日常命令：

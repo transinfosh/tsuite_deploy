@@ -33,6 +33,7 @@ MAX_BODY_BYTES = 8192
 SESSION_TTL_SECONDS = 8 * 60 * 60
 OAUTH_STATE_TTL_SECONDS = 10 * 60
 LOCAL_LOGIN_TTL_SECONDS = 5 * 60
+LOCAL_INVITE_TTL_SECONDS = 30 * 60
 ACTION = "/usr/local/bin/tsuite-support-console-action"
 BROKER_USER = "tsuite-support-operator"
 ACTIVE_STATUSES = {"issued", "enrolled", "revoking"}
@@ -169,8 +170,34 @@ class Store:
 					attempts INTEGER NOT NULL DEFAULT 0,
 					created_at INTEGER NOT NULL
 				);
+				CREATE TABLE IF NOT EXISTS local_user (
+					username TEXT PRIMARY KEY,
+					display_name TEXT NOT NULL,
+					password_hash TEXT NOT NULL,
+					totp_secret TEXT NOT NULL,
+					is_admin INTEGER NOT NULL DEFAULT 0,
+					enabled INTEGER NOT NULL DEFAULT 1,
+					created_by TEXT NOT NULL,
+					created_at INTEGER NOT NULL
+				);
+				CREATE TABLE IF NOT EXISTS local_user_invite (
+					token_hash TEXT PRIMARY KEY,
+					username TEXT NOT NULL,
+					display_name TEXT NOT NULL,
+					is_admin INTEGER NOT NULL DEFAULT 0,
+					created_by TEXT NOT NULL,
+					expires_at INTEGER NOT NULL,
+					password_hash TEXT,
+					totp_secret TEXT,
+					attempts INTEGER NOT NULL DEFAULT 0
+				);
 				"""
 			)
+			columns = {row[1] for row in connection.execute("PRAGMA table_info(web_session)")}
+			if "is_admin" not in columns:
+				connection.execute("ALTER TABLE web_session ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
+			if "auth_provider" not in columns:
+				connection.execute("ALTER TABLE web_session ADD COLUMN auth_provider TEXT NOT NULL DEFAULT 'github'")
 
 	def connect(self) -> sqlite3.Connection:
 		connection = sqlite3.connect(self.path)
@@ -192,6 +219,87 @@ class Store:
 			connection.execute("DELETE FROM oauth_state WHERE created_at < ?", (now - OAUTH_STATE_TTL_SECONDS,))
 			connection.execute("DELETE FROM web_session WHERE expires_at < ?", (now,))
 			connection.execute("DELETE FROM local_login_challenge WHERE created_at < ?", (now - LOCAL_LOGIN_TTL_SECONDS,))
+			connection.execute("DELETE FROM local_user_invite WHERE expires_at < ?", (now,))
+
+	def ensure_bootstrap_admin(self, settings: Settings) -> None:
+		if not (settings.local_admin_user and settings.local_password_hash and settings.local_totp_secret):
+			return
+		with self.connection() as connection:
+			connection.execute(
+				"INSERT OR IGNORE INTO local_user(username, display_name, password_hash, totp_secret, is_admin, enabled, created_by, created_at) "
+				"VALUES (?, ?, ?, ?, 1, 1, 'bootstrap', ?)",
+				(settings.local_admin_user, settings.local_admin_user, settings.local_password_hash, settings.local_totp_secret, int(time.time())),
+			)
+
+	def local_user(self, username: str) -> sqlite3.Row | None:
+		with self.connection() as connection:
+			return connection.execute("SELECT * FROM local_user WHERE username = ?", (username,)).fetchone()
+
+	def local_users(self) -> list[sqlite3.Row]:
+		with self.connection() as connection:
+			return connection.execute("SELECT username, display_name, is_admin, enabled, created_by, created_at FROM local_user ORDER BY username").fetchall()
+
+	def set_local_user_enabled(self, username: str, enabled: bool) -> None:
+		with self.connection() as connection:
+			connection.execute("UPDATE local_user SET enabled = ? WHERE username = ?", (int(enabled), username))
+			if not enabled:
+				connection.execute("DELETE FROM web_session WHERE login = ? AND auth_provider = 'local'", (username,))
+
+	def new_local_user_invite(self, username: str, display_name: str, is_admin: bool, created_by: str) -> str:
+		token = secrets.token_urlsafe(32)
+		token_hash = hashlib.sha256(token.encode()).hexdigest()
+		with self.connection() as connection:
+			connection.execute("DELETE FROM local_user_invite WHERE username = ?", (username,))
+			connection.execute(
+				"INSERT INTO local_user_invite(token_hash, username, display_name, is_admin, created_by, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+				(token_hash, username, display_name, int(is_admin), created_by, int(time.time()) + LOCAL_INVITE_TTL_SECONDS),
+			)
+		return token
+
+	def new_local_user_totp_reset(self, username: str, created_by: str) -> str:
+		user = self.local_user(username)
+		if user is None:
+			raise ConsoleError("用户不存在")
+		token = secrets.token_urlsafe(32)
+		token_hash = hashlib.sha256(token.encode()).hexdigest()
+		with self.connection() as connection:
+			connection.execute("DELETE FROM local_user_invite WHERE username = ?", (username,))
+			connection.execute(
+				"INSERT INTO local_user_invite(token_hash, username, display_name, is_admin, created_by, expires_at, password_hash, totp_secret) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+				(token_hash, username, user["display_name"], user["is_admin"], created_by, int(time.time()) + LOCAL_INVITE_TTL_SECONDS, user["password_hash"], new_totp_secret()),
+			)
+		return token
+
+	def local_user_invite(self, token: str) -> sqlite3.Row | None:
+		token_hash = hashlib.sha256(token.encode()).hexdigest()
+		with self.connection() as connection:
+			return connection.execute(
+				"SELECT * FROM local_user_invite WHERE token_hash = ? AND expires_at > ? AND attempts < 5",
+				(token_hash, int(time.time())),
+			).fetchone()
+
+	def prepare_local_user_invite(self, token: str, password_hash: str, totp_secret: str) -> None:
+		token_hash = hashlib.sha256(token.encode()).hexdigest()
+		with self.connection() as connection:
+			connection.execute("UPDATE local_user_invite SET password_hash = ?, totp_secret = ? WHERE token_hash = ?", (password_hash, totp_secret, token_hash))
+
+	def fail_local_user_invite(self, token: str) -> None:
+		with self.connection() as connection:
+			connection.execute("UPDATE local_user_invite SET attempts = attempts + 1 WHERE token_hash = ?", (hashlib.sha256(token.encode()).hexdigest(),))
+
+	def activate_local_user_invite(self, token: str) -> None:
+		token_hash = hashlib.sha256(token.encode()).hexdigest()
+		with self.connection() as connection:
+			invite = connection.execute("SELECT * FROM local_user_invite WHERE token_hash = ?", (token_hash,)).fetchone()
+			if invite is None or not invite["password_hash"] or not invite["totp_secret"]:
+				raise ConsoleError("邀请状态无效")
+			connection.execute(
+				"INSERT INTO local_user(username, display_name, password_hash, totp_secret, is_admin, enabled, created_by, created_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?) "
+				"ON CONFLICT(username) DO UPDATE SET totp_secret = excluded.totp_secret, enabled = 1",
+				(invite["username"], invite["display_name"], invite["password_hash"], invite["totp_secret"], invite["is_admin"], invite["created_by"], int(time.time())),
+			)
+			connection.execute("DELETE FROM web_session WHERE login = ? AND auth_provider = 'local'", (invite["username"],))
+			connection.execute("DELETE FROM local_user_invite WHERE token_hash = ?", (token_hash,))
 
 	def new_local_login_challenge(self, login: str) -> str:
 		challenge_id = secrets.token_urlsafe(32)
@@ -237,12 +345,12 @@ class Store:
 			return None
 		return str(row["verifier"])
 
-	def new_session(self, login: str, name: str) -> tuple[str, str]:
+	def new_session(self, login: str, name: str, is_admin: bool = False, auth_provider: str = "github") -> tuple[str, str]:
 		session_id, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
 		with self.connection() as connection:
 			connection.execute(
-				"INSERT INTO web_session(id, login, name, csrf, expires_at) VALUES (?, ?, ?, ?, ?)",
-				(session_id, login, name, csrf, int(time.time()) + SESSION_TTL_SECONDS),
+				"INSERT INTO web_session(id, login, name, csrf, expires_at, is_admin, auth_provider) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				(session_id, login, name, csrf, int(time.time()) + SESSION_TTL_SECONDS, int(is_admin), auth_provider),
 			)
 		return session_id, csrf
 
@@ -251,7 +359,7 @@ class Store:
 			return None
 		with self.connection() as connection:
 			return connection.execute(
-				"SELECT login, name, csrf, expires_at FROM web_session WHERE id = ? AND expires_at > ?",
+				"SELECT login, name, csrf, expires_at, is_admin, auth_provider FROM web_session WHERE id = ? AND expires_at > ?",
 				(session_id, int(time.time())),
 			).fetchone()
 
@@ -333,6 +441,16 @@ def verify_password(password: str, encoded: str) -> bool:
 		return False
 
 
+def hash_password(password: str) -> str:
+	salt = os.urandom(16)
+	digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1, dklen=32)
+	return f"scrypt${salt.hex()}${digest.hex()}"
+
+
+def new_totp_secret() -> str:
+	return base64.b32encode(os.urandom(20)).decode().rstrip("=")
+
+
 def verify_totp(secret: str, code: str, now: int | None = None) -> bool:
 	if not code.isdigit() or len(code) != 6:
 		return False
@@ -406,6 +524,7 @@ def login_layout(content: str) -> str:
 .login-description{margin:12px 0 28px;text-align:center;color:#64748b;line-height:1.7;font-size:14px}
 .login-form{display:grid;gap:17px}.login-form label{display:grid;gap:7px;color:#334155;font-size:13px;font-weight:650}.login-form input{width:100%;min-width:0;height:46px;border-radius:9px}.login-form button{min-height:46px;margin-top:3px;border-radius:9px;font-size:14px;font-weight:650}
 .login-error{margin:0 0 16px;padding:10px 12px;border-radius:8px;color:#991b1b;background:#fef2f2;font-size:13px;line-height:1.55}
+.login-card .secret{padding:13px;border:1px solid #dbe2ea;border-radius:9px;background:#f8fafc;font:600 14px ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}
 .login-divider{display:flex;align-items:center;gap:12px;margin:24px 0 16px;color:#94a3b8;font-size:12px}.login-divider::before,.login-divider::after{content:"";height:1px;flex:1;background:#e2e8f0}
 .social-login{display:flex;justify-content:center}.github-login{display:grid;place-items:center;width:44px;height:44px;border:1px solid #d5dce5;border-radius:50%;color:#17212b;background:#fff;transition:border-color .15s,box-shadow .15s,transform .15s}.github-login:hover{border-color:#94a3b8;box-shadow:0 5px 14px rgb(15 23 42 / 10%);transform:translateY(-1px)}.github-login:focus-visible{outline:3px solid #bae6fd;outline-offset:3px}.github-login svg{width:22px;height:22px;fill:currentColor}
 .login-note{margin:18px 0 0;text-align:center;color:#94a3b8;font-size:12px;line-height:1.65}.login-footer{margin:0;color:#64748b;font-size:12px;letter-spacing:.03em}.login-back{display:block;margin-top:18px;text-align:center;font-size:13px}
@@ -438,6 +557,31 @@ def totp_content(error: str = "") -> str:
 <h1 id="login-title">验证身份</h1><p class="login-description">账号密码已通过，请输入验证器中显示的 6 位动态验证码。</p>
 {error}<form class="login-form" method="post" action="/support/login/local/totp"><label>动态验证码<input class="otp-input" name="totp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autofocus autocomplete="one-time-code"></label><button class="primary">确认登录</button></form>
 <a class="login-back" href="/support/">返回重新登录</a>""".replace("{error}", error_html)
+	return login_layout(content)
+
+
+def invite_password_content(token: str, username: str, error: str = "") -> str:
+	error_html = f'<p class="login-error" role="alert">{html.escape(error)}</p>' if error else ""
+	content = f"""<div class="login-brand"><span class="login-mark" aria-hidden="true">TS</span><span>TSuite</span></div>
+<h1>设置本地账号</h1><p class="login-description">为 <strong>{html.escape(username)}</strong> 设置登录密码，下一步绑定动态验证码。</p>
+{error_html}<form class="login-form" method="post" action="/support/invite/password">
+<input type="hidden" name="token" value="{html.escape(token)}">
+<label>密码<input name="password" type="password" minlength="16" required autocomplete="new-password"></label>
+<label>确认密码<input name="confirm_password" type="password" minlength="16" required autocomplete="new-password"></label>
+<button class="primary">继续绑定验证器</button></form>"""
+	return login_layout(content)
+
+
+def invite_totp_content(token: str, username: str, secret: str, error: str = "") -> str:
+	error_html = f'<p class="login-error" role="alert">{html.escape(error)}</p>' if error else ""
+	uri = "otpauth://totp/" + urllib.parse.quote(f"TSuite:{username}") + "?" + urllib.parse.urlencode({"secret": secret, "issuer": "TSuite"})
+	content = f"""<div class="login-brand"><span class="login-mark" aria-hidden="true">TS</span><span>TSuite</span></div>
+<h1>绑定动态验证码</h1><p class="login-description">在验证器中手动添加密钥，或在手机上打开验证器链接，然后输入当前 6 位验证码完成绑定。</p>
+{error_html}<div class="secret" style="margin-bottom:14px;text-align:center;letter-spacing:.08em">{html.escape(secret)}</div>
+<p style="text-align:center"><a class="button" href="{html.escape(uri)}">在验证器中打开</a></p>
+<form class="login-form" method="post" action="/support/invite/totp"><input type="hidden" name="token" value="{html.escape(token)}">
+<label>动态验证码<input class="otp-input" name="totp" inputmode="numeric" pattern="[0-9]{{6}}" maxlength="6" required autofocus autocomplete="one-time-code"></label>
+<button class="primary">完成绑定</button></form>"""
 	return login_layout(content)
 
 
@@ -525,6 +669,7 @@ class Application:
 	def __init__(self, settings: Settings):
 		self.settings = settings
 		self.store = Store(settings.state_dir)
+		self.store.ensure_bootstrap_admin(settings)
 
 	def response(self, start_response: Callable[..., Any], status: HTTPStatus, body: bytes, headers: Iterable[tuple[str, str]] = ()) -> list[bytes]:
 		base = [
@@ -616,8 +761,36 @@ class Application:
 		)
 		return summary, groups
 
+	def users_page(self, start_response: Callable[..., Any], session: sqlite3.Row) -> list[bytes]:
+		rows = []
+		for user in self.store.local_users():
+			username = html.escape(str(user["username"]))
+			enabled = bool(user["enabled"])
+			action = "禁用" if enabled else "启用"
+			status = "已启用" if enabled else "已禁用"
+			role = "管理员" if bool(user["is_admin"]) else "操作员"
+			disabled = " disabled" if str(user["username"]) == str(session["login"]) else ""
+			rows.append(
+				f'<tr><td><strong>{username}</strong><br><span class="muted">{html.escape(str(user["display_name"]))}</span></td>'
+				f'<td>{role}</td><td>{status}</td><td><div class="inline-actions"><form method="post" action="/support/users/{username}/reset-totp">'
+				f'<input type="hidden" name="csrf" value="{html.escape(str(session["csrf"]))}">'
+				f'<button class="compact">重绑 TOTP</button></form><form method="post" action="/support/users/{username}/toggle">'
+				f'<input type="hidden" name="csrf" value="{html.escape(str(session["csrf"]))}">'
+				f'<button class="compact"{disabled}>{action}</button></form></div></td></tr>'
+			)
+		content = f"""<header><div><h1>本地用户</h1><p class="muted">通过一次性邀请完成密码设置和 TOTP 绑定。</p></div><a class="button" href="/support/">返回工作台</a></header>
+<section class="card"><h2>邀请新用户</h2><form class="create-form" method="post" action="/support/users/invite">
+<input type="hidden" name="csrf" value="{html.escape(str(session['csrf']))}">
+<label>用户名<input name="username" required pattern="[A-Za-z0-9_-]{{3,64}}" autocomplete="off"></label>
+<label>显示名称<input name="display_name" required maxlength="80" autocomplete="off"></label>
+<label>角色<select name="role"><option value="operator">操作员</option><option value="admin">管理员</option></select></label>
+<button class="primary">生成邀请链接</button></form><p class="muted">邀请链接 30 分钟有效且只能使用一次。</p></section>
+<section class="card"><h2>现有用户</h2><div class="session-table-wrap"><table><thead><tr><th>用户</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>{''.join(rows)}</tbody></table></div></section>"""
+		return self.response(start_response, HTTPStatus.OK, page("本地用户", content))
+
 	def dashboard(self, start_response: Callable[..., Any], session: sqlite3.Row) -> list[bytes]:
-		content = f"""<header><h1>TSuite 支持管理</h1><form method=\"post\" action=\"/support/logout\"><input type=\"hidden\" name=\"csrf\" value=\"{html.escape(str(session['csrf']))}\"><button>退出 {html.escape(str(session['login']))}</button></form></header>
+		users_link = '<a class="button" href="/support/users">用户管理</a>' if bool(session["is_admin"]) else ""
+		content = f"""<header><h1>TSuite 支持管理</h1><div class=\"detail-actions\">{users_link}<form method=\"post\" action=\"/support/logout\"><input type=\"hidden\" name=\"csrf\" value=\"{html.escape(str(session['csrf']))}\"><button>退出 {html.escape(str(session['login']))}</button></form></div></header>
 <section class=\"card\"><h2>新建支持会话</h2><p class=\"muted\">为同一台客户机器使用固定的环境标识，例如 <code>dtaut-srm-prod-01</code>。每次连接都会自动生成新的完整会话 ID。</p>
 <form class=\"create-form\" method=\"post\" action=\"/support/session\"><input type=\"hidden\" name=\"csrf\" value=\"{html.escape(str(session['csrf']))}\"><label>客户环境标识<input name=\"customer\" required autocomplete=\"off\" placeholder=\"例如 dtaut-srm-prod-01\" pattern=\"[a-z0-9][a-z0-9-]{{0,47}}\"></label><label>支持用途（可选）<input name=\"purpose\" maxlength=\"200\" autocomplete=\"off\" placeholder=\"例如升级 SRM 至 0.1.10\"></label><label>操作系统<select name=\"platform\"><option value=\"linux\">Linux</option><option value=\"windows\">Windows Server</option></select></label><button class=\"primary\">创建会话</button></form>
 <div id=\"session-summary\" class=\"summary\" aria-live=\"polite\"><span class=\"loading-label\">正在读取会话数据…</span></div></section>
@@ -652,17 +825,16 @@ class Application:
 				return self.redirect(start_response, f"https://github.com/login/oauth/authorize?{query}", [("Set-Cookie", oauth_cookie)])
 			if path == "/login/local" and method == "POST":
 				form = form_data(environ)
-				if not (self.settings.local_admin_user and self.settings.local_password_hash and self.settings.local_totp_secret):
-					raise ConsoleError("本地登录尚未配置")
+				user = self.store.local_user(form.get("username", ""))
 				if not (
-					secrets.compare_digest(form.get("username", ""), self.settings.local_admin_user)
-					and verify_password(form.get("password", ""), self.settings.local_password_hash)
+					user is not None and bool(user["enabled"])
+					and verify_password(form.get("password", ""), str(user["password_hash"]))
 				):
 					return self.response(
 						start_response, HTTPStatus.UNAUTHORIZED,
 						page("登录", login_content(True, "账号或密码不正确")),
 					)
-				challenge_id = self.store.new_local_login_challenge(self.settings.local_admin_user)
+				challenge_id = self.store.new_local_login_challenge(str(user["username"]))
 				cookie = f"tsuite_support_local={challenge_id}; Path=/support/login/local/totp; Secure; HttpOnly; SameSite=Strict; Max-Age={LOCAL_LOGIN_TTL_SECONDS}"
 				return self.response(start_response, HTTPStatus.OK, page("身份验证", totp_content()), [("Set-Cookie", cookie)])
 			if path == "/login/local/totp" and method == "POST":
@@ -672,14 +844,15 @@ class Application:
 					clear = "tsuite_support_local=; Path=/support/login/local/totp; Secure; HttpOnly; SameSite=Strict; Max-Age=0"
 					return self.redirect(start_response, "/support/", [("Set-Cookie", clear)])
 				form = form_data(environ)
-				if not self.settings.local_totp_secret or not verify_totp(self.settings.local_totp_secret, form.get("totp", "")):
+				user = self.store.local_user(str(challenge["login"]))
+				if user is None or not bool(user["enabled"]) or not verify_totp(str(user["totp_secret"]), form.get("totp", "")):
 					self.store.fail_local_login_challenge(challenge_id)
 					return self.response(
 						start_response, HTTPStatus.UNAUTHORIZED,
 						page("身份验证", totp_content("动态验证码不正确或已过期")),
 					)
 				self.store.consume_local_login_challenge(challenge_id)
-				session_id, _ = self.store.new_session(str(challenge["login"]), str(challenge["login"]))
+				session_id, _ = self.store.new_session(str(user["username"]), str(user["display_name"]), bool(user["is_admin"]), "local")
 				session_cookie = f"tsuite_support_session={session_id}; Path=/support; Secure; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL_SECONDS}"
 				clear = "tsuite_support_local=; Path=/support/login/local/totp; Secure; HttpOnly; SameSite=Strict; Max-Age=0"
 				return self.redirect(start_response, "/support/", [("Set-Cookie", session_cookie), ("Set-Cookie", clear)])
@@ -693,10 +866,42 @@ class Application:
 				if not verifier or not code:
 					raise ConsoleError("GitHub 登录状态已失效，请重新登录")
 				login, name = github_identity(self.settings, code, verifier)
-				session_id, _ = self.store.new_session(login, name)
+				session_id, _ = self.store.new_session(login, name, True, "github")
 				cookie = f"tsuite_support_session={session_id}; Path=/support; Secure; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL_SECONDS}"
 				clear_oauth = "tsuite_support_oauth=; Path=/support/auth/github/callback; Secure; HttpOnly; SameSite=Lax; Max-Age=0"
 				return self.redirect(start_response, "/support/", [("Set-Cookie", cookie), ("Set-Cookie", clear_oauth)])
+			if path == "/invite" and method == "GET":
+				token = urllib.parse.parse_qs(environ.get("QUERY_STRING", "")).get("token", [""])[-1]
+				invite = self.store.local_user_invite(token)
+				if invite is None:
+					raise ConsoleError("邀请链接无效或已过期")
+				if invite["password_hash"] and invite["totp_secret"]:
+					return self.response(start_response, HTTPStatus.OK, page("绑定动态验证码", invite_totp_content(token, str(invite["username"]), str(invite["totp_secret"]))))
+				return self.response(start_response, HTTPStatus.OK, page("设置本地账号", invite_password_content(token, str(invite["username"]))))
+			if path == "/invite/password" and method == "POST":
+				form = form_data(environ)
+				token = form.get("token", "")
+				invite = self.store.local_user_invite(token)
+				if invite is None:
+					raise ConsoleError("邀请链接无效或已过期")
+				password = form.get("password", "")
+				if len(password) < 16 or not secrets.compare_digest(password, form.get("confirm_password", "")):
+					return self.response(start_response, HTTPStatus.BAD_REQUEST, page("设置本地账号", invite_password_content(token, str(invite["username"]), "密码至少 16 位，且两次输入必须一致")))
+				secret = new_totp_secret()
+				self.store.prepare_local_user_invite(token, hash_password(password), secret)
+				return self.response(start_response, HTTPStatus.OK, page("绑定动态验证码", invite_totp_content(token, str(invite["username"]), secret)))
+			if path == "/invite/totp" and method == "POST":
+				form = form_data(environ)
+				token = form.get("token", "")
+				invite = self.store.local_user_invite(token)
+				if invite is None or not invite["password_hash"] or not invite["totp_secret"]:
+					raise ConsoleError("邀请状态无效或已过期")
+				if not verify_totp(str(invite["totp_secret"]), form.get("totp", "")):
+					self.store.fail_local_user_invite(token)
+					return self.response(start_response, HTTPStatus.BAD_REQUEST, page("绑定动态验证码", invite_totp_content(token, str(invite["username"]), str(invite["totp_secret"]), "动态验证码不正确，请检查手机时间后重试")))
+				self.store.activate_local_user_invite(token)
+				content = '<section class="card" style="max-width:520px;margin:80px auto;text-align:center"><h1>账号已启用</h1><p>密码和动态验证码绑定成功，现在可以登录支持工作台。</p><a class="button" href="/support/">前往登录</a></section>'
+				return self.response(start_response, HTTPStatus.OK, page("账号已启用", content))
 			session_id, session = self.require_session(environ)
 			if path == "/logout" and method == "POST":
 				form = form_data(environ)
@@ -706,6 +911,52 @@ class Application:
 				return self.redirect(start_response, "/support/", [("Set-Cookie", "tsuite_support_session=; Path=/support; Secure; HttpOnly; SameSite=Lax; Max-Age=0")])
 			if session is None:
 				return self.response(start_response, HTTPStatus.UNAUTHORIZED, page("登录", login_content(bool(self.settings.local_admin_user))))
+			if path == "/users" and method == "GET":
+				if not bool(session["is_admin"]):
+					return self.response(start_response, HTTPStatus.FORBIDDEN, page("无权访问", "<h1>无权访问</h1>"))
+				return self.users_page(start_response, session)
+			if path == "/users/invite" and method == "POST":
+				if not bool(session["is_admin"]):
+					return self.response(start_response, HTTPStatus.FORBIDDEN, page("无权访问", "<h1>无权访问</h1>"))
+				form = form_data(environ)
+				if not secrets.compare_digest(form.get("csrf", ""), str(session["csrf"])):
+					raise ConsoleError("请求校验失败，请刷新页面后重试")
+				username = form.get("username", "")
+				display_name = form.get("display_name", "").strip()
+				role = form.get("role", "operator")
+				if not 3 <= len(username) <= 64 or any(character not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-" for character in username):
+					raise ConsoleError("用户名无效")
+				if not display_name or len(display_name) > 80 or any(ord(character) < 32 for character in display_name):
+					raise ConsoleError("显示名称无效")
+				if role not in {"operator", "admin"} or self.store.local_user(username) is not None:
+					raise ConsoleError("角色无效或用户名已存在")
+				token = self.store.new_local_user_invite(username, display_name, role == "admin", str(session["login"]))
+				invite_url = f"{self.settings.public_url}/invite?" + urllib.parse.urlencode({"token": token})
+				content = f'<header><h1>邀请已创建</h1><a class="button" href="/support/users">返回用户管理</a></header><section class="card"><p>此链接 30 分钟内有效且只能使用一次，请通过安全渠道发给 <strong>{html.escape(username)}</strong>。</p><div class="secret-heading"><h2>邀请链接</h2><button type="button" class="copy-button" data-copy-target="invite-link">复制</button></div><div id="invite-link" class="secret">{html.escape(invite_url)}</div></section>'
+				return self.response(start_response, HTTPStatus.OK, page("邀请已创建", content))
+			if path.startswith("/users/") and path.endswith("/reset-totp") and method == "POST":
+				if not bool(session["is_admin"]):
+					return self.response(start_response, HTTPStatus.FORBIDDEN, page("无权访问", "<h1>无权访问</h1>"))
+				form = form_data(environ)
+				if not secrets.compare_digest(form.get("csrf", ""), str(session["csrf"])):
+					raise ConsoleError("请求校验失败，请刷新页面后重试")
+				username = path.removeprefix("/users/").removesuffix("/reset-totp")
+				token = self.store.new_local_user_totp_reset(username, str(session["login"]))
+				invite_url = f"{self.settings.public_url}/invite?" + urllib.parse.urlencode({"token": token})
+				content = f'<header><h1>TOTP 重绑链接已创建</h1><a class="button" href="/support/users">返回用户管理</a></header><section class="card"><p>链接 30 分钟内有效且只能使用一次。完成绑定后，该用户现有登录会话会被撤销。</p><div class="secret-heading"><h2>重绑链接</h2><button type="button" class="copy-button" data-copy-target="invite-link">复制</button></div><div id="invite-link" class="secret">{html.escape(invite_url)}</div></section>'
+				return self.response(start_response, HTTPStatus.OK, page("重绑 TOTP", content))
+			if path.startswith("/users/") and path.endswith("/toggle") and method == "POST":
+				if not bool(session["is_admin"]):
+					return self.response(start_response, HTTPStatus.FORBIDDEN, page("无权访问", "<h1>无权访问</h1>"))
+				form = form_data(environ)
+				if not secrets.compare_digest(form.get("csrf", ""), str(session["csrf"])):
+					raise ConsoleError("请求校验失败，请刷新页面后重试")
+				username = path.removeprefix("/users/").removesuffix("/toggle")
+				user = self.store.local_user(username)
+				if user is None or username == str(session["login"]):
+					raise ConsoleError("不能修改当前用户或用户不存在")
+				self.store.set_local_user_enabled(username, not bool(user["enabled"]))
+				return self.redirect(start_response, "/support/users")
 			if path == "/" and method == "GET":
 				return self.dashboard(start_response, session)
 			if path == "/sessions" and method == "GET":

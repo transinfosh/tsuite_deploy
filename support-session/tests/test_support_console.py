@@ -166,6 +166,52 @@ class SupportConsoleTest(unittest.TestCase):
 		self.assertIn("账号或密码不正确", content)
 		self.assertNotIn('name="totp"', content)
 
+	def test_admin_invites_user_who_sets_password_and_binds_totp(self):
+		app = CONSOLE.Application(self.local_settings())
+		session_id, csrf = app.store.new_session("support-admin", "support-admin", True, "local")
+		cookie = f"tsuite_support_session={session_id}"
+		captured, content = self.call(
+			app, "/users/invite", "POST",
+			urllib.parse.urlencode({"csrf": csrf, "username": "alice", "display_name": "Alice", "role": "operator"}),
+			cookie,
+		)
+		self.assertTrue(captured["status"].startswith("200"))
+		self.assertIn("邀请已创建", content)
+		with app.store.connection() as connection:
+			invite = connection.execute("SELECT * FROM local_user_invite WHERE username = 'alice'").fetchone()
+		self.assertIsNotNone(invite)
+		token = None
+		for candidate in __import__("re").findall(r"token=([A-Za-z0-9_-]+)", content):
+			if app.store.local_user_invite(candidate) is not None:
+				token = candidate
+				break
+		self.assertIsNotNone(token)
+		captured, content = self.call(app, "/invite", query=f"token={token}")
+		self.assertIn('name="password"', content)
+		captured, content = self.call(
+			app, "/invite/password", "POST",
+			urllib.parse.urlencode({"token": token, "password": "a secure password 123", "confirm_password": "a secure password 123"}),
+		)
+		self.assertTrue(captured["status"].startswith("200"))
+		self.assertIn("绑定动态验证码", content)
+		with mock.patch.object(CONSOLE, "verify_totp", return_value=True):
+			captured, content = self.call(
+				app, "/invite/totp", "POST", urllib.parse.urlencode({"token": token, "totp": "123456"}),
+			)
+		self.assertTrue(captured["status"].startswith("200"))
+		self.assertIn("账号已启用", content)
+		user = app.store.local_user("alice")
+		self.assertIsNotNone(user)
+		self.assertFalse(bool(user["is_admin"]))
+		self.assertTrue(CONSOLE.verify_password("a secure password 123", str(user["password_hash"])))
+		self.assertIsNone(app.store.local_user_invite(token))
+
+	def test_operator_cannot_manage_users(self):
+		app = CONSOLE.Application(self.local_settings())
+		session_id, _ = app.store.new_session("operator", "Operator", False, "local")
+		captured, _ = self.call(app, "/users", cookie=f"tsuite_support_session={session_id}")
+		self.assertTrue(captured["status"].startswith("403"))
+
 	def test_dashboard_uses_the_public_support_prefix(self):
 		app = CONSOLE.Application(self.settings)
 		session_id, _ = app.store.new_session("alice", "Alice")
