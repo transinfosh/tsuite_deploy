@@ -252,6 +252,24 @@ function Test-LocalSshAuthentication(
     }
 }
 
+function Stop-SessionSshdForDiagnostics([string]$Id, [string]$SshdPath, [string]$ConfigPath) {
+    Stop-ScheduledTask -TaskName "TSuiteSupport-$Id-Sshd" -ErrorAction SilentlyContinue
+    foreach ($process in Get-CimInstance Win32_Process) {
+        if ($process.Name -ine 'sshd.exe' -or -not $process.CommandLine -or
+            $process.ExecutablePath -ine $SshdPath -or -not $process.CommandLine.Contains($ConfigPath)) { continue }
+        & "$env:SystemRoot\System32\taskkill.exe" /PID $process.ProcessId /T /F | Out-Null
+    }
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        $running = @(Get-CimInstance Win32_Process | Where-Object {
+            $_.Name -ieq 'sshd.exe' -and $_.ExecutablePath -ieq $SshdPath -and
+            $_.CommandLine -and $_.CommandLine.Contains($ConfigPath)
+        })
+        if ($running.Count -eq 0) { return }
+        Start-Sleep -Milliseconds 100
+    }
+    throw 'Could not stop the session SSH listener before collecting diagnostics.'
+}
+
 $openSsh = Get-OpenSshBinaries ([bool]$windowsHost.use_compatibility_openssh)
 $sshdPath = $openSsh.sshd
 $sshPath = $openSsh.ssh
@@ -402,9 +420,12 @@ try {
         try {
             Test-LocalSshAuthentication $sshPath $keygenPath $directory $opsUser $localPort $id
         } catch {
+            $authenticationError = $_
+            try { Stop-SessionSshdForDiagnostics $id $sshdPath (Join-Path $directory 'sshd_config') }
+            catch { Write-Warning ('Could not stop the SSH listener for diagnostics: ' + $_.Exception.Message) }
             try { Save-StartupDiagnostics $id }
             catch { Write-Warning ('Could not save authentication diagnostics: ' + $_.Exception.Message) }
-            throw
+            throw $authenticationError
         }
         Start-ScheduledTask -TaskName "TSuiteSupport-$id-Tunnel"
         Start-ScheduledTask -TaskName "TSuiteSupport-$id-Monitor"

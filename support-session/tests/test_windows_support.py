@@ -34,6 +34,8 @@ class WindowsSessionTest(unittest.TestCase):
 		self.assertIn("OpenSSH-Server-In-TCP", bootstrap)
 		self.assertIn("sftp_path = $sftpPath", bootstrap)
 		self.assertIn('Test-LocalSshAuthentication', bootstrap)
+		self.assertIn('Stop-SessionSshdForDiagnostics', bootstrap)
+		self.assertIn("Stop-ScheduledTask -TaskName \"TSuiteSupport-$Id-Sshd\"", bootstrap)
 		self.assertIn('cert-authority,principals=', bootstrap)
 		self.assertIn('LogLevel VERBOSE', bootstrap)
 		self.assertNotIn('Install OpenSSH Server first.', bootstrap)
