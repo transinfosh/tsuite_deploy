@@ -15,6 +15,16 @@ Assert-True $badIdRejected 'Invalid session ID must fail.'
 $expiryFixture = [DateTimeOffset]'2026-09-22T03:50:49Z'
 Assert-True ((Format-WindowsOpenSshExpiry $expiryFixture) -eq $expiryFixture.LocalDateTime.ToString('yyyyMMddHHmmss')) `
     'Windows OpenSSH expiry must use local digits without a Z suffix for 8.1 compatibility.'
+$compatibilityOptions = Get-WindowsSshdRuntimeOptions $true 'C:/ProgramData/TSuiteSupport/fixture'
+Assert-True ($compatibilityOptions.Contains('PidFile "C:/ProgramData/TSuiteSupport/fixture/sshd.pid"')) `
+    'Portable sshd must not fall back to the package-default PID path.'
+Assert-True ($compatibilityOptions.Contains('PerSourcePenalties no')) `
+    'Loopback-only OpenSSH 9.8 must not penalize its own readiness checks.'
+Assert-True ($compatibilityOptions.Contains('LogLevel DEBUG3')) `
+    'Compatibility sshd failures must preserve detailed diagnostics.'
+$nativeOptions = Get-WindowsSshdRuntimeOptions $false 'C:/ProgramData/TSuiteSupport/fixture'
+Assert-True (-not $nativeOptions.Contains('PerSourcePenalties')) `
+    'Older system OpenSSH must not receive an unsupported 9.8 option.'
 
 $script:testRoot = Join-Path ([IO.Path]::GetTempPath()) ('tsuite-windows-test-' + [guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($script:testRoot)

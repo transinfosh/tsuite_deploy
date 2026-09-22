@@ -369,6 +369,7 @@ try {
         }
         # Isolated sshd: no shared administrators_authorized_keys or changes to the existing sshd service.
         $sshDirectoryPath = $directory.Replace('\', '/')
+        $sshdRuntimeOptions = Get-WindowsSshdRuntimeOptions ([bool]$windowsHost.use_compatibility_openssh) $sshDirectoryPath
         $sshdConfiguration = @"
     ListenAddress 127.0.0.1
     Port $localPort
@@ -381,7 +382,7 @@ try {
     PermitEmptyPasswords no
     AllowTcpForwarding no
     AllowAgentForwarding no
-    LogLevel VERBOSE
+    $sshdRuntimeOptions
     Subsystem sftp "$($sftpPath.Replace('\', '/'))"
 "@
         Write-Utf8 (Join-Path $directory 'sshd_config') $sshdConfiguration
@@ -417,6 +418,7 @@ try {
             catch { Write-Warning ('Could not save startup diagnostics: ' + $_.Exception.Message) }
             throw 'The temporary SSH listener failed to start. See the startup diagnostics above.'
         }
+        if ([bool]$windowsHost.use_compatibility_openssh) { Start-Sleep -Seconds 2 }
         try {
             Test-LocalSshAuthentication $sshPath $keygenPath $directory $opsUser $localPort $id
         } catch {

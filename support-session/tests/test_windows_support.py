@@ -37,7 +37,7 @@ class WindowsSessionTest(unittest.TestCase):
 		self.assertIn('Stop-SessionSshdForDiagnostics', bootstrap)
 		self.assertIn("Stop-ScheduledTask -TaskName \"TSuiteSupport-$Id-Sshd\"", bootstrap)
 		self.assertIn('cert-authority,principals=', bootstrap)
-		self.assertIn('LogLevel VERBOSE', bootstrap)
+		self.assertIn('Get-WindowsSshdRuntimeOptions', bootstrap)
 		self.assertNotIn('Install OpenSSH Server first.', bootstrap)
 		self.assertNotIn('requires Windows Server 2019 or later', bootstrap)
 

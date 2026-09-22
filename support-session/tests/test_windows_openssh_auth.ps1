@@ -1,5 +1,8 @@
 # Exercise the Windows support client's real OpenSSH 8.1 authentication shape.
-param([Parameter(Mandatory=$true)][string]$OpenSshDirectory)
+param(
+    [Parameter(Mandatory=$true)][string]$OpenSshDirectory,
+    [switch]$CompatibilityRuntime
+)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -41,6 +44,7 @@ try {
     $port = $listener.LocalEndpoint.Port
     $listener.Stop()
     $rootForSsh = $root.Replace('\', '/')
+    $runtimeOptions = Get-WindowsSshdRuntimeOptions ([bool]$CompatibilityRuntime) $rootForSsh
     Write-Utf8 $config @"
 ListenAddress 127.0.0.1
 Port $port
@@ -54,7 +58,7 @@ PermitEmptyPasswords no
 AllowTcpForwarding no
 AllowAgentForwarding no
 StrictModes yes
-LogLevel DEBUG3
+$runtimeOptions
 "@
     foreach ($path in @($hostKey, $authorizedKeys, $config)) { Set-ServiceFilePermissions $path }
 
@@ -73,12 +77,25 @@ LogLevel DEBUG3
         catch { Start-Sleep -Milliseconds 200 }
         finally { $connection.Dispose() }
     }
+    if ($CompatibilityRuntime) {
+        # OpenSSH 9.8 counts bare readiness probes as no-auth penalties. Make
+        # the production failure deterministic before testing authentication.
+        foreach ($probe in 1..16) {
+            $connection = New-Object Net.Sockets.TcpClient
+            try { $connection.Connect('127.0.0.1', $port) }
+            finally { $connection.Dispose() }
+        }
+    }
     & $ssh -F none -T -i $clientKey -o IdentitiesOnly=yes -o BatchMode=yes `
         -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -o ConnectTimeout=10 `
         -p $port "$userName@127.0.0.1" 'cmd.exe /d /c exit 0'
     $sshExitCode = $LASTEXITCODE
     if ($process -and -not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
     $nativeLog = Get-Content -LiteralPath $log -Raw
+    if ($nativeLog -match 'Couldn.t create pid file') {
+        Write-Output $nativeLog
+        throw 'Portable sshd fell back to an unusable package-default PID path.'
+    }
     # A foreground sshd on CI is elevated but not SYSTEM, so Win32-OpenSSH
     # cannot create the user token after authentication. Production starts
     # sshd as SYSTEM; the regression signal here is key acceptance itself.

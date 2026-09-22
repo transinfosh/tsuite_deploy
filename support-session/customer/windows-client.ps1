@@ -53,6 +53,19 @@ function Format-WindowsOpenSshExpiry([DateTimeOffset]$Value) {
     return $Value.LocalDateTime.ToString('yyyyMMddHHmmss')
 }
 
+function Get-WindowsSshdRuntimeOptions([bool]$CompatibilityRuntime, [string]$DirectoryPath) {
+    $options = @('PidFile "{0}/sshd.pid"' -f $DirectoryPath)
+    if ($CompatibilityRuntime) {
+        # OpenSSH 9.8 penalizes bare TCP readiness probes. This listener is
+        # loopback-only, and all legitimate tunneled connections share 127.0.0.1.
+        $options += 'PerSourcePenalties no'
+        $options += 'LogLevel DEBUG3'
+    } else {
+        $options += 'LogLevel VERBOSE'
+    }
+    return $options -join "`n    "
+}
+
 function Move-OpenSshHostKeyPair([string]$PrivateKeyPath, [string]$DestinationDirectory) {
     $publicKeyPath = "$PrivateKeyPath.pub"
     foreach ($path in @($PrivateKeyPath, $publicKeyPath)) {
