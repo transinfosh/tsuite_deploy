@@ -46,3 +46,16 @@ sudo python3 /srv/tsuite-deploy/backups/support-console/support-ai-handoff-20260
 新说明仅出现在新建会话的一次性命令页面。现有支持机已经保存的旧脚本不会远程改写；新领取的
 Linux 客户端才包含此次增强。Windows 原生 ACL/ConPTY 实机验收边界仍沿用上一份上线记录，
 本次未变更 Windows 原生终端实现。控制面备份与告警等长期待办沿用统一部署运行手册。
+
+## 操作说明精简更新
+
+`2026-09-30 07:29 UTC` 部署提交 `55a35e14ee33527c374f79d962c43b574b79267f`。
+说明缩短为支持机本地首次接入、后续远端命令调用、脚本路径和结果检查，删除客户侧接入步骤、
+身份字段、依赖介绍及授权/续期机制说明；操作任务固定为最后一段，页面辅助文字同步缩短。
+保留支持机与目标系统组合对应的命令形式及远端 Shell 语法。
+
+发布目录：`/srv/tsuite-deploy/releases/support-ai-brief-20260930T072938Z-55a35e14/`。
+备份与回退脚本：`/srv/tsuite-deploy/backups/support-console/support-ai-brief-20260930T072938Z-55a35e14/rollback.py`。
+仅更新并重启 console；客户端、会话协议和系统选择方式未变更。
+95 项本地 Python 测试通过，安装后的说明函数四种组合均验证任务在末尾且不含客户侧步骤。
+公网健康检查与两个下载入口为 200，未登录页面为 401。
