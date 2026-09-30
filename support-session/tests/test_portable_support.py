@@ -1,16 +1,21 @@
 """Security regressions for bearer enrollment and session-scoped SSH certificates."""
 
 import concurrent.futures
+import base64
+import html
+import io
 import hashlib
 import importlib.util
 import json
 import os
 import pathlib
+import re
 import subprocess
 import tempfile
 import time
 import types
 import unittest
+import urllib.parse
 from unittest import mock
 
 import test_support_console as console
@@ -213,6 +218,58 @@ class PortableConsoleTest(unittest.TestCase):
         self.assertTrue(captured["status"].startswith("400"))
         broker.assert_not_called()
 
+    def test_ai_handoff_matches_all_operator_and_customer_combinations(self):
+        app = CONSOLE.Application(self.settings)
+        session_id, csrf = app.store.new_session("alice", "Alice")
+        purpose = "检查服务 <script>alert('test')</script>"
+        for operator in ("linux", "windows"):
+            for platform in ("linux", "windows"):
+                with self.subTest(operator=operator, customer=platform):
+                    created = {
+                        "id": "012345abcdef", "token": "legacy-token", "auth_mode": "enrollment-key",
+                        "customer_command": "customer-command", "operator_claim_token": "A" * 43,
+                    }
+                    body = urllib.parse.urlencode({
+                        "customer": "customer-one", "platform": platform, "operator_platform": operator,
+                        "purpose": purpose, "csrf": csrf,
+                    })
+                    with mock.patch.object(CONSOLE, "manager", return_value=json.dumps(created)):
+                        captured, content = self.call(
+                            app, "/session", "POST", body, cookie="tsuite_support_session=" + session_id
+                        )
+                    self.assertTrue(captured["status"].startswith("200"))
+                    self.assertIn('data-copy-target="ai-instructions"', content)
+                    match = re.search(r'<div id="ai-instructions" class="secret">(.*?)</div>', content, re.S)
+                    self.assertIsNotNone(match)
+                    prompt = html.unescape(match[1])
+                    self.assertIn("客户环境标识：customer-one", prompt)
+                    self.assertIn("会话 ID：012345abcdef", prompt)
+                    self.assertIn("操作任务：" + purpose, prompt)
+                    self.assertNotIn(purpose, content)  # The copied text preserves it, while HTML escapes it.
+                    self.assertIn("A" * 43, prompt)
+                    self.assertIn("支持机（你的本机）：" + ("Windows" if operator == "windows" else "Linux"), prompt)
+                    self.assertIn("客户机（远端目标）：" + ("Windows" if platform == "windows" else "Linux"), prompt)
+                    if operator == "windows":
+                        self.assertIn("-Mode Claim -GrantJson", prompt)
+                        self.assertIn("-Command 'hostname'", prompt)
+                        self.assertIn('support.ps1 完整路径>" -Mode Resume -Command', prompt)
+                        self.assertNotIn("--command", prompt)
+                    else:
+                        self.assertIn("python3 -c", prompt)
+                        self.assertIn("--command 'hostname'", prompt)
+                        self.assertIn('support.py 完整路径>" --resume', prompt)
+                        self.assertNotIn("powershell.exe -NoProfile -ExecutionPolicy", prompt)
+                    self.assertIn("Get-CimInstance" if platform == "windows" else "uname -a", prompt)
+                    self.assertNotIn("uname -a" if platform == "windows" else "Get-CimInstance", prompt)
+                    self.assertIn(("Cache-Control", "no-store"), captured["headers"])
+        # Only web login state is persisted; bearer handoff text remains in the creation response.
+        with app.store.connection() as connection:
+            self.assertNotIn("A" * 43, "\n".join(connection.iterdump()))
+
+    def test_empty_purpose_prompts_ai_owner_to_supply_the_task(self):
+        text = CONSOLE.operator_ai_instructions("customer-one", "", "012345abcdef", "linux", "linux", "connect")
+        self.assertIn("[请补充要完成的具体任务]", text)
+
     def test_authenticated_creation_shows_two_commands_with_no_manual_id_prompt(self):
         app = CONSOLE.Application(self.settings)
         session_id, csrf = app.store.new_session("alice", "Alice")
@@ -272,3 +329,52 @@ class PortableCleanupTest(unittest.TestCase):
             with mock.patch.object(PORTABLE, "session_status", side_effect=OSError):
                 self.assertEqual(PORTABLE.cleanup_watch(root, settings), 0)
             self.assertFalse(root.exists())
+
+
+class PortableCommandTest(unittest.TestCase):
+    def test_first_claim_can_run_a_command_without_opening_a_terminal(self):
+        grant = {"id": "012345abcdef", "url": "https://edge.example.com/support", "token": "A" * 43}
+        claimed = {
+            "id": grant["id"], "host": "edge.example.com", "port": 22, "user": "tsuite-operator",
+            "expires_at": int(time.time()) + 900, "certificate": "test certificate",
+            "known_hosts": "edge.example.com ssh-ed25519 AAAA\n",
+        }
+        real_popen = subprocess.Popen
+
+        def start_process(arguments, **kwargs):
+            if arguments[-1] == "--watch":
+                return mock.Mock()
+            return real_popen(arguments, **kwargs)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            stdin = io.TextIOWrapper(io.BytesIO(json.dumps(grant).encode()))
+            with (
+                mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": temporary}),
+                mock.patch.object(PORTABLE.sys, "argv", ["support.py", "--command", "hostname"]),
+                mock.patch.object(PORTABLE.sys, "stdin", stdin),
+                mock.patch.object(PORTABLE, "claim", return_value=claimed),
+                mock.patch.object(PORTABLE, "wait_for_customer", return_value={"platform": "linux"}),
+                mock.patch.object(PORTABLE, "connect", return_value=7) as connect,
+                mock.patch.object(PORTABLE.subprocess, "Popen", side_effect=start_process),
+                mock.patch.object(PORTABLE, "open", side_effect=AssertionError("Opened tty"), create=True),
+            ):
+                self.assertEqual(PORTABLE.main(), 7)
+            self.assertEqual(connect.call_args.args[-1], "hostname")
+            saved = pathlib.Path(temporary) / "tsuite-support/portable/012345abcdef"
+            self.assertNotIn(grant["token"], (saved / "session.json").read_text())
+            stdin.close()
+
+    def test_customer_shell_selection_encodes_windows_and_preserves_linux_commands(self):
+        settings = {"id": "012345abcdef", "host": "edge.example.com", "port": 22, "user": "tsuite-operator"}
+        command = "Write-Output '测试'; $env:COMPUTERNAME\n"
+        relay_source = "def connect(arguments, *args, **kwargs):\n    return arguments\n"
+        for platform in ("linux", "windows"):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as temporary:
+                remote = {"remote_port": 22000, "customer_host_key": "ssh-ed25519 AAAA", "platform": platform}
+                with mock.patch.object(PORTABLE, "ACTIVITY_SOURCE", relay_source):
+                    arguments = PORTABLE.connect(pathlib.Path(temporary), settings, remote, command)
+                if platform == "windows":
+                    self.assertTrue(arguments[-1].startswith("powershell.exe -NoProfile -NonInteractive -EncodedCommand "))
+                    self.assertEqual(base64.b64decode(arguments[-1].split()[-1]).decode("utf-16-le"), command)
+                else:
+                    self.assertEqual(arguments[-1], command)

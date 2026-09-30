@@ -681,6 +681,45 @@ document.addEventListener("DOMContentLoaded", loadSessionData);
 </script></body></html>""".encode()
 
 
+def operator_ai_instructions(
+	customer: str, purpose: str, session_id: str, operator_platform: str,
+	customer_platform: str, command: str,
+) -> str:
+	operator_label = "Windows（PowerShell）" if operator_platform == "windows" else "Linux（Shell）"
+	customer_label = "Windows（远端 PowerShell）" if customer_platform == "windows" else "Linux（远端 Shell）"
+	if operator_platform == "windows":
+		first_command = command + " -Command 'hostname'"
+		resume = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<工具输出的 support.ps1 完整路径>" -Mode Resume -Command '
+		requirements = "本机需要 64 位 PowerShell 5.1/7 与 OpenSSH Client，无需 WSL 或 Python。"
+		exit_check = "首次检查 $LASTEXITCODE；后续使用独立 PowerShell 进程的退出码判断成功。"
+	else:
+		first_command = command + " --command 'hostname'"
+		resume = 'python3 "<工具输出的 support.py 完整路径>" --resume '
+		requirements = "本机需要 Python 3、OpenSSH Client 和 curl。"
+		exit_check = "检查每次调用的进程退出码。"
+	example = "Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version" if customer_platform == "windows" else "uname -a"
+	remote_shell = (
+		"远端命令使用 PowerShell 语法；客户端会自动编码后交给客户机的 PowerShell 执行。"
+		if customer_platform == "windows" else "远端命令使用 Linux Shell 语法，由客户机的 Shell 执行。"
+	)
+	return (
+		"你要通过 TSuite support session 操作远端客户机器。\n"
+		f"支持机（你的本机）：{operator_label}\n客户机（远端目标）：{customer_label}\n"
+		f"客户环境标识：{customer}\n会话 ID：{session_id}\n"
+		f"操作任务：{purpose or '[请补充要完成的具体任务]'}\n\n"
+		"1. 客户先在目标机器执行客户接入命令。你在支持机本地执行下面的接入检查命令；客户尚未接入时工具会等待。\n"
+		f"{requirements}\n{first_command}\n\n"
+		"2. 核对返回的主机名是用户指定的目标机器。记住工具输出的本机 support 脚本完整路径；客户环境标识不一定等于主机名。\n\n"
+		"3. 后续客户机器上的操作均通过以下命令执行。将路径占位符替换为工具输出的实际路径，并将示例替换为具体远端命令：\n"
+		f"{resume}'{example}'\n{remote_shell}\n"
+		"支持机负责发起连接，维护命令通过客户端在客户机执行。每次使用命令模式，避免进入持续交互终端。\n\n"
+		f"4. 根据标准输出、错误输出和退出码判断结果。{exit_check}\n"
+		"客户端会自动领取授权、取得证书并通过 Edge SSH 代理到客户机，无需自行拼接 SSH 或寻找 IP、密码和私钥。\n"
+		"授权只领取一次；后续使用再次连接命令。会话关闭或过期后需新建会话。仅真实输入或发起远端命令会续期，任务输出及持续运行不续期。\n"
+		"完成后报告操作结果，并提醒用户在支持管理页关闭会话。"
+	)
+
+
 class Application:
 	def __init__(self, settings: Settings):
 		self.settings = settings
@@ -1016,6 +1055,7 @@ class Application:
 				if not isinstance(created, dict) or not isinstance(created.get("token"), str):
 					raise ConsoleError("支持会话服务返回无效数据")
 				operator_section = ""
+				ai_section = ""
 				if isinstance(created.get("operator_claim_token"), str):
 					grant = json.dumps({"id": created["id"], "token": created["operator_claim_token"], "url": self.settings.public_url}, separators=(",", ":"))
 					command = "printf '%s\n' " + shlex.quote(grant) + ' | python3 -c "$(curl -fsSL --proto =https --tlsv1.2 ' + shlex.quote(self.settings.public_url + "/operator-client") + ')"'
@@ -1027,6 +1067,8 @@ class Application:
 						operator_label = "Windows PowerShell"
 						operator_hint = "支持机需 64 位 PowerShell 和 OpenSSH Client，无需管理员权限、WSL 或 Python。AI 首次执行时在命令末尾追加 <code>-Command 'hostname'</code>；后续使用工具输出的 Resume 命令。"
 					operator_section = '<div class="secret-section"><div class="secret-heading"><h2>支持机执行命令（' + operator_label + '）</h2><button type="button" class="copy-button" data-copy-target="operator-command">复制</button></div><div id="operator-command" class="secret">' + html.escape(command) + '</div><p class="muted">自动生成本机密钥并领取一次性授权，无需登录 GitHub 或部署控制机。客户尚未接入时自动等待。请勿分享此命令。' + operator_hint + '</p></div>'
+					ai_text = operator_ai_instructions(customer, purpose, str(created["id"]), operator_platform, platform, command)
+					ai_section = '<div class="secret-section"><div class="secret-heading"><h2>交给 AI 的操作说明</h2><button type="button" class="copy-button" data-copy-target="ai-instructions">复制</button></div><div id="ai-instructions" class="secret">' + html.escape(ai_text) + '</div><p class="muted">已按支持机与客户机系统生成，包含接入命令和再次连接方式。可直接复制给 AI；支持用途未填写时，请补充具体任务。此说明含一次性授权，仅显示一次，请勿公开分享。</p></div>'
 				legacy_code = ""
 				if created.get("auth_mode") != "enrollment-key":
 					legacy_code = f'<div class="secret-section"><h2>一次性支持会话码</h2><button type="button" class="copy-button" data-copy-target="support-token">复制</button><div id="support-token" class="secret token">{html.escape(created["token"])}</div></div>'
@@ -1034,7 +1076,7 @@ class Application:
 					if created.get("auth_mode") == "enrollment-key" else "请将命令和会话码通过两个独立安全渠道发送给客户。")
 				content = f"""<header><h1>支持会话已创建</h1><a href="/support/">返回会话列表</a></header><section class="card"><p>会话 ID：<code>{html.escape(str(created['id']))}</code>。以下内容仅显示一次，且不会被管理页面持久保存。</p>
 <div class="secret-section"><div class="secret-heading"><h2>客户执行命令（{"管理员 PowerShell" if platform == "windows" else "Linux 终端"}）</h2><button type="button" class="copy-button" data-copy-target="customer-command">复制</button></div><div id="customer-command" class="secret">{html.escape(str(created['customer_command']))}</div></div>
-{operator_section}{legacy_code}<p class="muted">{instructions}</p></section>"""
+{operator_section}{ai_section}{legacy_code}<p class="muted">{instructions}</p></section>"""
 				return self.response(start_response, HTTPStatus.OK, page("会话已创建", content))
 			if path.startswith("/session/") and path.endswith("/close") and method == "POST":
 				target = path.removeprefix("/session/").removesuffix("/close")
