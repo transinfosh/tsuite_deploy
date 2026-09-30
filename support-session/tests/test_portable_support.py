@@ -242,13 +242,14 @@ class PortableConsoleTest(unittest.TestCase):
                     match = re.search(r'<div id="ai-instructions" class="secret">(.*?)</div>', content, re.S)
                     self.assertIsNotNone(match)
                     prompt = html.unescape(match[1])
-                    self.assertIn("客户环境标识：customer-one", prompt)
-                    self.assertIn("会话 ID：012345abcdef", prompt)
-                    self.assertIn("操作任务：" + purpose, prompt)
+                    self.assertTrue(prompt.endswith("操作任务：\n" + purpose))
+                    self.assertNotIn("客户接入命令", prompt)
+                    self.assertNotIn("客户先", prompt)
+                    self.assertNotIn("客户环境标识", prompt)
+                    self.assertNotIn("会话 ID：", prompt)
                     self.assertNotIn(purpose, content)  # The copied text preserves it, while HTML escapes it.
                     self.assertIn("A" * 43, prompt)
-                    self.assertIn("支持机（你的本机）：" + ("Windows" if operator == "windows" else "Linux"), prompt)
-                    self.assertIn("客户机（远端目标）：" + ("Windows" if platform == "windows" else "Linux"), prompt)
+                    self.assertIn("在你的本机 " + ("Windows" if operator == "windows" else "Linux"), prompt)
                     if operator == "windows":
                         self.assertIn("-Mode Claim -GrantJson", prompt)
                         self.assertIn("-Command 'hostname'", prompt)
@@ -259,8 +260,7 @@ class PortableConsoleTest(unittest.TestCase):
                         self.assertIn("--command 'hostname'", prompt)
                         self.assertIn('support.py 完整路径>" --resume', prompt)
                         self.assertNotIn("powershell.exe -NoProfile -ExecutionPolicy", prompt)
-                    self.assertIn("Get-CimInstance" if platform == "windows" else "uname -a", prompt)
-                    self.assertNotIn("uname -a" if platform == "windows" else "Get-CimInstance", prompt)
+                    self.assertIn("远端命令使用 " + ("PowerShell" if platform == "windows" else "Linux Shell") + " 语法", prompt)
                     self.assertIn(("Cache-Control", "no-store"), captured["headers"])
         # Only web login state is persisted; bearer handoff text remains in the creation response.
         with app.store.connection() as connection:
@@ -268,7 +268,7 @@ class PortableConsoleTest(unittest.TestCase):
 
     def test_empty_purpose_prompts_ai_owner_to_supply_the_task(self):
         text = CONSOLE.operator_ai_instructions("customer-one", "", "012345abcdef", "linux", "linux", "connect")
-        self.assertIn("[请补充要完成的具体任务]", text)
+        self.assertTrue(text.endswith("操作任务：\n[请补充要完成的具体任务]"))
 
     def test_authenticated_creation_shows_two_commands_with_no_manual_id_prompt(self):
         app = CONSOLE.Application(self.settings)

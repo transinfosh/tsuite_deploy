@@ -84,7 +84,8 @@ Host Key 和专用 bridge key 调用堡垒机，bridge key 不能获得普通 Sh
 Windows 支持机可维护 Linux 或 Windows 客户机。Linux 支持机需要 Python 3、OpenSSH Client、curl 和可用终端。
 
 创建结果页同时提供可直接复制的“交给 AI 的操作说明”，根据支持机与客户机的四种系统组合生成。
-说明包含客户环境、会话 ID、支持用途、首次非交互接入检查、再次连接命令及对应远端 Shell 示例。
+说明仅包含 AI 在支持机上的首次接入检查、后续远端命令调用方式及远端 Shell 语法，不包含客户侧接入步骤。
+操作任务放在说明末尾，便于复制后补充，默认带入支持用途或保留任务占位符。
 Windows 支持机首次命令带 `-Command 'hostname'`，Linux 支持机首次命令带 `--command 'hostname'`；
 客户机为 Windows 时，两个支持机客户端的命令模式均自动编码为 PowerShell 执行。客户执行命令仍按
 客户机系统生成。未填写支持用途时，说明保留具体任务占位符。AI 说明含一次性授权，与接入命令一样
