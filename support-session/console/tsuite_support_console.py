@@ -808,7 +808,7 @@ class Application:
 		users_link = '<a class="button" href="/support/users">用户管理</a>' if bool(session["is_admin"]) else ""
 		content = f"""<header><h1>TSuite 支持管理</h1><div class=\"detail-actions\">{users_link}<form method=\"post\" action=\"/support/logout\"><input type=\"hidden\" name=\"csrf\" value=\"{html.escape(str(session['csrf']))}\"><button>退出 {html.escape(str(session['login']))}</button></form></div></header>
 <section class=\"card\"><h2>新建支持会话</h2><p class=\"muted\">为同一台客户机器使用固定的环境标识，例如 <code>dtaut-srm-prod-01</code>。每次连接都会自动生成新的完整会话 ID。</p>
-<form class=\"create-form\" method=\"post\" action=\"/support/session\"><input type=\"hidden\" name=\"csrf\" value=\"{html.escape(str(session['csrf']))}\"><label>客户环境标识<input name=\"customer\" required autocomplete=\"off\" placeholder=\"例如 dtaut-srm-prod-01\" pattern=\"[a-z0-9][a-z0-9-]{{0,47}}\"></label><label>支持用途（可选）<input name=\"purpose\" maxlength=\"200\" autocomplete=\"off\" placeholder=\"例如升级 SRM 至 0.1.10\"></label><label>操作系统<select name=\"platform\"><option value=\"linux\">Linux</option><option value=\"windows\">Windows（Server 2016+ / Windows 10/11）</option></select></label><button class=\"primary\">创建会话</button></form>
+<form class=\"create-form\" method=\"post\" action=\"/support/session\"><input type=\"hidden\" name=\"csrf\" value=\"{html.escape(str(session['csrf']))}\"><label>客户环境标识<input name=\"customer\" required autocomplete=\"off\" placeholder=\"例如 dtaut-srm-prod-01\" pattern=\"[a-z0-9][a-z0-9-]{{0,47}}\"></label><label>支持用途（可选）<input name=\"purpose\" maxlength=\"200\" autocomplete=\"off\" placeholder=\"例如升级 SRM 至 0.1.10\"></label><label>客户机操作系统<select name=\"platform\"><option value=\"linux\">Linux</option><option value=\"windows\">Windows（Server 2016+ / Windows 10/11）</option></select></label><label>支持机操作系统<select name=\"operator_platform\"><option value=\"linux\">Linux</option><option value=\"windows\">Windows（原生 PowerShell / OpenSSH）</option></select></label><button class=\"primary\">创建会话</button></form>
 <div id=\"session-summary\" class=\"summary\" aria-live=\"polite\"><span class=\"loading-label\">正在读取会话数据…</span></div></section>
 <section><h2>客户环境与会话</h2><div id=\"session-groups\" class=\"group-list\" aria-live=\"polite\" aria-busy=\"true\"><div class=\"card loading\"><span class=\"spinner\"></span><span>正在加载会话列表…</span></div></div></section>"""
 		return self.response(start_response, HTTPStatus.OK, page("支持管理", content))
@@ -818,6 +818,20 @@ class Application:
 		path = environ.get("PATH_INFO", "/")
 		method = environ.get("REQUEST_METHOD", "GET")
 		try:
+			if path == "/operator-client.ps1" and method == "GET":
+				root = pathlib.Path(__file__).resolve().parent
+				if not (root / "tsuite_support_windows.ps1").is_file():
+					root = root.parent / "operator"
+				source = base64.b64encode((root / "tsuite_support_windows.ps1").read_bytes()).decode("ascii")
+				relay = base64.b64encode((root / "tsuite_support_windows_relay.cs").read_bytes()).decode("ascii")
+				body = (
+					"param([string]$Mode = 'Claim', [string]$GrantJson, [string]$Command)\n"
+					+ "$script:ClientSource = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + source + "'))\n"
+					+ "$script:RelaySource = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + relay + "'))\n"
+					+ "& ([scriptblock]::Create($script:ClientSource)) -Mode $Mode -GrantJson $GrantJson -Command $Command\n"
+				).encode("utf-8")
+				start_response("200 OK", [("Content-Type", "text/plain; charset=utf-8"), ("Content-Length", str(len(body))), ("Cache-Control", "no-store"), ("X-Content-Type-Options", "nosniff")])
+				return [body]
 			if path == "/operator-client" and method == "GET":
 				root = pathlib.Path(__file__).resolve().parent
 				if not (root / "tsuite_support_portable.py").is_file():
@@ -989,6 +1003,9 @@ class Application:
 				platform = form.get("platform", "linux")
 				if platform not in ("linux", "windows"):
 					raise ConsoleError("请选择 Linux 或受支持的 Windows")
+				operator_platform = form.get("operator_platform", "linux")
+				if operator_platform not in ("linux", "windows"):
+					raise ConsoleError("请选择支持机的 Linux 或 Windows 操作系统")
 				platform_args = ("--platform", platform) if platform == "windows" else ()
 				created = json.loads(manager(
 					"create", customer,
@@ -1002,7 +1019,14 @@ class Application:
 				if isinstance(created.get("operator_claim_token"), str):
 					grant = json.dumps({"id": created["id"], "token": created["operator_claim_token"], "url": self.settings.public_url}, separators=(",", ":"))
 					command = "printf '%s\n' " + shlex.quote(grant) + ' | python3 -c "$(curl -fsSL --proto =https --tlsv1.2 ' + shlex.quote(self.settings.public_url + "/operator-client") + ')"'
-					operator_section = '<div class="secret-section"><div class="secret-heading"><h2>支持机执行命令（Linux 终端）</h2><button type="button" class="copy-button" data-copy-target="operator-command">复制</button></div><div id="operator-command" class="secret">' + html.escape(command) + '</div><p class="muted">自动生成本机密钥并领取一次性授权，无需登录 GitHub 或部署控制机。客户尚未接入时自动等待。请勿分享此命令。</p></div>'
+					operator_label = "Linux 终端"
+					operator_hint = ""
+					if operator_platform == "windows":
+						url = (self.settings.public_url + "/operator-client.ps1").replace("'", "''")
+						command = "$ErrorActionPreference='Stop'; [Net.ServicePointManager]::SecurityProtocol=[Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; $client=(Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 -Uri '" + url + "').Content; & ([scriptblock]::Create($client)) -Mode Claim -GrantJson '" + grant.replace("'", "''") + "'"
+						operator_label = "Windows PowerShell"
+						operator_hint = "支持机需 64 位 PowerShell 和 OpenSSH Client，无需管理员权限、WSL 或 Python。AI 首次执行时在命令末尾追加 <code>-Command 'hostname'</code>；后续使用工具输出的 Resume 命令。"
+					operator_section = '<div class="secret-section"><div class="secret-heading"><h2>支持机执行命令（' + operator_label + '）</h2><button type="button" class="copy-button" data-copy-target="operator-command">复制</button></div><div id="operator-command" class="secret">' + html.escape(command) + '</div><p class="muted">自动生成本机密钥并领取一次性授权，无需登录 GitHub 或部署控制机。客户尚未接入时自动等待。请勿分享此命令。' + operator_hint + '</p></div>'
 				legacy_code = ""
 				if created.get("auth_mode") != "enrollment-key":
 					legacy_code = f'<div class="secret-section"><h2>一次性支持会话码</h2><button type="button" class="copy-button" data-copy-target="support-token">复制</button><div id="support-token" class="secret token">{html.escape(created["token"])}</div></div>'

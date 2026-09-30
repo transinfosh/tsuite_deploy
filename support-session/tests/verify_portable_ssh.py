@@ -1,6 +1,10 @@
 """Verify portable certificates with two isolated local sshd processes (requires sudo)."""
 
-import getpass, json, pathlib, shlex, socket, subprocess, tempfile, time
+import argparse, getpass, json, pathlib, shlex, shutil, socket, subprocess, tempfile, time
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--operator-pwsh", help="Also exercise the native operator's SSH construction via pwsh")
+options = parser.parse_args()
 
 r = pathlib.Path(__file__).resolve().parents[2]
 processes = []
@@ -137,6 +141,39 @@ with tempfile.TemporaryDirectory(prefix="portable-sshd-", dir=pathlib.Path.home(
         check([*ssh(ep), "proxy", "fedcba543210"], False)
         check([*ssh(ep), "id"], False)
         check([*ssh(cp, "wrong"), "true"], False)
+        if options.operator_pwsh:
+            native = root / "native operator space"
+            native.mkdir(mode=0o700)
+            for source, destination in (("operator", "identity"), ("operator-cert.pub", "identity-cert.pub")):
+                shutil.copyfile(root / source, native / destination)
+                (native / destination).chmod(0o600)
+            (native / "edge_known_hosts").write_text(f"[127.0.0.1]:{ep} {host}\n")
+
+            def ps_quote(value):
+                return "'" + str(value).replace("'", "''") + "'"
+
+            powershell = root / "native-smoke.ps1"
+            powershell.write_text(
+                "$ErrorActionPreference = 'Stop'\n. "
+                + ps_quote(r / "support-session/operator/tsuite_support_windows.ps1")
+                + " -Mode Library\nInitialize-OperatorRelay\n$root = " + ps_quote(native)
+                + "\n$tools = [pscustomobject]@{ Ssh = " + ps_quote(shutil.which("ssh")) + " }\n"
+                + f"$settings = [pscustomobject]@{{id = '012345abcdef'; host = '127.0.0.1'; port = {ep}; user = '{username}'}}\n"
+                + "$status = Get-OperatorStatus $root $settings $tools\n"
+                + "if ($status.id -cne $settings.id) { throw 'Status certificate login failed.' }\n"
+                + f"$remote = [pscustomobject]@{{remote_port = {cp}; customer_host_key = '{host}'}}\n"
+                + "$arguments = [string[]](Get-OperatorCustomerArguments $root $settings $remote $tools)\n"
+                # The fixture uses only the current user and never creates a support account.
+                + f"$arguments[$arguments.Length - 1] = '{username}@127.0.0.1'\n"
+                + "$result = [TSuiteSupport.WindowsRelay]::Capture($tools.Ssh, [string[]](@('-T') + $arguments + @('printf native-certificate-proxy-ok')), 20000)\n"
+                + "if ($result.ExitCode -ne 0 -or $result.Output -cne 'native-certificate-proxy-ok') { throw ('Native SSH proxy failed: ' + $result.Error) }\n"
+                + "[IO.File]::WriteAllText((Join-Path $root 'customer_known_hosts'), '[127.0.0.1]:"
+                + str(cp) + " " + wrong + "')\n"
+                + "$result = [TSuiteSupport.WindowsRelay]::Capture($tools.Ssh, [string[]](@('-T') + $arguments + @('true')), 20000)\n"
+                + "if ($result.ExitCode -eq 0) { throw 'Changed pinned host key was accepted.' }\n"
+                + "Write-Output 'Native PowerShell/C# real certificate login, Edge proxy and pinned host rejection: PASS'\n"
+            )
+            subprocess.run([options.operator_pwsh, "-NoProfile", "-File", str(powershell)], check=True, timeout=45)
         expired = time.strftime("%Y%m%d%H%M%SZ", time.gmtime(time.time() - 60))
         customer_keys.write_text(customer_keys.read_text().replace(expiry, expired))
         check([*ssh(cp), "true"], False)

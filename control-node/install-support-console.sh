@@ -102,6 +102,8 @@ install -m 0755 -o root -g root \
 
 install -m 0644 -o root -g root "$REPO_ROOT/support-session/operator/tsuite_support_portable.py" "$INSTALL_ROOT/tsuite_support_portable.py"
 install -m 0644 -o root -g root "$REPO_ROOT/support-session/operator/tsuite_support_activity.py" "$INSTALL_ROOT/tsuite_support_activity.py"
+install -m 0644 -o root -g root "$REPO_ROOT/support-session/operator/tsuite_support_windows.ps1" "$INSTALL_ROOT/tsuite_support_windows.ps1"
+install -m 0644 -o root -g root "$REPO_ROOT/support-session/operator/tsuite_support_windows_relay.cs" "$INSTALL_ROOT/tsuite_support_windows_relay.cs"
 
 config_temporary="$(mktemp "$CONFIG_DIR/.config.json.XXXXXX")"
 trap 'rm -f -- "$config_temporary"' EXIT

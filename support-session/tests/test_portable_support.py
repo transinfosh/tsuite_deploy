@@ -170,6 +170,49 @@ class PortableConsoleTest(unittest.TestCase):
         self.assertIn("CLIENT_SOURCE", body)
         self.assertNotIn("operator_claim_token", body)
 
+    def test_windows_bootstrap_bundles_native_client_and_relay_without_credentials(self):
+        app = CONSOLE.Application(self.settings)
+        captured, body = self.call(app, "/operator-client.ps1")
+        self.assertTrue(captured["status"].startswith("200"))
+        self.assertIn("$script:ClientSource", body)
+        self.assertIn("$script:RelaySource", body)
+        self.assertNotIn("operator_claim_token", body)
+        self.assertNotIn("-GrantJson '", body)
+        self.assertIn(("Cache-Control", "no-store"), captured["headers"])
+        self.assertIn(("X-Content-Type-Options", "nosniff"), captured["headers"])
+
+    def test_windows_operator_is_independent_of_customer_platform(self):
+        app = CONSOLE.Application(self.settings)
+        session_id, csrf = app.store.new_session("alice", "Alice")
+        for platform in ("linux", "windows"):
+            created = {
+                "id": "012345abcdef", "token": "legacy-token", "auth_mode": "enrollment-key",
+                "customer_command": "customer-command", "operator_claim_token": "A" * 43,
+            }
+            body = f"customer=customer-one&platform={platform}&operator_platform=windows&csrf={csrf}"
+            with mock.patch.object(CONSOLE, "manager", return_value=json.dumps(created)) as broker:
+                captured, content = self.call(
+                    app, "/session", "POST", body, cookie="tsuite_support_session=" + session_id
+                )
+            self.assertTrue(captured["status"].startswith("200"))
+            self.assertIn("支持机执行命令（Windows PowerShell）", content)
+            self.assertIn("operator-client.ps1", content)
+            self.assertIn("-MaximumRedirection 0", content)
+            self.assertIn("-GrantJson", content)
+            self.assertNotIn("python3 -c", content)
+            self.assertEqual("--platform" in broker.call_args.args, platform == "windows")
+
+    def test_invalid_operator_platform_does_not_create_a_session(self):
+        app = CONSOLE.Application(self.settings)
+        session_id, csrf = app.store.new_session("alice", "Alice")
+        with mock.patch.object(CONSOLE, "manager") as broker:
+            captured, _ = self.call(
+                app, "/session", "POST", f"customer=customer-one&operator_platform=bad&csrf={csrf}",
+                cookie="tsuite_support_session=" + session_id,
+            )
+        self.assertTrue(captured["status"].startswith("400"))
+        broker.assert_not_called()
+
     def test_authenticated_creation_shows_two_commands_with_no_manual_id_prompt(self):
         app = CONSOLE.Application(self.settings)
         session_id, csrf = app.store.new_session("alice", "Alice")

@@ -75,12 +75,13 @@ Host Key 和专用 bridge key 调用堡垒机，bridge key 不能获得普通 Sh
 页面、bridge、broker 和 CLI 的用途校验同步放宽，填写时仍限制为最多 200 个可见字符；关闭原因仍必填。
 首页只展示尚未结束的会话及对应客户环境，统计也只计这些会话；已关闭/已过期记录保留供详情及后台审计查询。
 
-## 任意 Linux 支持机接入
+## 任意 Linux / Windows 支持机接入
 
 网页创建会话时同时显示客户执行命令和支持机执行命令，两条命令绑定同一个已经生成的完整
 会话 ID，并使用独立凭据。先执行客户命令，再在支持机执行支持命令即可；支持机先执行时会
 自动等待客户接入。支持机无需再次登录 GitHub，无需到部署控制机的 SSH 权限，也无需手工
-输入会话 ID、生成密钥或修改 SSH 配置。支持机需要 Python 3、OpenSSH Client、curl 和可用终端。
+输入会话 ID、生成密钥或修改 SSH 配置。创建页的“客户机操作系统”与“支持机操作系统”独立选择；
+Windows 支持机可维护 Linux 或 Windows 客户机。Linux 支持机需要 Python 3、OpenSSH Client、curl 和可用终端。
 
 授权请求经 `https://edge.trinfo.net/support/operator-claim` 转到控制机；终端输入输出直接经
 Edge 的受限 SSH 代理到客户，不经过控制机。公开 `/support/operator-client` 只提供通用程序，
@@ -111,6 +112,52 @@ python3 ~/.config/tsuite-support/portable/SESSION_ID/support.py --resume 'hostna
 本机后台清理程序每 30 秒核对会话状态，确认结束或超过最后确认租约时删除本次会话目录。
 网络不可用时按最后确认期限清理，不自行续期；支持机休眠或进程退出会延迟本机文件删除，
 但服务端到期/撤销仍生效。如已领取授权而客户没有接入，授权随客户领取窗口结束。
+
+### 原生 Windows PowerShell / OpenSSH 支持机
+
+在创建页将“支持机操作系统”选为 **Windows（原生 PowerShell / OpenSSH）**，在支持机执行生成的
+PowerShell 命令。无需 WSL、Python、PuTTY、控制机登录权限或管理员权限。前置条件是 64 位
+Windows PowerShell 5.1 或 PowerShell 7，以及 Windows 10 1809+、Windows 11 或 Windows Server 2019+。
+OpenSSH Client 必须提供同目录下的 `ssh.exe` 和 `ssh-keygen.exe`；未安装时先通过 Windows 可选功能
+安装客户端。不需要在支持机安装 OpenSSH Server。Server 2016 仍可作为客户机，不纳入原生支持机范围。
+
+Windows AI 首次执行网页命令时，在末尾追加 `-Command 'hostname'`，避免进入交互终端。
+授权领取后，工具输出本机再次连接命令，例如：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\TSuiteSupport\portable\SESSION_ID\support.ps1" -Mode Resume -Command 'hostname'
+# Linux 客户机命令由远端 Shell 执行；Windows 客户机命令自动编码给 PowerShell。
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\TSuiteSupport\portable\SESSION_ID\support.ps1" -Mode Resume -Command 'Get-Service sshd'
+# 人工交互时省略 -Command，需实际 Windows 控制台（非 ISE / 重定向终端）。
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\TSuiteSupport\portable\SESSION_ID\support.ps1" -Mode Resume
+```
+
+AI 应使用独立 PowerShell 进程执行再次连接命令，按进程退出码判断成功；标准输出与错误输出分别返回，
+输入和输出按字节转发。首次下载脚本在当前 PowerShell 中运行时也设置 `$LASTEXITCODE`。
+交互连接使用 Windows ConPTY，转发真实输入、Ctrl+C 和窗口尺寸。输入及发起命令会触发活动上报；
+输出、任务持续运行、SSH keepalive 和后台状态查询均不延长租约。
+
+公开 `/support/operator-client.ps1` 只提供通用 PowerShell 与 C# 终端程序，不包含会话凭据。客户端用
+HTTPS POST 领取既有会话专属证书，拒绝重定向，并保持 Edge 与客户 Host Key 的严格固定。每会话目录
+仅当前 Windows 用户可访问；私钥不出本机，领取凭据不写入文件或子进程参数。Windows 的支持命令同样
+会进入 PowerShell 历史，不得分享。领取失败且无法恢复证书时，关闭旧会话后新建，不重用授权。
+本机路径拒绝 reparse point 和 `%`、`!` 等可被代理命令 Shell 展开的字符。
+
+后台清理每 30 秒查询状态，并持久保存确认过的最新期限。关闭、撤销或最后确认期限到期时删除本机会话
+目录；网络故障不制造新期限。休眠或清理进程被终止会延迟本机删除，服务端租约与撤销仍生效。
+
+兼容影响：新增公开下载地址与创建表单 `operator_platform`，缺省 `linux`；原客户 `platform`、领取接口、
+CA/会话结构及 Linux 接入命令保持兼容。部署时更新控制机 console 和两个 Windows operator 文件并重启
+console 服务；安装器已包含这些文件。不需要为本次客户端扩展修改 Edge/客户的既有 portable 协议。
+已领取的 Linux 授权不能再用 Windows 领取；切换支持机需新建会话。
+
+验证：`python3 -m unittest discover -s support-session/tests -p 'test_*.py'` 验证网页与既有授权；
+`powershell.exe -NoProfile -File support-session/tests/test_windows_operator.ps1` 在隔离目录验证原生权限、
+真实 keygen、带空格路径、SSH 配置、命令编码、二进制转发、退出码、超时和清理。
+Windows CI 已纳入此测试。Linux 上 pwsh 可验证语法、配置和命令转发，但不能代替真实 Windows 上的
+ConPTY、证书经 Edge 登录、持续输入续期与关闭清理验收；发布前仍需完成这些系统集成验证。
+具备 sudo 的 Linux 测试机还可运行 `python3 support-session/tests/verify_portable_ssh.py --operator-pwsh
+<pwsh路径>`，用两个隔离 sshd 验证 PowerShell/C# 构造的证书连接、Edge 代理与主机密钥拒绝。
 
 兼容影响：create 结果新增 `operator_claim_token`（只在创建返回），会话及 enrollment 增加
 `portable_operator`；原 ID、原有命令和字段保持兼容。公司旧 CLI 创建的会话默认不启用 CA。

@@ -5,11 +5,15 @@ on:
       - main
     paths:
       - 'support-session/customer/*.ps1'
+      - 'support-session/operator/*.ps1'
+      - 'support-session/operator/*.cs'
       - 'support-session/tests/*.ps1'
       - '.github/workflows/support-windows.yml'
   pull_request:
     paths:
       - 'support-session/customer/*.ps1'
+      - 'support-session/operator/*.ps1'
+      - 'support-session/operator/*.cs'
       - 'support-session/tests/*.ps1'
       - '.github/workflows/support-windows.yml'
 permissions:
@@ -38,5 +42,6 @@ jobs:
           ./support-session/tests/test_windows_lease.ps1
           ./support-session/tests/test_windows_diagnostics.ps1
           ./support-session/tests/test_windows_permissions.ps1
+          ./support-session/tests/test_windows_operator.ps1
           ./support-session/tests/test_windows_openssh_auth.ps1 -OpenSshDirectory "$env:RUNNER_TEMP/OpenSSH-8.1/OpenSSH-Win64"
           ./support-session/tests/test_windows_openssh_auth.ps1 -OpenSshDirectory "$env:RUNNER_TEMP/OpenSSH-9.8.3/OpenSSH-Win64" -CompatibilityRuntime

@@ -223,13 +223,20 @@ sudo -n -u tsuite-support-operator \
 新会话从接入起按闲置窗口自动续期，仅实际标准输入和发起 `run` 的那一次命令输入计为活动；
 任务运行、输出、页面刷新与隧道保活均不续期。长任务无输入超过闲置窗口仍会到期。`expires_at` 会变化，不能按创建时缓存的期限删 key。新逻辑只作用于升级后重新创建的会话。
 
-### 任意 Linux 支持机到客户
+### 任意 Linux / Windows 支持机到客户
 
 支持机执行页面生成的支持命令即可，完整会话 ID 已绑定在凭据中。工具自动在支持机生成
 私钥，通过 Edge 的 HTTPS 接口向控制机领取一次性会话专属证书，然后直接经 Edge 的受限
 SSH 代理到客户；无需 GitHub 再登录或到控制机的 SSH 权限。客户未接入时自动等待。
 凭据默认 15 分钟内领取且仅能领取一次，必须像密码一样保管完整命令。再次连接使用工具
 输出的本机 `support.py --resume` 命令；支持机不保存控制机或 Edge 的长期私钥。
+
+Windows 支持机在创建页独立选择“支持机操作系统 = Windows”，使用原生 64 位 PowerShell 5.1/7
+和 OpenSSH Client，无需 WSL/Python。AI 首次执行网页支持命令时追加 `-Command 'hostname'`；
+再次连接通过独立 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <本机会话目录>/support.ps1
+-Mode Resume -Command '<远端命令>'` 进程执行，并检查退出码。Linux 客户命令传给远端 Shell，Windows
+客户命令自动以 PowerShell UTF-16LE 编码执行。支持机与客户机系统选项独立；客户命令仍按客户机系统生成。
+Windows 原生支持机要求 Windows 10 1809+ / Windows 11 / Server 2019+；详细生命周期和验收见专项说明。
 
 支持机的真实输入沿用原活动上报机制，状态轮询不续期。网页普通关闭仍由控制机原有独立
 operator key 确认客户清理，随后撤销 Edge CA 信任和隧道；支持机的本地清理程序按会话状态和
