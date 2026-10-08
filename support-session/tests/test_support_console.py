@@ -285,7 +285,7 @@ class SupportConsoleTest(unittest.TestCase):
 		})) as manager:
 			captured, _ = self.call(app, "/session", "POST", f"csrf={csrf}&customer=customer-one", f"tsuite_support_session={session_id}")
 		self.assertTrue(captured["status"].startswith("200"))
-		manager.assert_called_once_with("create", "customer-one", "--created-by", "alice", "--purpose", "")
+		manager.assert_called_once_with("create", "customer-one", "--created-by", "alice", "--purpose", "", "--platform", "pending")
 
 
 	def test_detail_localizes_fields_values_and_destructive_action(self):
@@ -356,11 +356,10 @@ class SupportConsoleTest(unittest.TestCase):
 		})) as manager:
 			captured, content = self.call(app, "/session", "POST", f"csrf={csrf}&customer=customer-one&purpose=upgrade-srm", f"tsuite_support_session={session_id}")
 		self.assertTrue(captured["status"].startswith("200"))
-		manager.assert_called_once_with("create", "customer-one", "--created-by", "alice", "--purpose", "upgrade-srm")
-		self.assertIn("do-not-persist", content)
+		manager.assert_called_once_with("create", "customer-one", "--created-by", "alice", "--purpose", "upgrade-srm", "--platform", "pending")
+		self.assertNotIn("do-not-persist", content)
 		self.assertIn('data-copy-target="customer-command"', content)
-		self.assertIn('data-copy-target="support-token"', content)
-		self.assertIn('id="support-token" class="secret token"', content)
+		self.assertNotIn('id="support-token" class="secret token"', content)
 		self.assertIn('navigator.clipboard.writeText(target.textContent)', content)
 		self.assertNotIn("#fff7ed", content)
 		self.assertNotIn("#eff6ff", content)

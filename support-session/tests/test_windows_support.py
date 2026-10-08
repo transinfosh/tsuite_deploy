@@ -5,6 +5,7 @@ import json
 import subprocess
 import time
 import unittest
+import urllib.parse
 from unittest import mock
 
 import test_support_session as sessions
@@ -98,6 +99,23 @@ class WindowsSessionTest(unittest.TestCase):
 				SUPPORT.create_session(self.store, 'windows-one', sessions.PUBLIC_KEY, 'alice', 'upgrade', 'windows')
 		create.assert_not_called()
 
+	def test_pending_session_can_select_windows_before_enrollment_and_locks_after(self):
+		for name in ('bootstrap.ps1', 'windows-client.ps1'):
+			self.settings.bootstrap_path.with_name(name).write_bytes((sessions.ROOT / 'customer' / name).read_bytes())
+		with mock.patch.object(SUPPORT, 'create_tunnel_identity', return_value=('test-user', 'private', 'key')), \
+			mock.patch.object(SUPPORT, 'create_key_pair', return_value=('private', sessions.PUBLIC_KEY)), \
+			mock.patch.object(SUPPORT, 'chown_to_user'), mock.patch.object(SUPPORT, 'allocate_port', return_value=22000), \
+			mock.patch.object(SUPPORT, 'rewrite_enrollment_authorized_keys'):
+			session, _ = SUPPORT.create_session(self.store, 'windows-one', sessions.PUBLIC_KEY, 'alice', '', 'pending')
+		self.assertEqual(session['platform'], 'pending')
+		updated = SUPPORT.set_customer_platform(self.store, session['id'], 'windows')
+		self.assertEqual(updated['platform'], 'windows')
+		self.assertTrue(updated['customer_command'].startswith('powershell.exe'))
+		with mock.patch.object(SUPPORT, 'rewrite_tunnel_expiry'), mock.patch.object(SUPPORT, 'chown_to_user'):
+			SUPPORT.enroll(self.store, '', 'a' * 32, sessions.PUBLIC_KEY, session['id'], key_authenticated=True)
+		with self.assertRaisesRegex(SUPPORT.SupportError, '不能再切换'):
+			SUPPORT.set_customer_platform(self.store, session['id'], 'linux')
+
 	def test_legacy_enrollment_defaults_to_linux(self):
 		token = sessions.SupportSessionTest.save_issued_session(self)
 		self.assertEqual(SUPPORT.enroll(self.store, token, 'a' * 32, sessions.PUBLIC_KEY)['platform'], 'linux')
@@ -116,6 +134,14 @@ class WindowsBrokerTest(unittest.TestCase):
 		self.assertEqual(json.loads(action.call_args.kwargs['input_text'])['platform'], 'windows')
 		state = REMOTE.session_state_path(self.settings, created['id']).read_text()
 		self.assertNotIn('DO-NOT-STORE', state)
+
+	def test_set_platform_updates_bastion_through_restricted_bridge_command(self):
+		request = io.TextIOWrapper(io.BytesIO(b'{"platform":"windows"}\n'))
+		with mock.patch.dict(console.BASTION_ACTION.os.environ, {'SSH_ORIGINAL_COMMAND': 'set-platform 012345abcdef'}), \
+			mock.patch.object(console.BASTION_ACTION.sys, 'stdin', request), \
+			mock.patch.object(console.BASTION_ACTION, 'run_manager', return_value=0) as manager:
+			console.BASTION_ACTION.main(['--forced'])
+		self.assertEqual(manager.call_args.args, ('set-platform', '012345abcdef', 'windows', '--json'))
 
 	def test_windows_close_confirms_cleanup_before_revoking_and_preserves_failed_session(self):
 		for returncode, output, confirmed in (
@@ -163,20 +189,26 @@ class WindowsConsoleTest(unittest.TestCase):
 	tearDown = console.SupportConsoleTest.tearDown
 	call = console.SupportConsoleTest.call
 
-	def test_windows_selection_reaches_broker_and_invalid_platform_is_rejected(self):
+	def test_customer_platform_is_selected_after_creation_and_then_sent_to_broker(self):
 		app = console.CONSOLE.Application(self.settings)
 		session_id, csrf = app.store.new_session('alice', 'Alice')
 		cookie = f'tsuite_support_session={session_id}'
-		body = f'csrf={csrf}&customer=windows-one&purpose=maintenance&platform=windows'
-		with mock.patch.object(console.CONSOLE, 'manager', return_value=json.dumps({
-			'id': '012345abcdef', 'token': 'secret', 'customer_command': 'powershell.exe test',
-		})) as manager:
-			captured, content = self.call(app, '/session', 'POST', body, cookie)
+		created = {'id': '012345abcdef', 'token': 'secret', 'platform': 'pending',
+			'operator_claim_token': 'A' * 43}
+		configured = {'id': '012345abcdef', 'platform': 'windows', 'customer_command': 'powershell.exe test'}
+		with mock.patch.object(console.CONSOLE, 'manager', side_effect=[json.dumps(created), json.dumps(configured)]) as manager:
+			captured, content = self.call(app, '/session', 'POST', f'csrf={csrf}&customer=windows-one&purpose=maintenance', cookie)
+			self.assertTrue(captured['status'].startswith('200'))
+			self.assertIn('name="platform"', content)
+			grant = json.dumps({'id': '012345abcdef', 'token': 'A' * 43, 'url': self.settings.public_url}, separators=(',', ':'))
+			body = urllib.parse.urlencode({'csrf': csrf, 'customer': 'windows-one', 'purpose': 'maintenance',
+				'operator_platform': 'linux', 'grant': grant, 'platform': 'windows'})
+			captured, content = self.call(app, '/session/012345abcdef/platform', 'POST', body, cookie)
 			self.assertTrue(captured['status'].startswith('200'))
 			self.assertIn('管理员 PowerShell', content)
-			self.assertEqual(manager.call_args.args[-2:], ('--platform', 'windows'))
+			self.assertEqual(manager.call_args_list[-1].args, ('set-platform', '012345abcdef', 'windows'))
 			manager.reset_mock()
-			captured, _ = self.call(app, '/session', 'POST', body.replace('platform=windows', 'platform=invalid'), cookie)
+			captured, _ = self.call(app, '/session/012345abcdef/platform', 'POST', body.replace('platform=windows', 'platform=invalid'), cookie)
 			self.assertTrue(captured['status'].startswith('400'))
 			manager.assert_not_called()
 

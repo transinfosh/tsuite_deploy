@@ -705,6 +705,35 @@ def operator_ai_instructions(
 	)
 
 
+def operator_command(public_url: str, grant: str, operator_platform: str) -> tuple[str, str, str]:
+	if operator_platform == "windows":
+		url = (public_url + "/operator-client.ps1").replace("'", "''")
+		command = "$ErrorActionPreference='Stop'; [Net.ServicePointManager]::SecurityProtocol=[Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; $client=(Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 -Uri '" + url + "').Content; & ([scriptblock]::Create($client)) -Mode Claim -GrantJson '" + grant.replace("'", "''") + "'"
+		return command, "Windows PowerShell", "支持机需 64 位 PowerShell 和 OpenSSH Client，无需管理员权限、WSL 或 Python。AI 首次执行时在命令末尾追加 <code>-Command 'hostname'</code>；后续使用工具输出的 Resume 命令。"
+	command = "printf '%s\\n' " + shlex.quote(grant) + ' | python3 -c "$(curl -fsSL --proto =https --tlsv1.2 ' + shlex.quote(public_url + "/operator-client") + ')"'
+	return command, "Linux 终端", ""
+
+
+def configured_session_content(created: dict[str, Any], csrf: str, customer: str, purpose: str,
+		operator_platform: str, grant: str, public_url: str) -> str:
+	platform = str(created.get("platform", "pending"))
+	command, operator_label, operator_hint = operator_command(public_url, grant, operator_platform)
+	operator_section = '<div class="secret-section"><div class="secret-heading"><h2>支持机执行命令（' + operator_label + '）</h2><button type="button" class="copy-button" data-copy-target="operator-command">复制</button></div><div id="operator-command" class="secret">' + html.escape(command) + '</div><p class="muted">自动生成本机密钥并领取一次性授权，无需登录 GitHub 或部署控制机。客户尚未接入时自动等待。请勿分享此命令。' + operator_hint + '</p></div>'
+	selector = f'''<form class="create-form" method="post" action="/support/session/{html.escape(str(created["id"]))}/platform">
+<input type="hidden" name="csrf" value="{html.escape(csrf)}"><input type="hidden" name="customer" value="{html.escape(customer)}">
+<input type="hidden" name="purpose" value="{html.escape(purpose)}"><input type="hidden" name="operator_platform" value="{html.escape(operator_platform)}">
+<input type="hidden" name="grant" value="{html.escape(grant)}"><label>被控机操作系统<select name="platform"><option value="linux"{" selected" if platform == "linux" else ""}>Linux</option><option value="windows"{" selected" if platform == "windows" else ""}>Windows（Server 2016+ / Windows 10/11）</option></select></label>
+<button class="primary">{("更新系统并重新生成命令" if platform in ("linux", "windows") else "生成接入命令")}</button></form>'''
+	if platform == "pending":
+		return f'''<header><h1>会话已创建</h1><a href="/support/">返回会话列表</a></header><section class="card"><p>会话 ID：<code>{html.escape(str(created["id"]))}</code>。先选择被控机系统，再把对应命令发给客户。</p>{selector}{operator_section}</section>'''
+	customer_title = "管理员 PowerShell" if platform == "windows" else "Linux 终端"
+	ai_text = operator_ai_instructions(customer, purpose, str(created["id"]), operator_platform, platform, command)
+	ai_section = '<div class="secret-section"><div class="secret-heading"><h2>交给 AI 的操作说明</h2><button type="button" class="copy-button" data-copy-target="ai-instructions">复制</button></div><div id="ai-instructions" class="secret">' + html.escape(ai_text) + '</div><p class="muted">复制给 AI，在末尾补充操作任务。含一次性授权，请勿公开分享。</p></div>'
+	return f'''<header><h1>支持会话已创建</h1><a href="/support/">返回会话列表</a></header><section class="card"><p>会话 ID：<code>{html.escape(str(created["id"]))}</code>。客户接入前可切换被控机系统。</p>{selector}
+<div class="secret-section"><div class="secret-heading"><h2>客户执行命令（{customer_title}）</h2><button type="button" class="copy-button" data-copy-target="customer-command">复制</button></div><div id="customer-command" class="secret">{html.escape(str(created.get("customer_command", "")))}</div></div>
+{operator_section}{ai_section}<p class="muted">请通过安全渠道发送客户命令；命令中的链接就是接入凭据，默认 15 分钟有效，无需另输会话码。</p></section>'''
+
+
 class Application:
 	def __init__(self, settings: Settings):
 		self.settings = settings
@@ -832,7 +861,7 @@ class Application:
 		users_link = '<a class="button" href="/support/users">用户管理</a>' if bool(session["is_admin"]) else ""
 		content = f"""<header><h1>TSuite 支持管理</h1><div class=\"detail-actions\">{users_link}<form method=\"post\" action=\"/support/logout\"><input type=\"hidden\" name=\"csrf\" value=\"{html.escape(str(session['csrf']))}\"><button>退出 {html.escape(str(session['login']))}</button></form></div></header>
 <section class=\"card\"><h2>新建支持会话</h2><p class=\"muted\">为同一台客户机器使用固定的环境标识，例如 <code>dtaut-srm-prod-01</code>。每次连接都会自动生成新的完整会话 ID。</p>
-<form class=\"create-form\" method=\"post\" action=\"/support/session\"><input type=\"hidden\" name=\"csrf\" value=\"{html.escape(str(session['csrf']))}\"><label>客户环境标识<input name=\"customer\" required autocomplete=\"off\" placeholder=\"例如 dtaut-srm-prod-01\" pattern=\"[a-z0-9][a-z0-9-]{{0,47}}\"></label><label>支持用途（可选）<input name=\"purpose\" maxlength=\"200\" autocomplete=\"off\" placeholder=\"例如升级 SRM 至 0.1.10\"></label><label>客户机操作系统<select name=\"platform\"><option value=\"linux\">Linux</option><option value=\"windows\">Windows（Server 2016+ / Windows 10/11）</option></select></label><label>支持机操作系统<select name=\"operator_platform\"><option value=\"linux\">Linux</option><option value=\"windows\">Windows（原生 PowerShell / OpenSSH）</option></select></label><button class=\"primary\">创建会话</button></form>
+<form class=\"create-form\" method=\"post\" action=\"/support/session\"><input type=\"hidden\" name=\"csrf\" value=\"{html.escape(str(session['csrf']))}\"><label>客户环境标识<input name=\"customer\" required autocomplete=\"off\" placeholder=\"例如 dtaut-srm-prod-01\" pattern=\"[a-z0-9][a-z0-9-]{{0,47}}\"></label><label>支持用途（可选）<input name=\"purpose\" maxlength=\"200\" autocomplete=\"off\" placeholder=\"例如升级 SRM 至 0.1.10\"></label><label>支持机操作系统<select name=\"operator_platform\"><option value=\"linux\">Linux</option><option value=\"windows\">Windows（原生 PowerShell / OpenSSH）</option></select></label><button class=\"primary\">创建会话</button></form>
 <div id=\"session-summary\" class=\"summary\" aria-live=\"polite\"><span class=\"loading-label\">正在读取会话数据…</span></div></section>
 <section><h2>客户环境与会话</h2><div id=\"session-groups\" class=\"group-list\" aria-live=\"polite\" aria-busy=\"true\"><div class=\"card loading\"><span class=\"spinner\"></span><span>正在加载会话列表…</span></div></div></section>"""
 		return self.response(start_response, HTTPStatus.OK, page("支持管理", content))
@@ -1024,45 +1053,55 @@ class Application:
 				purpose = form.get("purpose", "").strip()
 				if len(purpose) > 200 or any(ord(character) < 32 for character in purpose):
 					raise ConsoleError("支持用途最多为 200 个可见字符")
-				platform = form.get("platform", "linux")
-				if platform not in ("linux", "windows"):
-					raise ConsoleError("请选择 Linux 或受支持的 Windows")
+				platform = "pending"
 				operator_platform = form.get("operator_platform", "linux")
 				if operator_platform not in ("linux", "windows"):
 					raise ConsoleError("请选择支持机的 Linux 或 Windows 操作系统")
-				platform_args = ("--platform", platform) if platform == "windows" else ()
 				created = json.loads(manager(
 					"create", customer,
 					"--created-by", str(session["login"]),
 					"--purpose", purpose,
-					*platform_args,
+					"--platform", "pending",
 				))
 				if not isinstance(created, dict) or not isinstance(created.get("token"), str):
 					raise ConsoleError("支持会话服务返回无效数据")
-				operator_section = ""
-				ai_section = ""
-				if isinstance(created.get("operator_claim_token"), str):
-					grant = json.dumps({"id": created["id"], "token": created["operator_claim_token"], "url": self.settings.public_url}, separators=(",", ":"))
-					command = "printf '%s\n' " + shlex.quote(grant) + ' | python3 -c "$(curl -fsSL --proto =https --tlsv1.2 ' + shlex.quote(self.settings.public_url + "/operator-client") + ')"'
-					operator_label = "Linux 终端"
-					operator_hint = ""
-					if operator_platform == "windows":
-						url = (self.settings.public_url + "/operator-client.ps1").replace("'", "''")
-						command = "$ErrorActionPreference='Stop'; [Net.ServicePointManager]::SecurityProtocol=[Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; $client=(Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 -Uri '" + url + "').Content; & ([scriptblock]::Create($client)) -Mode Claim -GrantJson '" + grant.replace("'", "''") + "'"
-						operator_label = "Windows PowerShell"
-						operator_hint = "支持机需 64 位 PowerShell 和 OpenSSH Client，无需管理员权限、WSL 或 Python。AI 首次执行时在命令末尾追加 <code>-Command 'hostname'</code>；后续使用工具输出的 Resume 命令。"
-					operator_section = '<div class="secret-section"><div class="secret-heading"><h2>支持机执行命令（' + operator_label + '）</h2><button type="button" class="copy-button" data-copy-target="operator-command">复制</button></div><div id="operator-command" class="secret">' + html.escape(command) + '</div><p class="muted">自动生成本机密钥并领取一次性授权，无需登录 GitHub 或部署控制机。客户尚未接入时自动等待。请勿分享此命令。' + operator_hint + '</p></div>'
-					ai_text = operator_ai_instructions(customer, purpose, str(created["id"]), operator_platform, platform, command)
-					ai_section = '<div class="secret-section"><div class="secret-heading"><h2>交给 AI 的操作说明</h2><button type="button" class="copy-button" data-copy-target="ai-instructions">复制</button></div><div id="ai-instructions" class="secret">' + html.escape(ai_text) + '</div><p class="muted">复制给 AI，在末尾补充操作任务。含一次性授权，请勿公开分享。</p></div>'
-				legacy_code = ""
-				if created.get("auth_mode") != "enrollment-key":
-					legacy_code = f'<div class="secret-section"><h2>一次性支持会话码</h2><button type="button" class="copy-button" data-copy-target="support-token">复制</button><div id="support-token" class="secret token">{html.escape(created["token"])}</div></div>'
-				instructions = ("请通过安全渠道发送客户命令；命令中的链接就是接入凭据，默认 15 分钟有效，无需另输会话码。"
-					if created.get("auth_mode") == "enrollment-key" else "请将命令和会话码通过两个独立安全渠道发送给客户。")
-				content = f"""<header><h1>支持会话已创建</h1><a href="/support/">返回会话列表</a></header><section class="card"><p>会话 ID：<code>{html.escape(str(created['id']))}</code>。以下内容仅显示一次，且不会被管理页面持久保存。</p>
-<div class="secret-section"><div class="secret-heading"><h2>客户执行命令（{"管理员 PowerShell" if platform == "windows" else "Linux 终端"}）</h2><button type="button" class="copy-button" data-copy-target="customer-command">复制</button></div><div id="customer-command" class="secret">{html.escape(str(created['customer_command']))}</div></div>
-{operator_section}{ai_section}{legacy_code}<p class="muted">{instructions}</p></section>"""
+				if not isinstance(created.get("operator_claim_token"), str):
+					if not isinstance(created.get("customer_command"), str):
+						raise ConsoleError("支持会话服务未返回支持机授权")
+					legacy_hint = "无需另输会话码。" if created.get("auth_mode") == "enrollment-key" else ""
+					content = f'''<header><h1>支持会话已创建</h1><a href="/support/">返回会话列表</a></header><section class="card"><p>会话 ID：<code>{html.escape(str(created.get("id", "")))}</code></p><div class="secret-section"><div class="secret-heading"><h2>客户执行命令</h2><button type="button" class="copy-button" data-copy-target="customer-command">复制</button></div><div id="customer-command" class="secret">{html.escape(created["customer_command"])}</div></div><p class="muted">此会话使用兼容接入方式。{legacy_hint}</p></section>'''
+					return self.response(start_response, HTTPStatus.OK, page("会话已创建", content))
+				grant = json.dumps({"id": created["id"], "token": created["operator_claim_token"], "url": self.settings.public_url}, separators=(",", ":"))
+				content = configured_session_content(created, str(session["csrf"]), customer, purpose,
+					operator_platform, grant, self.settings.public_url)
 				return self.response(start_response, HTTPStatus.OK, page("会话已创建", content))
+			if path.startswith("/session/") and path.endswith("/platform") and method == "POST":
+				target = path.removeprefix("/session/").removesuffix("/platform")
+				if not target or "/" in target:
+					raise ConsoleError("会话 ID 无效")
+				form = form_data(environ)
+				if not secrets.compare_digest(form.get("csrf", ""), str(session["csrf"])):
+					raise ConsoleError("请求校验失败，请刷新页面后重试")
+				platform = form.get("platform", "")
+				customer = form.get("customer", "")
+				purpose = form.get("purpose", "")
+				operator_platform = form.get("operator_platform", "")
+				grant = form.get("grant", "")
+				if platform not in ("linux", "windows") or operator_platform not in ("linux", "windows"):
+					raise ConsoleError("请选择受支持的操作系统")
+				try:
+					grant_value = json.loads(grant)
+				except json.JSONDecodeError as error:
+					raise ConsoleError("支持机授权数据无效") from error
+				if not isinstance(grant_value, dict) or grant_value.get("id") != target or not isinstance(grant_value.get("token"), str):
+					raise ConsoleError("支持机授权与会话不匹配")
+				created = json.loads(manager("set-platform", target, platform))
+				if not isinstance(created, dict) or created.get("platform") != platform or not isinstance(created.get("customer_command"), str):
+					raise ConsoleError("支持会话服务未返回接入命令")
+				content = configured_session_content(created, str(session["csrf"]), customer, purpose,
+					operator_platform, grant, self.settings.public_url)
+				return self.response(start_response, HTTPStatus.OK, page("会话命令", content))
+
 			if path.startswith("/session/") and path.endswith("/close") and method == "POST":
 				target = path.removeprefix("/session/").removesuffix("/close")
 				if not target or "/" in target:

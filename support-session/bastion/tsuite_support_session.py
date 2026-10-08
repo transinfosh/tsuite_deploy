@@ -353,7 +353,7 @@ def create_session(
 		raise SupportError("客户标识仅允许小写字母、数字和连字符")
 	created_by = validate_created_by(created_by)
 	purpose = validate_purpose(purpose, allow_empty=True)
-	if platform not in {"linux", "windows"}:
+	if platform not in {"linux", "windows", "pending"}:
 		raise SupportError("客户操作系统无效")
 	settings = store.settings
 	settings.validate()
@@ -589,6 +589,8 @@ def enroll(store: SessionStore, token: str, nonce: str, customer_host_key: str, 
 			raise SupportError("会话码已过期")
 		if now >= session["expires_at"]:
 			raise SupportError("支持会话已过期")
+		if session.get("platform") == "pending":
+			raise SupportError("请先由支持人员选择客户机操作系统")
 		if session["status"] == "issued":
 			if session.get("idle_timeout_seconds"):
 				session["expires_at"] = now + session["idle_timeout_seconds"]
@@ -743,6 +745,8 @@ def customer_script(settings: Settings, session: dict[str, Any]) -> str:
 
 
 def customer_command(settings: Settings, session: dict[str, Any]) -> str:
+	if session.get("platform", "linux") == "pending":
+		raise SupportError("请先选择客户机操作系统")
 	download_id = session.get("download_id", "")
 	if not re.fullmatch(r"[A-Za-z0-9_-]{43}", download_id):
 		raise SupportError("下载标识无效")
@@ -754,6 +758,27 @@ def customer_command(settings: Settings, session: dict[str, Any]) -> str:
 			f"& ([scriptblock]::Create((New-Object Net.WebClient).DownloadString('{url}')))\""
 		)
 	return f"curl -fsS --proto '=https' --tlsv1.2 {shlex.quote(url)} | sudo bash"
+
+
+def set_customer_platform(store: SessionStore, session_id: str, platform: str) -> dict[str, Any]:
+	if platform not in {"linux", "windows"}:
+		raise SupportError("客户操作系统无效")
+	with store.locked():
+		session = store.load(session_id)
+		if session["status"] != "issued":
+			raise SupportError("客户已接入，不能再切换客户机操作系统")
+		if int(time.time()) >= int(session.get("expires_at", 0)):
+			raise SupportError("支持会话已过期")
+		if platform == "windows":
+			for name in ("bootstrap.ps1", "windows-client.ps1"):
+				if not store.settings.bootstrap_path.with_name(name).is_file():
+					raise SupportError("请先安装 Windows 客户脚本")
+		session["platform"] = platform
+		write_customer_script(store.settings, session)
+		store.save(session)
+		result = public_session(session)
+		result["customer_command"] = customer_command(store.settings, session)
+		return result
 
 
 def write_customer_script(settings: Settings, session: dict[str, Any]) -> None:
@@ -789,12 +814,16 @@ def build_parser() -> argparse.ArgumentParser:
 	create.add_argument("--operator-public-key", required=True)
 	create.add_argument("--created-by", required=True)
 	create.add_argument("--purpose", default="")
-	create.add_argument("--platform", choices=("linux", "windows"), default="linux")
+	create.add_argument("--platform", choices=("linux", "windows", "pending"), default="linux")
 	create.add_argument("--json", action="store_true")
 	create.add_argument("--portable-operator", action="store_true")
 	show = subparsers.add_parser("show")
 	show.add_argument("session_id")
 	show.add_argument("--json", action="store_true")
+	set_platform = subparsers.add_parser("set-platform")
+	set_platform.add_argument("session_id")
+	set_platform.add_argument("platform", choices=("linux", "windows"))
+	set_platform.add_argument("--json", action="store_true")
 	subparsers.add_parser("list")
 	close = subparsers.add_parser("close")
 	close.add_argument("session_id")
@@ -826,13 +855,17 @@ def main() -> int:
 				args.portable_operator,
 			)
 			result = public_session(session) | {"token": token}
-			result["customer_command"] = customer_command(settings, session)
+			if session.get("platform") != "pending":
+				result["customer_command"] = customer_command(settings, session)
 			print(json.dumps(result, ensure_ascii=False) if args.json else result["customer_command"])
 
 		elif args.command == "show":
 			result = public_session(store.load(args.session_id))
 			result["tunnel_reachable"] = port_listening("127.0.0.1", int(result["remote_port"]))
 			print(json.dumps(result, ensure_ascii=False) if args.json else json.dumps(result, ensure_ascii=False, indent=2))
+		elif args.command == "set-platform":
+			result = set_customer_platform(store, args.session_id, args.platform)
+			print(json.dumps(result, ensure_ascii=False) if args.json else result["customer_command"])
 		elif args.command == "list":
 			for session in store.all():
 				print(f"{session['id']}\t{session['customer']}\t{session['status']}\t{session['remote_port']}")

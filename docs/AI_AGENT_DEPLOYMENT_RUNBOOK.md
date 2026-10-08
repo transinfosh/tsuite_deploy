@@ -197,9 +197,9 @@ gh run watch --repo transinfosh/<repo> <run-id> --exit-status
 
 1. 运维人员打开 `https://edge.trinfo.net/support/`，使用获准的本地账号、密码和 TOTP 登录；GitHub 组织账号作为备用登录方式；
 2. 使用固定、可复用的客户环境标识，例如 `dtaut-srm-prod-01`；同一机器不要每次换名字；
-3. 点击“创建会话”；页面只显示一次客户执行命令和支持机执行命令，各自带独立随机凭据；
-4. 命令通过安全渠道交给客户；领取链接默认 15 分钟有效；
-5. 客户执行一条 `curl ... | sudo bash` 命令，无需另输会话码；
+3. 点击“创建会话”，然后在会话命令页选择被控机操作系统；客户接入前可以切换，接入后系统选择锁定；
+4. 将页面生成的客户执行命令通过安全渠道交给客户；领取链接默认 15 分钟有效；
+5. 客户执行页面提供的单条接入命令，无需另输会话码；
 6. 页面状态变为“已连接”后，记录完整 12 位会话 ID。
 
 页面不持久保存原始客户或支持机命令，这是安全设计，不是数据丢失。需要重发时关闭旧会话并
@@ -412,7 +412,7 @@ tsuite-support-operator-gc.timer
 
 控制机日常免密权限由 `/etc/sudoers.d/tsuite-deploy-operator` 限定，只允许：
 
-- 页面以 `tsuite-support-operator` broker 身份执行会话 `create`、`list`、`show`、普通 `close`；
+- 页面以 `tsuite-support-operator` broker 身份执行会话 `create`、接入前 `set-platform`、`list`、`show`、普通 `close`；
 - `adam` 以 broker 身份执行 `list`、`show`、带关闭人参数的普通 `close`、带原因的 `force-close`、
   `ssh` 和 `run`；
 - 精确重启 `nginx`、`tsuite-frpc`、`tsuite-support-console`、`tsuite-github-egress`。

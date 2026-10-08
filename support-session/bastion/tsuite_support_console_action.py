@@ -138,7 +138,7 @@ def read_create_request() -> dict[str, str]:
 		raise ActionError("支持用途最多为 200 个可见字符")
 	fields["purpose"] = purpose
 	platform = value.get("platform", "linux")
-	if platform not in ("linux", "windows"):
+	if platform not in ("linux", "windows", "pending"):
 		raise ActionError("客户操作系统无效")
 	fields["platform"] = platform
 	if type(value.get("portable_operator", False)) is not bool:
@@ -163,12 +163,21 @@ def read_close_request() -> dict[str, str]:
 	return fields
 
 
+def read_platform_request() -> dict[str, str]:
+	value = read_request()
+	if value.get("platform") not in {"linux", "windows"}:
+		raise ActionError("客户操作系统无效")
+	return {"platform": str(value["platform"])}
+
+
 def parser() -> argparse.ArgumentParser:
 	root = argparse.ArgumentParser(description=__doc__)
 	subparsers = root.add_subparsers(dest="action", required=True)
 	subparsers.add_parser("create")
 	show = subparsers.add_parser("show")
 	show.add_argument("session_id", type=session_id)
+	set_platform = subparsers.add_parser("set-platform")
+	set_platform.add_argument("session_id", type=session_id)
 	close = subparsers.add_parser("close")
 	close.add_argument("session_id", type=session_id)
 	subparsers.add_parser("list")
@@ -210,6 +219,9 @@ def main(arguments: list[str] | None = None) -> int:
 			"--mode", request["mode"],
 			"--reason", request["reason"],
 		)
+	if args.action == "set-platform":
+		request = read_platform_request()
+		return run_manager("set-platform", args.session_id, request["platform"], "--json")
 	return run_manager("list")
 
 
