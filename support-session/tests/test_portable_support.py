@@ -231,11 +231,13 @@ class PortableConsoleTest(unittest.TestCase):
                     with mock.patch.object(CONSOLE, "manager", side_effect=[json.dumps(created), json.dumps(configured)]) as broker:
                         captured, initial = self.call(app, "/session", "POST", body, cookie)
                         self.assertTrue(captured["status"].startswith("200"))
+                        self.assertIn('name="operator_platform"', initial)
                         self.assertIn('name="platform"', initial)
                         grant = json.dumps({"id": "012345abcdef", "token": "A" * 43,
                             "url": self.settings.public_url}, separators=(",", ":"))
+                        selected_operator = "windows" if operator == "linux" else "linux"
                         select_body = urllib.parse.urlencode({"csrf": csrf, "customer": "customer-one",
-                            "purpose": purpose, "operator_platform": operator, "grant": grant, "platform": platform})
+                            "purpose": purpose, "operator_platform": selected_operator, "grant": grant, "platform": platform})
                         captured, content = self.call(app, "/session/012345abcdef/platform", "POST", select_body, cookie)
                     self.assertTrue(captured["status"].startswith("200"))
                     self.assertIn('data-copy-target="ai-instructions"', content)
@@ -244,7 +246,13 @@ class PortableConsoleTest(unittest.TestCase):
                     prompt = html.unescape(match[1])
                     self.assertTrue(prompt.endswith("操作任务：\n" + purpose))
                     self.assertIn("A" * 43, prompt)
-                    self.assertIn("在你的本机 " + ("Windows" if operator == "windows" else "Linux"), prompt)
+                    self.assertIn("在你的本机 " + ("Windows" if selected_operator == "windows" else "Linux"), prompt)
+                    if selected_operator == "windows":
+                        self.assertIn("operator-client.ps1", content)
+                        self.assertIn("支持机执行命令（Windows PowerShell）", content)
+                    else:
+                        self.assertIn("python3 -c", content)
+                        self.assertIn("支持机执行命令（Linux 终端）", content)
                     self.assertIn("远端命令使用 " + ("PowerShell" if platform == "windows" else "Linux Shell") + " 语法", prompt)
                     self.assertEqual(broker.call_args_list[0].args, ("create", "customer-one", "--created-by", "alice", "--purpose", purpose, "--platform", "pending"))
                     self.assertEqual(broker.call_args_list[1].args, ("set-platform", "012345abcdef", platform))

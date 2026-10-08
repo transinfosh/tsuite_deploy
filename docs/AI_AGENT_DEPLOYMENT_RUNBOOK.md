@@ -231,7 +231,7 @@ SSH 代理到客户；无需 GitHub 再登录或到控制机的 SSH 权限。客
 凭据默认 15 分钟内领取且仅能领取一次，必须像密码一样保管完整命令。再次连接使用工具
 输出的本机 `support.py --resume` 命令；支持机不保存控制机或 Edge 的长期私钥。
 
-Windows 支持机在创建页独立选择“支持机操作系统 = Windows”，使用原生 64 位 PowerShell 5.1/7
+Windows 支持机在创建页或会话命令页选择“支持机操作系统 = Windows”，使用原生 64 位 PowerShell 5.1/7
 和 OpenSSH Client，无需 WSL/Python。AI 首次执行网页支持命令时追加 `-Command 'hostname'`；
 再次连接通过独立 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <本机会话目录>/support.ps1
 -Mode Resume -Command '<远端命令>'` 进程执行，并检查退出码。Linux 客户命令传给远端 Shell，Windows

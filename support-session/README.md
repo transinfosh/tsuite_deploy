@@ -77,10 +77,9 @@ Host Key 和专用 bridge key 调用堡垒机，bridge key 不能获得普通 Sh
 
 ## 任意 Linux / Windows 支持机接入
 
-网页创建会话后先选择被控机操作系统，再显示客户执行命令和支持机执行命令。被控机系统可在
-客户接入前切换；每次切换都会同步更新堡垒机配置和接入脚本，客户接入后系统选择锁定。
-两条命令绑定同一个已经生成的完整会话 ID，并使用独立凭据。支持机先执行时会自动等待客户
-接入。支持机系统仍在创建时选择；Windows 支持机可维护 Linux 或 Windows 客户机。Linux 支持机需要 Python 3、OpenSSH Client、curl 和可用终端。
+网页创建会话后可分别选择支持机和被控机操作系统，再显示对应的客户执行命令和支持机执行命令。
+被控机系统可在客户接入前切换；每次切换都会同步更新堡垒机配置和接入脚本，客户接入后系统选择锁定。
+支持机系统可在会话命令页切换；页面会重新生成支持机命令和 AI 操作说明。两条命令绑定同一个已经生成的完整会话 ID，并使用独立凭据。支持机先执行时会自动等待客户接入。Windows 支持机可维护 Linux 或 Windows 客户机。Linux 支持机需要 Python 3、OpenSSH Client、curl 和可用终端。
 
 选择被控机系统后，命令页同时提供可直接复制的“交给 AI 的操作说明”，根据支持机与客户机的四种系统组合生成。
 说明仅包含 AI 在支持机上的首次接入检查、后续远端命令调用方式及远端 Shell 语法，不包含客户侧接入步骤。
@@ -122,7 +121,7 @@ python3 ~/.config/tsuite-support/portable/SESSION_ID/support.py --resume 'hostna
 
 ### 原生 Windows PowerShell / OpenSSH 支持机
 
-在创建页将“支持机操作系统”选为 **Windows（原生 PowerShell / OpenSSH）**，在支持机执行生成的
+在会话命令页将“支持机操作系统”选为 **Windows（原生 PowerShell / OpenSSH）**，在支持机执行生成的
 PowerShell 命令。无需 WSL、Python、PuTTY、控制机登录权限或管理员权限。前置条件是 64 位
 Windows PowerShell 5.1 或 PowerShell 7，以及 Windows 10 1809+、Windows 11 或 Windows Server 2019+。
 OpenSSH Client 必须提供同目录下的 `ssh.exe` 和 `ssh-keygen.exe`；未安装时先通过 Windows 可选功能
