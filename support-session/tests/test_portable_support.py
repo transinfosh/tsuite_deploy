@@ -314,6 +314,8 @@ class PortableConsoleTest(unittest.TestCase):
         self.assertIn('id="customer-command"', content)
         self.assertIn("linux-customer-command", content)
         self.assertIn('name="platform"', content)
+        self.assertLess(content.index('id="customer-command"'), content.index('<select name="platform"'))
+        self.assertLess(content.index('id="operator-command"'), content.index('<select name="operator_platform"'))
         self.assertIn('action="/support/session/012345abcdef/platform"', content)
         self.assertEqual(broker.call_args_list[0].args, ("create", "customer-one", "--created-by", "alice", "--purpose", "", "--platform", "pending"))
         self.assertEqual(broker.call_args_list[1].args, ("set-platform", "012345abcdef", "linux"))

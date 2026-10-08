@@ -718,22 +718,32 @@ def configured_session_content(created: dict[str, Any], csrf: str, customer: str
 		operator_platform: str, grant: str, public_url: str) -> str:
 	platform = str(created.get("platform", "pending"))
 	command, operator_label, operator_hint = operator_command(public_url, grant, operator_platform)
-	operator_section = '<div class="secret-section"><div class="secret-heading"><h2>支持机执行命令（' + operator_label + '）</h2><button type="button" class="copy-button" data-copy-target="operator-command">复制</button></div><div id="operator-command" class="secret">' + html.escape(command) + '</div><p class="muted">自动生成本机密钥并领取一次性授权，无需登录 GitHub 或部署控制机。客户尚未接入时自动等待。请勿分享此命令。' + operator_hint + '</p></div>'
-	selector = f'''<form class="create-form" method="post" action="/support/session/{html.escape(str(created["id"]))}/platform">
-<input type="hidden" name="csrf" value="{html.escape(csrf)}"><input type="hidden" name="customer" value="{html.escape(customer)}">
-<input type="hidden" name="purpose" value="{html.escape(purpose)}"><input type="hidden" name="grant" value="{html.escape(grant)}">
-<input type="hidden" name="current_platform" value="{html.escape(platform)}"><input type="hidden" name="customer_command" value="{html.escape(str(created.get("customer_command", "")))}">
-<label>支持机操作系统<select name="operator_platform" onchange="this.form.requestSubmit()"><option value="linux"{" selected" if operator_platform == "linux" else ""}>Linux（Shell）</option><option value="windows"{" selected" if operator_platform == "windows" else ""}>Windows（PowerShell / OpenSSH）</option></select></label>
-<label>被控机操作系统<select name="platform" onchange="this.form.requestSubmit()"><option value="linux"{" selected" if platform == "linux" else ""}>Linux</option><option value="windows"{" selected" if platform == "windows" else ""}>Windows（Server 2016+ / Windows 10/11）</option></select></label>
-<noscript><button class="primary">更新命令</button></noscript></form>'''
+	session_id = html.escape(str(created["id"]))
+	hidden = (
+		f'<input type="hidden" name="csrf" value="{html.escape(csrf)}">'
+		f'<input type="hidden" name="customer" value="{html.escape(customer)}">'
+		f'<input type="hidden" name="purpose" value="{html.escape(purpose)}">'
+		f'<input type="hidden" name="grant" value="{html.escape(grant)}">'
+		f'<input type="hidden" name="current_platform" value="{html.escape(platform)}">'
+		f'<input type="hidden" name="customer_command" value="{html.escape(str(created.get("customer_command", "")))}">'
+	)
+	operator_selector = f'''<form class="create-form" method="post" action="/support/session/{session_id}/platform">
+{hidden}<input type="hidden" name="platform" value="{html.escape(platform)}">
+<label>支持机操作系统（支持机执行命令）<select name="operator_platform" onchange="this.form.requestSubmit()"><option value="linux"{" selected" if operator_platform == "linux" else ""}>Linux（Shell）</option><option value="windows"{" selected" if operator_platform == "windows" else ""}>Windows（PowerShell / OpenSSH）</option></select></label>
+<noscript><button class="primary">更新支持机命令</button></noscript></form>'''
+	customer_selector = f'''<form class="create-form" method="post" action="/support/session/{session_id}/platform">
+{hidden}<input type="hidden" name="operator_platform" value="{html.escape(operator_platform)}">
+<label>被控机操作系统（客户执行命令）<select name="platform" onchange="this.form.requestSubmit()"><option value="linux"{" selected" if platform == "linux" else ""}>Linux</option><option value="windows"{" selected" if platform == "windows" else ""}>Windows（Server 2016+ / Windows 10/11）</option></select></label>
+<noscript><button class="primary">更新客户命令</button></noscript></form>'''
+	operator_section = '<div class="secret-section"><div class="secret-heading"><h2>支持机执行命令（' + operator_label + '）</h2><button type="button" class="copy-button" data-copy-target="operator-command">复制</button></div><div id="operator-command" class="secret">' + html.escape(command) + '</div><p class="muted">自动生成本机密钥并领取一次性授权，无需登录 GitHub 或部署控制机。客户尚未接入时自动等待。请勿分享此命令。' + operator_hint + '</p>' + operator_selector + '</div>'
 	if platform == "pending":
-		return f'''<header><h1>会话已创建</h1><a href="/support/">返回会话列表</a></header><section class="card"><p>会话 ID：<code>{html.escape(str(created["id"]))}</code>。选择支持机和被控机系统，页面会重新生成对应命令。</p>{selector}{operator_section}</section>'''
+		return f'''<header><h1>会话已创建</h1><a href="/support/">返回会话列表</a></header><section class="card"><p>会话 ID：<code>{session_id}</code>。请先选择被控机操作系统。</p>{operator_section}{customer_selector}</section>'''
 	customer_title = "管理员 PowerShell" if platform == "windows" else "Linux 终端"
 	ai_text = operator_ai_instructions(customer, purpose, str(created["id"]), operator_platform, platform, command)
 	ai_section = '<div class="secret-section"><div class="secret-heading"><h2>交给 AI 的操作说明</h2><button type="button" class="copy-button" data-copy-target="ai-instructions">复制</button></div><div id="ai-instructions" class="secret">' + html.escape(ai_text) + '</div><p class="muted">复制给 AI，在末尾补充操作任务。含一次性授权，请勿公开分享。</p></div>'
-	return f'''<header><h1>支持会话已创建</h1><a href="/support/">返回会话列表</a></header><section class="card"><p>会话 ID：<code>{html.escape(str(created["id"]))}</code>。客户命令默认按 Linux 生成；切换系统选项会自动更新命令。被控机接入前可切换系统。</p>{selector}
-<div class="secret-section"><div class="secret-heading"><h2>客户执行命令（{customer_title}）</h2><button type="button" class="copy-button" data-copy-target="customer-command">复制</button></div><div id="customer-command" class="secret">{html.escape(str(created.get("customer_command", "")))}</div></div>
-{operator_section}{ai_section}<p class="muted">请通过安全渠道发送客户命令；命令中的链接就是接入凭据，默认 15 分钟有效，无需另输会话码。</p></section>'''
+	customer_section = f'''<div class="secret-section"><div class="secret-heading"><h2>客户执行命令（{customer_title}）</h2><button type="button" class="copy-button" data-copy-target="customer-command">复制</button></div><div id="customer-command" class="secret">{html.escape(str(created.get("customer_command", "")))}</div>{customer_selector}</div>'''
+	return f'''<header><h1>支持会话已创建</h1><a href="/support/">返回会话列表</a></header><section class="card"><p>会话 ID：<code>{session_id}</code>。客户命令默认按 Linux 生成；在命令下方切换被控机系统会自动更新。被控机接入前可切换系统。</p>
+{customer_section}{operator_section}{ai_section}<p class="muted">请通过安全渠道发送客户命令；命令中的链接就是接入凭据，默认 15 分钟有效，无需另输会话码。</p></section>'''
 
 
 class Application:
