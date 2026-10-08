@@ -196,14 +196,16 @@ class WindowsConsoleTest(unittest.TestCase):
 		created = {'id': '012345abcdef', 'token': 'secret', 'platform': 'pending',
 			'operator_claim_token': 'A' * 43}
 		configured = {'id': '012345abcdef', 'platform': 'windows', 'customer_command': 'powershell.exe test'}
-		with mock.patch.object(console.CONSOLE, 'manager', side_effect=[json.dumps(created), json.dumps({'platform': 'pending'}), json.dumps(configured)]) as manager:
+		default = {'id': '012345abcdef', 'platform': 'linux', 'customer_command': 'linux-command'}
+		with mock.patch.object(console.CONSOLE, 'manager', side_effect=[json.dumps(created), json.dumps(default), json.dumps({'platform': 'linux'}), json.dumps(configured)]) as manager:
 			captured, content = self.call(app, '/session', 'POST', f'csrf={csrf}&customer=windows-one&purpose=maintenance', cookie)
 			self.assertTrue(captured['status'].startswith('200'))
 			self.assertIn('name="platform"', content)
+			self.assertIn('id="customer-command"', content)
 			grant = json.dumps({'id': '012345abcdef', 'token': 'A' * 43, 'url': self.settings.public_url}, separators=(',', ':'))
 			body = urllib.parse.urlencode({'csrf': csrf, 'customer': 'windows-one', 'purpose': 'maintenance',
 				'operator_platform': 'linux', 'grant': grant, 'platform': 'windows',
-				'current_platform': 'pending', 'customer_command': ''})
+				'current_platform': 'linux', 'customer_command': 'linux-command'})
 			captured, content = self.call(app, '/session/012345abcdef/platform', 'POST', body, cookie)
 			self.assertTrue(captured['status'].startswith('200'))
 			self.assertIn('管理员 PowerShell', content)

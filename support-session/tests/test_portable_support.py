@@ -192,7 +192,8 @@ class PortableConsoleTest(unittest.TestCase):
         created = {"id": "012345abcdef", "token": "legacy-token", "auth_mode": "enrollment-key",
             "platform": "pending", "operator_claim_token": "A" * 43}
         body = f"customer=customer-one&operator_platform=windows&csrf={csrf}"
-        with mock.patch.object(CONSOLE, "manager", return_value=json.dumps(created)) as broker:
+        configured = {"id": "012345abcdef", "platform": "linux", "customer_command": "linux-customer-command"}
+        with mock.patch.object(CONSOLE, "manager", side_effect=[json.dumps(created), json.dumps(configured)]) as broker:
             captured, content = self.call(app, "/session", "POST", body,
                 cookie="tsuite_support_session=" + session_id)
         self.assertTrue(captured["status"].startswith("200"))
@@ -201,7 +202,11 @@ class PortableConsoleTest(unittest.TestCase):
         self.assertIn("-MaximumRedirection 0", content)
         self.assertIn("-GrantJson", content)
         self.assertIn('name="platform"', content)
-        broker.assert_called_once_with("create", "customer-one", "--created-by", "alice", "--purpose", "", "--platform", "pending")
+        self.assertIn('id="customer-command"', content)
+        self.assertIn("linux-customer-command", content)
+        self.assertIn("onchange=\"this.form.requestSubmit()\"", content)
+        self.assertEqual(broker.call_args_list[0].args, ("create", "customer-one", "--created-by", "alice", "--purpose", "", "--platform", "pending"))
+        self.assertEqual(broker.call_args_list[1].args, ("set-platform", "012345abcdef", "linux"))
 
     def test_invalid_operator_platform_does_not_create_a_session(self):
         app = CONSOLE.Application(self.settings)
@@ -223,14 +228,20 @@ class PortableConsoleTest(unittest.TestCase):
                 with self.subTest(operator=operator, customer=platform):
                     created = {"id": "012345abcdef", "token": "legacy-token", "auth_mode": "enrollment-key",
                         "platform": "pending", "operator_claim_token": "A" * 43}
+                    default = {"id": "012345abcdef", "platform": "linux",
+                        "customer_command": "default-linux-command"}
                     configured = {"id": "012345abcdef", "platform": platform,
                         "customer_command": "customer-command"}
                     body = urllib.parse.urlencode({"customer": "customer-one", "operator_platform": operator,
                         "purpose": purpose, "csrf": csrf})
                     cookie = "tsuite_support_session=" + session_id
-                    with mock.patch.object(CONSOLE, "manager", side_effect=[json.dumps(created), json.dumps({"platform": "pending"}), json.dumps(configured)]) as broker:
+                    side_effect = [json.dumps(created), json.dumps(default), json.dumps({"platform": "linux"})]
+                    if platform != "linux":
+                        side_effect.append(json.dumps(configured))
+                    with mock.patch.object(CONSOLE, "manager", side_effect=side_effect) as broker:
                         captured, initial = self.call(app, "/session", "POST", body, cookie)
                         self.assertTrue(captured["status"].startswith("200"))
+                        self.assertIn('id="customer-command"', initial)
                         self.assertIn('name="operator_platform"', initial)
                         self.assertIn('name="platform"', initial)
                         grant = json.dumps({"id": "012345abcdef", "token": "A" * 43,
@@ -238,7 +249,8 @@ class PortableConsoleTest(unittest.TestCase):
                         selected_operator = "windows" if operator == "linux" else "linux"
                         select_body = urllib.parse.urlencode({"csrf": csrf, "customer": "customer-one",
                             "purpose": purpose, "operator_platform": selected_operator, "grant": grant,
-                            "platform": platform, "current_platform": "pending", "customer_command": ""})
+                            "platform": platform, "current_platform": "linux",
+                            "customer_command": "default-linux-command"})
                         captured, content = self.call(app, "/session/012345abcdef/platform", "POST", select_body, cookie)
                     self.assertTrue(captured["status"].startswith("200"))
                     self.assertIn('data-copy-target="ai-instructions"', content)
@@ -256,8 +268,9 @@ class PortableConsoleTest(unittest.TestCase):
                         self.assertIn("支持机执行命令（Linux 终端）", content)
                     self.assertIn("远端命令使用 " + ("PowerShell" if platform == "windows" else "Linux Shell") + " 语法", prompt)
                     self.assertEqual(broker.call_args_list[0].args, ("create", "customer-one", "--created-by", "alice", "--purpose", purpose, "--platform", "pending"))
-                    self.assertEqual(broker.call_args_list[1].args, ("show", "012345abcdef"))
-                    self.assertEqual(broker.call_args_list[2].args, ("set-platform", "012345abcdef", platform))
+                    self.assertEqual(broker.call_args_list[2].args, ("show", "012345abcdef"))
+                    if platform != "linux":
+                        self.assertEqual(broker.call_args_list[3].args, ("set-platform", "012345abcdef", platform))
         with app.store.connection() as connection:
             self.assertNotIn("A" * 43, "\n".join(connection.iterdump()))
 
@@ -286,21 +299,24 @@ class PortableConsoleTest(unittest.TestCase):
         self.assertIn("existing-customer-command", content)
         broker.assert_called_once_with("show", "012345abcdef")
 
-    def test_authenticated_creation_shows_operator_command_and_defers_customer_command(self):
+    def test_authenticated_creation_shows_both_commands_without_an_extra_submit(self):
         app = CONSOLE.Application(self.settings)
         session_id, csrf = app.store.new_session("alice", "Alice")
         created = {"id": "012345abcdef", "token": "legacy-token", "auth_mode": "enrollment-key",
             "platform": "pending", "operator_claim_token": "A" * 43}
+        configured = {"id": "012345abcdef", "platform": "linux", "customer_command": "linux-customer-command"}
         body = "customer=customer-one&purpose=&csrf=" + csrf
-        with mock.patch.object(CONSOLE, "manager", return_value=json.dumps(created)) as broker:
+        with mock.patch.object(CONSOLE, "manager", side_effect=[json.dumps(created), json.dumps(configured)]) as broker:
             captured, content = self.call(app, "/session", "POST", body,
                 cookie="tsuite_support_session=" + session_id)
         self.assertTrue(captured["status"].startswith("200"))
         self.assertIn('id="operator-command"', content)
-        self.assertNotIn('id="customer-command"', content)
+        self.assertIn('id="customer-command"', content)
+        self.assertIn("linux-customer-command", content)
         self.assertIn('name="platform"', content)
         self.assertIn('action="/support/session/012345abcdef/platform"', content)
-        broker.assert_called_once_with("create", "customer-one", "--created-by", "alice", "--purpose", "", "--platform", "pending")
+        self.assertEqual(broker.call_args_list[0].args, ("create", "customer-one", "--created-by", "alice", "--purpose", "", "--platform", "pending"))
+        self.assertEqual(broker.call_args_list[1].args, ("set-platform", "012345abcdef", "linux"))
         self.assertIn(("Cache-Control", "no-store"), captured["headers"])
 
     def test_claim_endpoint_rejects_oversized_and_invalid_lengths(self):

@@ -723,15 +723,15 @@ def configured_session_content(created: dict[str, Any], csrf: str, customer: str
 <input type="hidden" name="csrf" value="{html.escape(csrf)}"><input type="hidden" name="customer" value="{html.escape(customer)}">
 <input type="hidden" name="purpose" value="{html.escape(purpose)}"><input type="hidden" name="grant" value="{html.escape(grant)}">
 <input type="hidden" name="current_platform" value="{html.escape(platform)}"><input type="hidden" name="customer_command" value="{html.escape(str(created.get("customer_command", "")))}">
-<label>支持机操作系统<select name="operator_platform"><option value="linux"{" selected" if operator_platform == "linux" else ""}>Linux（Shell）</option><option value="windows"{" selected" if operator_platform == "windows" else ""}>Windows（PowerShell / OpenSSH）</option></select></label>
-<label>被控机操作系统<select name="platform"><option value="linux"{" selected" if platform == "linux" else ""}>Linux</option><option value="windows"{" selected" if platform == "windows" else ""}>Windows（Server 2016+ / Windows 10/11）</option></select></label>
-<button class="primary">{("更新系统并重新生成命令" if platform in ("linux", "windows") else "生成接入命令")}</button></form>'''
+<label>支持机操作系统<select name="operator_platform" onchange="this.form.requestSubmit()"><option value="linux"{" selected" if operator_platform == "linux" else ""}>Linux（Shell）</option><option value="windows"{" selected" if operator_platform == "windows" else ""}>Windows（PowerShell / OpenSSH）</option></select></label>
+<label>被控机操作系统<select name="platform" onchange="this.form.requestSubmit()"><option value="linux"{" selected" if platform == "linux" else ""}>Linux</option><option value="windows"{" selected" if platform == "windows" else ""}>Windows（Server 2016+ / Windows 10/11）</option></select></label>
+<noscript><button class="primary">更新命令</button></noscript></form>'''
 	if platform == "pending":
 		return f'''<header><h1>会话已创建</h1><a href="/support/">返回会话列表</a></header><section class="card"><p>会话 ID：<code>{html.escape(str(created["id"]))}</code>。选择支持机和被控机系统，页面会重新生成对应命令。</p>{selector}{operator_section}</section>'''
 	customer_title = "管理员 PowerShell" if platform == "windows" else "Linux 终端"
 	ai_text = operator_ai_instructions(customer, purpose, str(created["id"]), operator_platform, platform, command)
 	ai_section = '<div class="secret-section"><div class="secret-heading"><h2>交给 AI 的操作说明</h2><button type="button" class="copy-button" data-copy-target="ai-instructions">复制</button></div><div id="ai-instructions" class="secret">' + html.escape(ai_text) + '</div><p class="muted">复制给 AI，在末尾补充操作任务。含一次性授权，请勿公开分享。</p></div>'
-	return f'''<header><h1>支持会话已创建</h1><a href="/support/">返回会话列表</a></header><section class="card"><p>会话 ID：<code>{html.escape(str(created["id"]))}</code>。被控机接入前可切换系统；支持机系统切换只重新生成支持端命令。</p>{selector}
+	return f'''<header><h1>支持会话已创建</h1><a href="/support/">返回会话列表</a></header><section class="card"><p>会话 ID：<code>{html.escape(str(created["id"]))}</code>。客户命令默认按 Linux 生成；切换系统选项会自动更新命令。被控机接入前可切换系统。</p>{selector}
 <div class="secret-section"><div class="secret-heading"><h2>客户执行命令（{customer_title}）</h2><button type="button" class="copy-button" data-copy-target="customer-command">复制</button></div><div id="customer-command" class="secret">{html.escape(str(created.get("customer_command", "")))}</div></div>
 {operator_section}{ai_section}<p class="muted">请通过安全渠道发送客户命令；命令中的链接就是接入凭据，默认 15 分钟有效，无需另输会话码。</p></section>'''
 
@@ -1074,6 +1074,9 @@ class Application:
 					content = f'''<header><h1>支持会话已创建</h1><a href="/support/">返回会话列表</a></header><section class="card"><p>会话 ID：<code>{html.escape(str(created.get("id", "")))}</code></p><div class="secret-section"><div class="secret-heading"><h2>客户执行命令</h2><button type="button" class="copy-button" data-copy-target="customer-command">复制</button></div><div id="customer-command" class="secret">{html.escape(created["customer_command"])}</div></div><p class="muted">此会话使用兼容接入方式。{legacy_hint}</p></section>'''
 					return self.response(start_response, HTTPStatus.OK, page("会话已创建", content))
 				grant = json.dumps({"id": created["id"], "token": created["operator_claim_token"], "url": self.settings.public_url}, separators=(",", ":"))
+				created = json.loads(manager("set-platform", str(created["id"]), "linux"))
+				if not isinstance(created, dict) or created.get("platform") != "linux" or not isinstance(created.get("customer_command"), str):
+					raise ConsoleError("支持会话服务未能生成默认 Linux 接入命令")
 				content = configured_session_content(created, str(session["csrf"]), customer, purpose,
 					operator_platform, grant, self.settings.public_url)
 				return self.response(start_response, HTTPStatus.OK, page("会话已创建", content))
