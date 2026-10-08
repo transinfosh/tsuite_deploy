@@ -321,6 +321,8 @@ class PortableConsoleTest(unittest.TestCase):
         self.assertLess(content.index('aria-label="切换为Linux 支持机'), content.index('id="operator-command"'))
         self.assertIn('aria-pressed="true"', content)
         self.assertIn('<svg viewBox="0 0 24 24"', content)
+        self.assertIn('<span class="os-button-label">Linux</span>', content)
+        self.assertIn('<span class="os-button-label">Windows</span>', content)
         self.assertIn('action="/support/session/012345abcdef/platform"', content)
         self.assertEqual(broker.call_args_list[0].args, ("create", "customer-one", "--created-by", "alice", "--purpose", "", "--platform", "pending"))
         self.assertEqual(broker.call_args_list[1].args, ("set-platform", "012345abcdef", "linux"))
