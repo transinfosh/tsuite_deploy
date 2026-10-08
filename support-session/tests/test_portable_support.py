@@ -186,15 +186,25 @@ class PortableConsoleTest(unittest.TestCase):
         self.assertIn(("Cache-Control", "no-store"), captured["headers"])
         self.assertIn(("X-Content-Type-Options", "nosniff"), captured["headers"])
 
-    def test_windows_operator_command_is_created_before_customer_platform_selection(self):
+    def test_windows_operator_command_can_be_selected_after_creation(self):
         app = CONSOLE.Application(self.settings)
         session_id, csrf = app.store.new_session("alice", "Alice")
         created = {"id": "012345abcdef", "token": "legacy-token", "auth_mode": "enrollment-key",
             "platform": "pending", "operator_claim_token": "A" * 43}
-        body = f"customer=customer-one&operator_platform=windows&csrf={csrf}"
+        body = f"customer=customer-one&csrf={csrf}"
         configured = {"id": "012345abcdef", "platform": "linux", "customer_command": "linux-customer-command"}
-        with mock.patch.object(CONSOLE, "manager", side_effect=[json.dumps(created), json.dumps(configured)]) as broker:
+        with mock.patch.object(CONSOLE, "manager", side_effect=[json.dumps(created), json.dumps(configured), json.dumps({"platform": "linux"})]) as broker:
             captured, content = self.call(app, "/session", "POST", body,
+                cookie="tsuite_support_session=" + session_id)
+            self.assertTrue(captured["status"].startswith("200"))
+            self.assertIn("支持机执行命令（Linux 终端）", content)
+            self.assertIn("linux-customer-command", content)
+            grant = json.dumps({"id": "012345abcdef", "token": "A" * 43,
+                "url": self.settings.public_url}, separators=(",", ":"))
+            switch_body = urllib.parse.urlencode({"csrf": csrf, "customer": "customer-one", "purpose": "",
+                "operator_platform": "windows", "grant": grant, "platform": "linux",
+                "current_platform": "linux", "customer_command": "linux-customer-command"})
+            captured, content = self.call(app, "/session/012345abcdef/platform", "POST", switch_body,
                 cookie="tsuite_support_session=" + session_id)
         self.assertTrue(captured["status"].startswith("200"))
         self.assertIn("支持机执行命令（Windows PowerShell）", content)
@@ -204,17 +214,22 @@ class PortableConsoleTest(unittest.TestCase):
         self.assertIn('name="platform"', content)
         self.assertIn('id="customer-command"', content)
         self.assertIn("linux-customer-command", content)
-        self.assertIn('name="operator_platform" value="windows"', content)
         self.assertIn('aria-label="切换为Windows 支持机（PowerShell / OpenSSH）"', content)
         self.assertEqual(broker.call_args_list[0].args, ("create", "customer-one", "--created-by", "alice", "--purpose", "", "--platform", "pending"))
         self.assertEqual(broker.call_args_list[1].args, ("set-platform", "012345abcdef", "linux"))
+        self.assertEqual(broker.call_args_list[2].args, ("show", "012345abcdef"))
 
     def test_invalid_operator_platform_does_not_create_a_session(self):
         app = CONSOLE.Application(self.settings)
         session_id, csrf = app.store.new_session("alice", "Alice")
+        grant = json.dumps({"id": "012345abcdef", "token": "A" * 43,
+            "url": self.settings.public_url}, separators=(",", ":"))
+        body = urllib.parse.urlencode({"csrf": csrf, "customer": "customer-one", "purpose": "",
+            "operator_platform": "bad", "grant": grant, "platform": "linux",
+            "current_platform": "linux", "customer_command": "customer-command"})
         with mock.patch.object(CONSOLE, "manager") as broker:
             captured, _ = self.call(
-                app, "/session", "POST", f"customer=customer-one&operator_platform=bad&csrf={csrf}",
+                app, "/session/012345abcdef/platform", "POST", body,
                 cookie="tsuite_support_session=" + session_id,
             )
         self.assertTrue(captured["status"].startswith("400"))
@@ -233,8 +248,7 @@ class PortableConsoleTest(unittest.TestCase):
                         "customer_command": "default-linux-command"}
                     configured = {"id": "012345abcdef", "platform": platform,
                         "customer_command": "customer-command"}
-                    body = urllib.parse.urlencode({"customer": "customer-one", "operator_platform": operator,
-                        "purpose": purpose, "csrf": csrf})
+                    body = urllib.parse.urlencode({"customer": "customer-one", "purpose": purpose, "csrf": csrf})
                     cookie = "tsuite_support_session=" + session_id
                     side_effect = [json.dumps(created), json.dumps(default), json.dumps({"platform": "linux"})]
                     if platform != "linux":
@@ -247,7 +261,7 @@ class PortableConsoleTest(unittest.TestCase):
                         self.assertIn('name="platform"', initial)
                         grant = json.dumps({"id": "012345abcdef", "token": "A" * 43,
                             "url": self.settings.public_url}, separators=(",", ":"))
-                        selected_operator = "windows" if operator == "linux" else "linux"
+                        selected_operator = operator
                         select_body = urllib.parse.urlencode({"csrf": csrf, "customer": "customer-one",
                             "purpose": purpose, "operator_platform": selected_operator, "grant": grant,
                             "platform": platform, "current_platform": "linux",

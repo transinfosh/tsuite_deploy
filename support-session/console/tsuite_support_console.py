@@ -885,7 +885,7 @@ class Application:
 		users_link = '<a class="button" href="/support/users">用户管理</a>' if bool(session["is_admin"]) else ""
 		content = f"""<header><h1>TSuite 支持管理</h1><div class=\"detail-actions\">{users_link}<form method=\"post\" action=\"/support/logout\"><input type=\"hidden\" name=\"csrf\" value=\"{html.escape(str(session['csrf']))}\"><button>退出 {html.escape(str(session['login']))}</button></form></div></header>
 <section class=\"card\"><h2>新建支持会话</h2><p class=\"muted\">为同一台客户机器使用固定的环境标识，例如 <code>dtaut-srm-prod-01</code>。每次连接都会自动生成新的完整会话 ID。</p>
-<form class=\"create-form\" method=\"post\" action=\"/support/session\"><input type=\"hidden\" name=\"csrf\" value=\"{html.escape(str(session['csrf']))}\"><label>客户环境标识<input name=\"customer\" required autocomplete=\"off\" placeholder=\"例如 dtaut-srm-prod-01\" pattern=\"[a-z0-9][a-z0-9-]{{0,47}}\"></label><label>支持用途（可选）<input name=\"purpose\" maxlength=\"200\" autocomplete=\"off\" placeholder=\"例如升级 SRM 至 0.1.10\"></label><label>支持机操作系统<select name=\"operator_platform\"><option value=\"linux\">Linux</option><option value=\"windows\">Windows（原生 PowerShell / OpenSSH）</option></select></label><button class=\"primary\">创建会话</button></form>
+<form class=\"create-form\" method=\"post\" action=\"/support/session\"><input type=\"hidden\" name=\"csrf\" value=\"{html.escape(str(session['csrf']))}\"><label>客户环境标识<input name=\"customer\" required autocomplete=\"off\" placeholder=\"例如 dtaut-srm-prod-01\" pattern=\"[a-z0-9][a-z0-9-]{{0,47}}\"></label><label>支持用途（可选）<input name=\"purpose\" maxlength=\"200\" autocomplete=\"off\" placeholder=\"例如升级 SRM 至 0.1.10\"></label><button class=\"primary\">创建会话</button></form>
 <div id=\"session-summary\" class=\"summary\" aria-live=\"polite\"><span class=\"loading-label\">正在读取会话数据…</span></div></section>
 <section><h2>客户环境与会话</h2><div id=\"session-groups\" class=\"group-list\" aria-live=\"polite\" aria-busy=\"true\"><div class=\"card loading\"><span class=\"spinner\"></span><span>正在加载会话列表…</span></div></div></section>"""
 		return self.response(start_response, HTTPStatus.OK, page("支持管理", content))
@@ -1078,9 +1078,7 @@ class Application:
 				if len(purpose) > 200 or any(ord(character) < 32 for character in purpose):
 					raise ConsoleError("支持用途最多为 200 个可见字符")
 				platform = "pending"
-				operator_platform = form.get("operator_platform", "linux")
-				if operator_platform not in ("linux", "windows"):
-					raise ConsoleError("请选择支持机的 Linux 或 Windows 操作系统")
+				operator_platform = "linux"
 				created = json.loads(manager(
 					"create", customer,
 					"--created-by", str(session["login"]),

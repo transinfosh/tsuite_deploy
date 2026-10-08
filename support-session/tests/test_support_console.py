@@ -231,6 +231,7 @@ class SupportConsoleTest(unittest.TestCase):
 			captured, content = self.call(app, "/", cookie=f"tsuite_support_session={session_id}")
 		self.assertTrue(captured["status"].startswith("200"))
 		self.assertIn('action="/support/session"', content)
+		self.assertNotIn('name="operator_platform"', content)
 		self.assertIn('action="/support/logout"', content)
 		self.assertIn('fetch("/support/sessions"', content)
 		self.assertIn("正在加载会话列表", content)
