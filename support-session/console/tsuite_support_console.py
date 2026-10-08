@@ -722,6 +722,7 @@ def configured_session_content(created: dict[str, Any], csrf: str, customer: str
 	selector = f'''<form class="create-form" method="post" action="/support/session/{html.escape(str(created["id"]))}/platform">
 <input type="hidden" name="csrf" value="{html.escape(csrf)}"><input type="hidden" name="customer" value="{html.escape(customer)}">
 <input type="hidden" name="purpose" value="{html.escape(purpose)}"><input type="hidden" name="grant" value="{html.escape(grant)}">
+<input type="hidden" name="current_platform" value="{html.escape(platform)}"><input type="hidden" name="customer_command" value="{html.escape(str(created.get("customer_command", "")))}">
 <label>支持机操作系统<select name="operator_platform"><option value="linux"{" selected" if operator_platform == "linux" else ""}>Linux（Shell）</option><option value="windows"{" selected" if operator_platform == "windows" else ""}>Windows（PowerShell / OpenSSH）</option></select></label>
 <label>被控机操作系统<select name="platform"><option value="linux"{" selected" if platform == "linux" else ""}>Linux</option><option value="windows"{" selected" if platform == "windows" else ""}>Windows（Server 2016+ / Windows 10/11）</option></select></label>
 <button class="primary">{("更新系统并重新生成命令" if platform in ("linux", "windows") else "生成接入命令")}</button></form>'''
@@ -730,7 +731,7 @@ def configured_session_content(created: dict[str, Any], csrf: str, customer: str
 	customer_title = "管理员 PowerShell" if platform == "windows" else "Linux 终端"
 	ai_text = operator_ai_instructions(customer, purpose, str(created["id"]), operator_platform, platform, command)
 	ai_section = '<div class="secret-section"><div class="secret-heading"><h2>交给 AI 的操作说明</h2><button type="button" class="copy-button" data-copy-target="ai-instructions">复制</button></div><div id="ai-instructions" class="secret">' + html.escape(ai_text) + '</div><p class="muted">复制给 AI，在末尾补充操作任务。含一次性授权，请勿公开分享。</p></div>'
-	return f'''<header><h1>支持会话已创建</h1><a href="/support/">返回会话列表</a></header><section class="card"><p>会话 ID：<code>{html.escape(str(created["id"]))}</code>。客户接入前可切换支持机和被控机系统。</p>{selector}
+	return f'''<header><h1>支持会话已创建</h1><a href="/support/">返回会话列表</a></header><section class="card"><p>会话 ID：<code>{html.escape(str(created["id"]))}</code>。被控机接入前可切换系统；支持机系统切换只重新生成支持端命令。</p>{selector}
 <div class="secret-section"><div class="secret-heading"><h2>客户执行命令（{customer_title}）</h2><button type="button" class="copy-button" data-copy-target="customer-command">复制</button></div><div id="customer-command" class="secret">{html.escape(str(created.get("customer_command", "")))}</div></div>
 {operator_section}{ai_section}<p class="muted">请通过安全渠道发送客户命令；命令中的链接就是接入凭据，默认 15 分钟有效，无需另输会话码。</p></section>'''
 
@@ -1084,6 +1085,7 @@ class Application:
 				if not secrets.compare_digest(form.get("csrf", ""), str(session["csrf"])):
 					raise ConsoleError("请求校验失败，请刷新页面后重试")
 				platform = form.get("platform", "")
+				current_platform = form.get("current_platform", "")
 				customer = form.get("customer", "")
 				purpose = form.get("purpose", "")
 				operator_platform = form.get("operator_platform", "")
@@ -1096,7 +1098,17 @@ class Application:
 					raise ConsoleError("支持机授权数据无效") from error
 				if not isinstance(grant_value, dict) or grant_value.get("id") != target or not isinstance(grant_value.get("token"), str):
 					raise ConsoleError("支持机授权与会话不匹配")
-				created = json.loads(manager("set-platform", target, platform))
+				current = json.loads(manager("show", target))
+				if not isinstance(current, dict) or current.get("platform") != current_platform:
+					raise ConsoleError("会话系统状态已变化，请刷新页面后重试")
+				if platform != current_platform:
+					created = json.loads(manager("set-platform", target, platform))
+				else:
+					created = {
+						"id": target,
+						"platform": platform,
+						"customer_command": form.get("customer_command", ""),
+					}
 				if not isinstance(created, dict) or created.get("platform") != platform or not isinstance(created.get("customer_command"), str):
 					raise ConsoleError("支持会话服务未返回接入命令")
 				content = configured_session_content(created, str(session["csrf"]), customer, purpose,

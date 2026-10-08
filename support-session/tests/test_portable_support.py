@@ -228,7 +228,7 @@ class PortableConsoleTest(unittest.TestCase):
                     body = urllib.parse.urlencode({"customer": "customer-one", "operator_platform": operator,
                         "purpose": purpose, "csrf": csrf})
                     cookie = "tsuite_support_session=" + session_id
-                    with mock.patch.object(CONSOLE, "manager", side_effect=[json.dumps(created), json.dumps(configured)]) as broker:
+                    with mock.patch.object(CONSOLE, "manager", side_effect=[json.dumps(created), json.dumps({"platform": "pending"}), json.dumps(configured)]) as broker:
                         captured, initial = self.call(app, "/session", "POST", body, cookie)
                         self.assertTrue(captured["status"].startswith("200"))
                         self.assertIn('name="operator_platform"', initial)
@@ -237,7 +237,8 @@ class PortableConsoleTest(unittest.TestCase):
                             "url": self.settings.public_url}, separators=(",", ":"))
                         selected_operator = "windows" if operator == "linux" else "linux"
                         select_body = urllib.parse.urlencode({"csrf": csrf, "customer": "customer-one",
-                            "purpose": purpose, "operator_platform": selected_operator, "grant": grant, "platform": platform})
+                            "purpose": purpose, "operator_platform": selected_operator, "grant": grant,
+                            "platform": platform, "current_platform": "pending", "customer_command": ""})
                         captured, content = self.call(app, "/session/012345abcdef/platform", "POST", select_body, cookie)
                     self.assertTrue(captured["status"].startswith("200"))
                     self.assertIn('data-copy-target="ai-instructions"', content)
@@ -255,13 +256,35 @@ class PortableConsoleTest(unittest.TestCase):
                         self.assertIn("支持机执行命令（Linux 终端）", content)
                     self.assertIn("远端命令使用 " + ("PowerShell" if platform == "windows" else "Linux Shell") + " 语法", prompt)
                     self.assertEqual(broker.call_args_list[0].args, ("create", "customer-one", "--created-by", "alice", "--purpose", purpose, "--platform", "pending"))
-                    self.assertEqual(broker.call_args_list[1].args, ("set-platform", "012345abcdef", platform))
+                    self.assertEqual(broker.call_args_list[1].args, ("show", "012345abcdef"))
+                    self.assertEqual(broker.call_args_list[2].args, ("set-platform", "012345abcdef", platform))
         with app.store.connection() as connection:
             self.assertNotIn("A" * 43, "\n".join(connection.iterdump()))
 
     def test_empty_purpose_prompts_ai_owner_to_supply_the_task(self):
         text = CONSOLE.operator_ai_instructions("customer-one", "", "012345abcdef", "linux", "linux", "connect")
         self.assertTrue(text.endswith("操作任务：\n[请补充要完成的具体任务]"))
+
+    def test_support_host_can_change_after_customer_enrollment_without_edge_platform_update(self):
+        app = CONSOLE.Application(self.settings)
+        session_id, csrf = app.store.new_session("alice", "Alice")
+        grant = json.dumps({"id": "012345abcdef", "token": "A" * 43,
+            "url": self.settings.public_url}, separators=(",", ":"))
+        body = urllib.parse.urlencode({
+            "csrf": csrf, "customer": "customer-one", "purpose": "maintenance",
+            "operator_platform": "windows", "grant": grant, "platform": "windows",
+            "current_platform": "windows", "customer_command": "existing-customer-command",
+        })
+        with mock.patch.object(CONSOLE, "manager", return_value=json.dumps({
+            "id": "012345abcdef", "platform": "windows", "status": "enrolled",
+        })) as broker:
+            captured, content = self.call(app, "/session/012345abcdef/platform", "POST", body,
+                f"tsuite_support_session={session_id}")
+        self.assertTrue(captured["status"].startswith("200"))
+        self.assertIn("支持机执行命令（Windows PowerShell）", content)
+        self.assertIn("operator-client.ps1", content)
+        self.assertIn("existing-customer-command", content)
+        broker.assert_called_once_with("show", "012345abcdef")
 
     def test_authenticated_creation_shows_operator_command_and_defers_customer_command(self):
         app = CONSOLE.Application(self.settings)
