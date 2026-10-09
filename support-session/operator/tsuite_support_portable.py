@@ -1,5 +1,6 @@
 """Portable Linux support terminal; authorization uses HTTPS, terminal uses edge SSH."""
 
+import base64
 import fcntl
 import json
 import os
@@ -217,6 +218,10 @@ def connect(root, settings, remote, command):
     base = list(arguments)
     if command:
         # This option deliberately accepts a remote shell command, as ssh does.
+        if remote["platform"] == "windows":
+            command = "powershell.exe -NoProfile -NonInteractive -EncodedCommand " + base64.b64encode(
+                command.encode("utf-16-le")
+            ).decode("ascii")
         arguments.append(command)
     activity = types.ModuleType("tsuite_support_activity")
     exec(ACTIVITY_SOURCE, activity.__dict__)
@@ -239,6 +244,8 @@ def main():
         settings = json.loads((root / "session.json").read_text())
         command = sys.argv[2] if len(sys.argv) > 2 else None
     else:
+        if sys.argv[1:] and (len(sys.argv) != 3 or sys.argv[1] != "--command" or not sys.argv[2]):
+            raise ValueError("首次执行支持 --command '<远端命令>'，再次连接使用 --resume。")
         raw = sys.stdin.buffer.read(8193)
         if len(raw) > 8192:
             raise ValueError("Invalid grant")
@@ -276,7 +283,7 @@ def main():
             shutil.rmtree(root)
             raise
         grant.clear()
-        command = None
+        command = sys.argv[2] if len(sys.argv) == 3 else None
         print(
             "授权已领取。再次连接命令：\n" + shlex.join(["python3", str(root / "support.py"), "--resume"]),
             file=sys.stderr,

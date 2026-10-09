@@ -246,7 +246,7 @@ def close_remote(
 def create_session(
 	settings: Settings, customer: str, created_by: str, purpose: str = "", platform: str = "linux",
 ) -> dict[str, Any]:
-	if platform not in ("linux", "windows"):
+	if platform not in ("linux", "windows", "pending"):
 		raise RemoteActionError("客户操作系统无效")
 	sessions_dir = settings.state_dir / "sessions"
 	sessions_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -259,7 +259,7 @@ def create_session(
 		ensure_success(key_result, "无法生成会话 operator identity")
 		public_key = key_path.with_suffix(".pub").read_text(encoding="utf-8").strip()
 		request = json.dumps({
-			"customer": customer,
+		"customer": customer,
 			"platform": platform,
 			"portable_operator": True,
 			"operator_public_key": public_key,
@@ -277,7 +277,7 @@ def create_session(
 		if created.get("platform", "linux") != platform:
 			close_remote(settings, session_id, "system:broker", "force", "堡垒机未返回请求的操作系统")
 			raise RemoteActionError("堡垒机不支持请求的操作系统，请同步升级")
-		if not isinstance(created.get("token"), str) or not isinstance(created.get("customer_command"), str):
+		if not isinstance(created.get("token"), str) or (platform != "pending" and not isinstance(created.get("customer_command"), str)):
 			close_remote(settings, session_id, "system:broker", "force", "堡垒机返回的会话凭据无效")
 			raise RemoteActionError("堡垒机返回的会话凭据无效")
 		if (created.get("portable_operator") is not True or type(created.get("token_expires_at")) is not int
@@ -311,6 +311,26 @@ def create_session(
 			raise
 	created["operator_claim_token"] = claim_token
 	return created
+
+
+def set_customer_platform(settings: Settings, session_id: str, platform: str) -> dict[str, Any]:
+	if platform not in ("linux", "windows"):
+		raise RemoteActionError("客户操作系统无效")
+	remote = remote_session(settings, session_id)
+	if remote.get("status") != "issued":
+		raise RemoteActionError("客户已接入，不能再切换客户机操作系统")
+	request = json.dumps({"platform": platform}, separators=(",", ":")) + "\n"
+	result = remote_action(settings, "set-platform", session_id, input_text=request)
+	try:
+		updated = json.loads(ensure_success(result, "无法设置客户机操作系统"))
+	except json.JSONDecodeError as error:
+		raise RemoteActionError("堡垒机返回了无效系统设置") from error
+	if not isinstance(updated, dict) or updated.get("id") != session_id or updated.get("platform") != platform:
+		raise RemoteActionError("堡垒机返回的系统设置与请求不一致")
+	local = load_local_session(settings, session_id)
+	local["platform"] = platform
+	atomic_write(session_state_path(settings, session_id), json.dumps(local, ensure_ascii=False, sort_keys=True) + "\n")
+	return updated
 
 
 def windows_command(command: list[str]) -> str:
@@ -530,7 +550,7 @@ def parser() -> argparse.ArgumentParser:
 	create.add_argument("customer", type=validate_customer)
 	create.add_argument("--created-by", required=True, type=validate_created_by)
 	create.add_argument("--purpose", default="", type=lambda value: validate_purpose(value, allow_empty=True))
-	create.add_argument("--platform", choices=("linux", "windows"), default="linux")
+	create.add_argument("--platform", choices=("linux", "windows", "pending"), default="linux")
 	show = subparsers.add_parser("show")
 	show.add_argument("session_id", type=validate_session_id)
 	close = subparsers.add_parser("close")
@@ -540,6 +560,9 @@ def parser() -> argparse.ArgumentParser:
 	force_close.add_argument("session_id", type=validate_session_id)
 	force_close.add_argument("--closed-by", required=True, type=validate_created_by)
 	force_close.add_argument("--reason", required=True, type=validate_purpose)
+	set_platform = subparsers.add_parser("set-platform")
+	set_platform.add_argument("session_id", type=validate_session_id)
+	set_platform.add_argument("platform", choices=("linux", "windows"))
 	ssh_parser = subparsers.add_parser("ssh")
 	ssh_parser.add_argument("session_id", type=validate_session_id)
 	run_parser = subparsers.add_parser("run")
@@ -567,6 +590,9 @@ def main() -> int:
 	if args.action == "create":
 		created = create_session(settings, args.customer, args.created_by, args.purpose, args.platform)
 		print(json.dumps(created, ensure_ascii=False, separators=(",", ":")))
+		return 0
+	if args.action == "set-platform":
+		print(json.dumps(set_customer_platform(settings, args.session_id, args.platform), ensure_ascii=False, separators=(",", ":")))
 		return 0
 	if args.action == "list":
 		result = remote_action(settings, "list")

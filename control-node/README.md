@@ -92,6 +92,10 @@ sudo ./install-support-console.sh \
 已有控制机原地升级时，可以省略 `--github-client-secret-file`，安装器会以 root 身份沿用现有 OAuth
 配置中的 Secret；首次安装仍必须显式提供 Secret 文件。
 
+Web 页面 broker 的最小 sudoers 权限包含 `create`、`set-platform`、`show`、`list`、普通 `close` 和
+`claim`。`set-platform` 只允许在客户接入前修改被控机系统类型；堡垒机会拒绝已接入会话的切换。
+新增此权限后，必须同时更新控制机 `prepare-support-access.sh` 和 edge 会话管理器及其 sudoers。
+
 从旧版固定 operator key 升级时，先确认 edge 上没有 `issued`、`enrolled` 或 `revoking` 会话，再按上述
 顺序更新。控制机安装器只有在新 broker 自检通过后，才会删除旧 `/etc/tsuite-support-console/` 中的共享
 私钥副本；未结束的旧会话不能自动迁移到每会话独立 key。

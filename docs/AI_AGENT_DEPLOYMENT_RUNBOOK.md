@@ -197,9 +197,9 @@ gh run watch --repo transinfosh/<repo> <run-id> --exit-status
 
 1. 运维人员打开 `https://edge.trinfo.net/support/`，使用获准的本地账号、密码和 TOTP 登录；GitHub 组织账号作为备用登录方式；
 2. 使用固定、可复用的客户环境标识，例如 `dtaut-srm-prod-01`；同一机器不要每次换名字；
-3. 点击“创建会话”；页面只显示一次客户执行命令和支持机执行命令，各自带独立随机凭据；
-4. 命令通过安全渠道交给客户；领取链接默认 15 分钟有效；
-5. 客户执行一条 `curl ... | sudo bash` 命令，无需另输会话码；
+3. 点击“创建会话”；命令页会立即显示默认 Linux 客户命令和支持端命令。需要 Windows 客户机时切换被控机系统下拉框，页面自动更新命令；客户接入前可以切换，接入后被控机系统锁定；
+4. 将页面生成的客户执行命令通过安全渠道交给客户；领取链接默认 15 分钟有效；
+5. 客户执行页面提供的单条接入命令，无需另输会话码；
 6. 页面状态变为“已连接”后，记录完整 12 位会话 ID。
 
 页面不持久保存原始客户或支持机命令，这是安全设计，不是数据丢失。需要重发时关闭旧会话并
@@ -223,13 +223,20 @@ sudo -n -u tsuite-support-operator \
 新会话从接入起按闲置窗口自动续期，仅实际标准输入和发起 `run` 的那一次命令输入计为活动；
 任务运行、输出、页面刷新与隧道保活均不续期。长任务无输入超过闲置窗口仍会到期。`expires_at` 会变化，不能按创建时缓存的期限删 key。新逻辑只作用于升级后重新创建的会话。
 
-### 任意 Linux 支持机到客户
+### 任意 Linux / Windows 支持机到客户
 
 支持机执行页面生成的支持命令即可，完整会话 ID 已绑定在凭据中。工具自动在支持机生成
 私钥，通过 Edge 的 HTTPS 接口向控制机领取一次性会话专属证书，然后直接经 Edge 的受限
 SSH 代理到客户；无需 GitHub 再登录或到控制机的 SSH 权限。客户未接入时自动等待。
 凭据默认 15 分钟内领取且仅能领取一次，必须像密码一样保管完整命令。再次连接使用工具
 输出的本机 `support.py --resume` 命令；支持机不保存控制机或 Edge 的长期私钥。
+
+Windows 支持机在会话命令页选择“支持机操作系统 = Windows”，使用原生 64 位 PowerShell 5.1/7
+和 OpenSSH Client，无需 WSL/Python。AI 首次执行网页支持命令时追加 `-Command 'hostname'`；
+再次连接通过独立 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <本机会话目录>/support.ps1
+-Mode Resume -Command '<远端命令>'` 进程执行，并检查退出码。Linux 客户命令传给远端 Shell，Windows
+客户命令自动以 PowerShell UTF-16LE 编码执行。支持机与客户机系统选项独立；客户命令仍按客户机系统生成。
+Windows 原生支持机要求 Windows 10 1809+ / Windows 11 / Server 2019+；详细生命周期和验收见专项说明。
 
 支持机的真实输入沿用原活动上报机制，状态轮询不续期。网页普通关闭仍由控制机原有独立
 operator key 确认客户清理，随后撤销 Edge CA 信任和隧道；支持机的本地清理程序按会话状态和
@@ -405,7 +412,7 @@ tsuite-support-operator-gc.timer
 
 控制机日常免密权限由 `/etc/sudoers.d/tsuite-deploy-operator` 限定，只允许：
 
-- 页面以 `tsuite-support-operator` broker 身份执行会话 `create`、`list`、`show`、普通 `close`；
+- 页面以 `tsuite-support-operator` broker 身份执行会话 `create`、接入前 `set-platform`、`list`、`show`、普通 `close`；
 - `adam` 以 broker 身份执行 `list`、`show`、带关闭人参数的普通 `close`、带原因的 `force-close`、
   `ssh` 和 `run`；
 - 精确重启 `nginx`、`tsuite-frpc`、`tsuite-support-console`、`tsuite-github-egress`。

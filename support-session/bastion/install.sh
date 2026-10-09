@@ -255,6 +255,7 @@ Defaults:$ENROLL_USER env_keep += "SSH_ORIGINAL_COMMAND"
 $ENROLL_USER ALL=(root) NOPASSWD: /usr/local/sbin/tsuite-support-session --config $CONFIG_DIR/config.json enroll-ssh *, /usr/local/sbin/tsuite-support-session --config $CONFIG_DIR/config.json lease-ssh *
 $OPERATOR_USER ALL=(root) NOPASSWD: /usr/local/sbin/tsuite-support-session --config $CONFIG_DIR/config.json create *
 $OPERATOR_USER ALL=(root) NOPASSWD: /usr/local/sbin/tsuite-support-session --config $CONFIG_DIR/config.json show *
+$OPERATOR_USER ALL=(root) NOPASSWD: /usr/local/sbin/tsuite-support-session --config $CONFIG_DIR/config.json set-platform *
 $OPERATOR_USER ALL=(root) NOPASSWD: /usr/local/sbin/tsuite-support-session --config $CONFIG_DIR/config.json list
 $OPERATOR_USER ALL=(root) NOPASSWD: /usr/local/sbin/tsuite-support-session --config $CONFIG_DIR/config.json close *
 EOF

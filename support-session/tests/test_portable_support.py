@@ -1,16 +1,21 @@
 """Security regressions for bearer enrollment and session-scoped SSH certificates."""
 
 import concurrent.futures
+import base64
+import html
+import io
 import hashlib
 import importlib.util
 import json
 import os
 import pathlib
+import re
 import subprocess
 import tempfile
 import time
 import types
 import unittest
+import urllib.parse
 from unittest import mock
 
 import test_support_console as console
@@ -170,37 +175,175 @@ class PortableConsoleTest(unittest.TestCase):
         self.assertIn("CLIENT_SOURCE", body)
         self.assertNotIn("operator_claim_token", body)
 
-    def test_authenticated_creation_shows_two_commands_with_no_manual_id_prompt(self):
+    def test_windows_bootstrap_bundles_native_client_and_relay_without_credentials(self):
+        app = CONSOLE.Application(self.settings)
+        captured, body = self.call(app, "/operator-client.ps1")
+        self.assertTrue(captured["status"].startswith("200"))
+        self.assertIn("$script:ClientSource", body)
+        self.assertIn("$script:RelaySource", body)
+        self.assertNotIn("operator_claim_token", body)
+        self.assertNotIn("-GrantJson '", body)
+        self.assertIn(("Cache-Control", "no-store"), captured["headers"])
+        self.assertIn(("X-Content-Type-Options", "nosniff"), captured["headers"])
+
+    def test_windows_operator_command_can_be_selected_after_creation(self):
         app = CONSOLE.Application(self.settings)
         session_id, csrf = app.store.new_session("alice", "Alice")
-        created = {
-            "id": "012345abcdef",
-            "token": "legacy-token",
-            "auth_mode": "enrollment-key",
-            "customer_command": "customer-command",
-            "operator_claim_token": "A" * 43,
-        }
-        body = "customer=customer-one&purpose=&csrf=" + csrf
-        with mock.patch.object(CONSOLE, "manager", return_value=json.dumps(created)):
-            captured, content = self.call(
-                app, "/session", "POST", body, cookie="tsuite_support_session=" + session_id
-            )
+        created = {"id": "012345abcdef", "token": "legacy-token", "auth_mode": "enrollment-key",
+            "platform": "pending", "operator_claim_token": "A" * 43}
+        body = f"customer=customer-one&csrf={csrf}"
+        configured = {"id": "012345abcdef", "platform": "linux", "customer_command": "linux-customer-command"}
+        with mock.patch.object(CONSOLE, "manager", side_effect=[json.dumps(created), json.dumps(configured), json.dumps({"platform": "linux"})]) as broker:
+            captured, content = self.call(app, "/session", "POST", body,
+                cookie="tsuite_support_session=" + session_id)
+            self.assertTrue(captured["status"].startswith("200"))
+            self.assertIn("支持机执行命令（Linux 终端）", content)
+            self.assertIn("linux-customer-command", content)
+            grant = json.dumps({"id": "012345abcdef", "token": "A" * 43,
+                "url": self.settings.public_url}, separators=(",", ":"))
+            switch_body = urllib.parse.urlencode({"csrf": csrf, "customer": "customer-one", "purpose": "",
+                "operator_platform": "windows", "grant": grant, "platform": "linux",
+                "current_platform": "linux", "customer_command": "linux-customer-command"})
+            captured, content = self.call(app, "/session/012345abcdef/platform", "POST", switch_body,
+                cookie="tsuite_support_session=" + session_id)
         self.assertTrue(captured["status"].startswith("200"))
+        self.assertIn("支持机执行命令（Windows PowerShell）", content)
+        self.assertIn("operator-client.ps1", content)
+        self.assertIn("-MaximumRedirection 0", content)
+        self.assertIn("-GrantJson", content)
+        self.assertIn('name="platform"', content)
         self.assertIn('id="customer-command"', content)
-        self.assertIn('id="operator-command"', content)
-        self.assertIn("012345abcdef", content)
-        self.assertIn("operator-client", content)
-        self.assertIn(("Cache-Control", "no-store"), captured["headers"])
+        self.assertIn("linux-customer-command", content)
+        self.assertIn('aria-label="切换为Windows 支持机（PowerShell / OpenSSH）"', content)
+        self.assertEqual(broker.call_args_list[0].args, ("create", "customer-one", "--created-by", "alice", "--purpose", "", "--platform", "pending"))
+        self.assertEqual(broker.call_args_list[1].args, ("set-platform", "012345abcdef", "linux"))
+        self.assertEqual(broker.call_args_list[2].args, ("show", "012345abcdef"))
 
-    def test_claim_needs_bearer_grant_but_no_github_cookie(self):
+    def test_invalid_operator_platform_does_not_create_a_session(self):
         app = CONSOLE.Application(self.settings)
-        request = json.dumps({"id": "012345abcdef", "token": "A" * 43, "public_key": "ssh-ed25519 AAAA"})
-        with mock.patch.object(CONSOLE, "manager", return_value='{"certificate":"test"}') as broker:
-            captured, body = self.call(app, "/operator-claim", "POST", request)
+        session_id, csrf = app.store.new_session("alice", "Alice")
+        grant = json.dumps({"id": "012345abcdef", "token": "A" * 43,
+            "url": self.settings.public_url}, separators=(",", ":"))
+        body = urllib.parse.urlencode({"csrf": csrf, "customer": "customer-one", "purpose": "",
+            "operator_platform": "bad", "grant": grant, "platform": "linux",
+            "current_platform": "linux", "customer_command": "customer-command"})
+        with mock.patch.object(CONSOLE, "manager") as broker:
+            captured, _ = self.call(
+                app, "/session/012345abcdef/platform", "POST", body,
+                cookie="tsuite_support_session=" + session_id,
+            )
+        self.assertTrue(captured["status"].startswith("400"))
+        broker.assert_not_called()
+
+    def test_ai_handoff_matches_all_operator_and_customer_combinations(self):
+        app = CONSOLE.Application(self.settings)
+        session_id, csrf = app.store.new_session("alice", "Alice")
+        purpose = "检查服务 <script>alert('test')</script>"
+        for operator in ("linux", "windows"):
+            for platform in ("linux", "windows"):
+                with self.subTest(operator=operator, customer=platform):
+                    created = {"id": "012345abcdef", "token": "legacy-token", "auth_mode": "enrollment-key",
+                        "platform": "pending", "operator_claim_token": "A" * 43}
+                    default = {"id": "012345abcdef", "platform": "linux",
+                        "customer_command": "default-linux-command"}
+                    configured = {"id": "012345abcdef", "platform": platform,
+                        "customer_command": "customer-command"}
+                    body = urllib.parse.urlencode({"customer": "customer-one", "purpose": purpose, "csrf": csrf})
+                    cookie = "tsuite_support_session=" + session_id
+                    side_effect = [json.dumps(created), json.dumps(default), json.dumps({"platform": "linux"})]
+                    if platform != "linux":
+                        side_effect.append(json.dumps(configured))
+                    with mock.patch.object(CONSOLE, "manager", side_effect=side_effect) as broker:
+                        captured, initial = self.call(app, "/session", "POST", body, cookie)
+                        self.assertTrue(captured["status"].startswith("200"))
+                        self.assertIn('id="customer-command"', initial)
+                        self.assertIn('name="operator_platform"', initial)
+                        self.assertIn('name="platform"', initial)
+                        grant = json.dumps({"id": "012345abcdef", "token": "A" * 43,
+                            "url": self.settings.public_url}, separators=(",", ":"))
+                        selected_operator = operator
+                        select_body = urllib.parse.urlencode({"csrf": csrf, "customer": "customer-one",
+                            "purpose": purpose, "operator_platform": selected_operator, "grant": grant,
+                            "platform": platform, "current_platform": "linux",
+                            "customer_command": "default-linux-command"})
+                        captured, content = self.call(app, "/session/012345abcdef/platform", "POST", select_body, cookie)
+                    self.assertTrue(captured["status"].startswith("200"))
+                    self.assertIn('data-copy-target="ai-instructions"', content)
+                    match = re.search(r'<div id="ai-instructions" class="secret">(.*?)</div>', content, re.S)
+                    self.assertIsNotNone(match)
+                    prompt = html.unescape(match[1])
+                    self.assertTrue(prompt.endswith("操作任务：\n" + purpose))
+                    self.assertIn("A" * 43, prompt)
+                    self.assertIn("在你的本机 " + ("Windows" if selected_operator == "windows" else "Linux"), prompt)
+                    if selected_operator == "windows":
+                        self.assertIn("operator-client.ps1", content)
+                        self.assertIn("支持机执行命令（Windows PowerShell）", content)
+                    else:
+                        self.assertIn("python3 -c", content)
+                        self.assertIn("支持机执行命令（Linux 终端）", content)
+                    self.assertIn("远端命令使用 " + ("PowerShell" if platform == "windows" else "Linux Shell") + " 语法", prompt)
+                    self.assertEqual(broker.call_args_list[0].args, ("create", "customer-one", "--created-by", "alice", "--purpose", purpose, "--platform", "pending"))
+                    self.assertEqual(broker.call_args_list[2].args, ("show", "012345abcdef"))
+                    if platform != "linux":
+                        self.assertEqual(broker.call_args_list[3].args, ("set-platform", "012345abcdef", platform))
+        with app.store.connection() as connection:
+            self.assertNotIn("A" * 43, "\n".join(connection.iterdump()))
+
+    def test_empty_purpose_prompts_ai_owner_to_supply_the_task(self):
+        text = CONSOLE.operator_ai_instructions("customer-one", "", "012345abcdef", "linux", "linux", "connect")
+        self.assertTrue(text.endswith("操作任务：\n[请补充要完成的具体任务]"))
+
+    def test_support_host_can_change_after_customer_enrollment_without_edge_platform_update(self):
+        app = CONSOLE.Application(self.settings)
+        session_id, csrf = app.store.new_session("alice", "Alice")
+        grant = json.dumps({"id": "012345abcdef", "token": "A" * 43,
+            "url": self.settings.public_url}, separators=(",", ":"))
+        body = urllib.parse.urlencode({
+            "csrf": csrf, "customer": "customer-one", "purpose": "maintenance",
+            "operator_platform": "windows", "grant": grant, "platform": "windows",
+            "current_platform": "windows", "customer_command": "existing-customer-command",
+        })
+        with mock.patch.object(CONSOLE, "manager", return_value=json.dumps({
+            "id": "012345abcdef", "platform": "windows", "status": "enrolled",
+        })) as broker:
+            captured, content = self.call(app, "/session/012345abcdef/platform", "POST", body,
+                f"tsuite_support_session={session_id}")
         self.assertTrue(captured["status"].startswith("200"))
-        broker.assert_called_once_with("claim", input_text=request)
+        self.assertIn("支持机执行命令（Windows PowerShell）", content)
+        self.assertIn("operator-client.ps1", content)
+        self.assertIn("existing-customer-command", content)
+        broker.assert_called_once_with("show", "012345abcdef")
+
+    def test_authenticated_creation_shows_both_commands_without_an_extra_submit(self):
+        app = CONSOLE.Application(self.settings)
+        session_id, csrf = app.store.new_session("alice", "Alice")
+        created = {"id": "012345abcdef", "token": "legacy-token", "auth_mode": "enrollment-key",
+            "platform": "pending", "operator_claim_token": "A" * 43}
+        configured = {"id": "012345abcdef", "platform": "linux", "customer_command": "linux-customer-command"}
+        body = "customer=customer-one&purpose=&csrf=" + csrf
+        with mock.patch.object(CONSOLE, "manager", side_effect=[json.dumps(created), json.dumps(configured)]) as broker:
+            captured, content = self.call(app, "/session", "POST", body,
+                cookie="tsuite_support_session=" + session_id)
+        self.assertTrue(captured["status"].startswith("200"))
+        self.assertIn('id="operator-command"', content)
+        self.assertIn('id="customer-command"', content)
+        self.assertIn("linux-customer-command", content)
+        self.assertIn('name="platform"', content)
+        self.assertLess(content.index("客户执行命令（Linux 终端）"), content.index('aria-label="切换为Linux 被控机'))
+        self.assertLess(content.index("支持机执行命令（Linux 终端）"), content.index('aria-label="切换为Linux 支持机'))
+        self.assertLess(content.index('aria-label="切换为Linux 被控机'), content.index('id="customer-command"'))
+        self.assertLess(content.index('aria-label="切换为Linux 支持机'), content.index('id="operator-command"'))
+        self.assertIn('aria-pressed="true"', content)
+        self.assertIn('<svg viewBox="0 0 24 24"', content)
+        self.assertIn('<span class="os-button-label">Linux</span>', content)
+        self.assertIn('<span class="os-button-label">Windows</span>', content)
+        self.assertIn('data-os-icon="linux-penguin"', content)
+        self.assertIn('data-os-icon="windows-logo"', content)
+        self.assertIn('fill="#facc15"', content)
+        self.assertIn('action="/support/session/012345abcdef/platform"', content)
+        self.assertEqual(broker.call_args_list[0].args, ("create", "customer-one", "--created-by", "alice", "--purpose", "", "--platform", "pending"))
+        self.assertEqual(broker.call_args_list[1].args, ("set-platform", "012345abcdef", "linux"))
         self.assertIn(("Cache-Control", "no-store"), captured["headers"])
-        self.assertNotIn("A" * 43, body)
 
     def test_claim_endpoint_rejects_oversized_and_invalid_lengths(self):
         app = CONSOLE.Application(self.settings)
@@ -229,3 +372,52 @@ class PortableCleanupTest(unittest.TestCase):
             with mock.patch.object(PORTABLE, "session_status", side_effect=OSError):
                 self.assertEqual(PORTABLE.cleanup_watch(root, settings), 0)
             self.assertFalse(root.exists())
+
+
+class PortableCommandTest(unittest.TestCase):
+    def test_first_claim_can_run_a_command_without_opening_a_terminal(self):
+        grant = {"id": "012345abcdef", "url": "https://edge.example.com/support", "token": "A" * 43}
+        claimed = {
+            "id": grant["id"], "host": "edge.example.com", "port": 22, "user": "tsuite-operator",
+            "expires_at": int(time.time()) + 900, "certificate": "test certificate",
+            "known_hosts": "edge.example.com ssh-ed25519 AAAA\n",
+        }
+        real_popen = subprocess.Popen
+
+        def start_process(arguments, **kwargs):
+            if arguments[-1] == "--watch":
+                return mock.Mock()
+            return real_popen(arguments, **kwargs)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            stdin = io.TextIOWrapper(io.BytesIO(json.dumps(grant).encode()))
+            with (
+                mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": temporary}),
+                mock.patch.object(PORTABLE.sys, "argv", ["support.py", "--command", "hostname"]),
+                mock.patch.object(PORTABLE.sys, "stdin", stdin),
+                mock.patch.object(PORTABLE, "claim", return_value=claimed),
+                mock.patch.object(PORTABLE, "wait_for_customer", return_value={"platform": "linux"}),
+                mock.patch.object(PORTABLE, "connect", return_value=7) as connect,
+                mock.patch.object(PORTABLE.subprocess, "Popen", side_effect=start_process),
+                mock.patch.object(PORTABLE, "open", side_effect=AssertionError("Opened tty"), create=True),
+            ):
+                self.assertEqual(PORTABLE.main(), 7)
+            self.assertEqual(connect.call_args.args[-1], "hostname")
+            saved = pathlib.Path(temporary) / "tsuite-support/portable/012345abcdef"
+            self.assertNotIn(grant["token"], (saved / "session.json").read_text())
+            stdin.close()
+
+    def test_customer_shell_selection_encodes_windows_and_preserves_linux_commands(self):
+        settings = {"id": "012345abcdef", "host": "edge.example.com", "port": 22, "user": "tsuite-operator"}
+        command = "Write-Output '测试'; $env:COMPUTERNAME\n"
+        relay_source = "def connect(arguments, *args, **kwargs):\n    return arguments\n"
+        for platform in ("linux", "windows"):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as temporary:
+                remote = {"remote_port": 22000, "customer_host_key": "ssh-ed25519 AAAA", "platform": platform}
+                with mock.patch.object(PORTABLE, "ACTIVITY_SOURCE", relay_source):
+                    arguments = PORTABLE.connect(pathlib.Path(temporary), settings, remote, command)
+                if platform == "windows":
+                    self.assertTrue(arguments[-1].startswith("powershell.exe -NoProfile -NonInteractive -EncodedCommand "))
+                    self.assertEqual(base64.b64decode(arguments[-1].split()[-1]).decode("utf-16-le"), command)
+                else:
+                    self.assertEqual(arguments[-1], command)
