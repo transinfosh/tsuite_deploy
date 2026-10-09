@@ -458,7 +458,7 @@ Agent 每次开始部署时应先检查这些事项的当前状态。若缺项�
 
 - [仓库总览](../README.md)
 - [部署控制机](../control-node/README.md)
-- [临时远程支持会话](../support-session/README.md)
+- [临时远程支持会话](https://github.com/transinfosh/tsuite-support)
 - [单机部署](../single-node/README.md)
 - [多节点部署](../multi-node/README.md)
 - [共享部署契约](../shared/contracts/README.md)
@@ -475,3 +475,10 @@ Agent 每次开始部署时应先检查这些事项的当前状态。若缺项�
 证明正式源码提交包含修复；未完成或回滚失败的补丁先处理，不继续升级。
 镜像准备就绪后，在同一维护窗口撤回补丁，再按现有正式升级流程执行迁移与验证。
 这一步需要明确执行；第一版未自动嵌入全部历史单机与 Ansible 部署入口。
+
+## 独立支持工具版本
+
+支持工具已拆至 [tsuite-support](https://github.com/transinfosh/tsuite-support)，源码、测试、CI 与工具文档在该仓库维护。
+本仓库 `control-node/support-release.env` 固定其 Release 和 SHA-256，两个安装入口只负责调用。
+线上现有会话和目录不因源码拆分迁移。修改支持运行时前阅读其 `docs/operations.md`；
+本手册继续负责部署机、FRP、Nginx/Caddy 混合路由及业务部署流程。

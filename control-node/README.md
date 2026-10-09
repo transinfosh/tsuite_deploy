@@ -54,15 +54,17 @@ sudo ./install.sh \
 
 ## 支持管理页面
 
-控制机先创建专用 broker、每会话私钥目录、bridge key、edge 会话代理 key、固定 Host Key 和最小
-sudoers。Host Key 文件必须通过独立渠道核验，不能直接信任 `ssh-keyscan`：
+支持工具已迁至独立仓库 [tsuite-support](https://github.com/transinfosh/tsuite-support)。
+源码、客户端、权限规则、测试、CI 和工具说明统一在该仓库维护。本仓库保留部署机的
+FRP、Nginx/Caddy 路由与两个兼容安装入口。
 
-支持页面使用控制机本地的 `qrencode` 生成 TOTP 绑定二维码，二维码和密钥不会发送给第三方服务。
-安装支持页面前先安装该系统包：
+`support-release.env` 固定 Release 版本和归档 SHA-256；安装入口下载并校验归档后调用
+独立安装器，不保存运行时代码副本。显式升级时同时更新版本与摘要。
+离线安装可使用 `sudo env TSUITE_SUPPORT_ARCHIVE=/绝对路径/源码归档 ./安装入口.sh ...`，
+归档仍须匹配固定摘要。
 
-```bash
-sudo apt-get install qrencode
-```
+控制机依赖和首次安装顺序见[独立安装说明](https://github.com/transinfosh/tsuite-support/blob/main/control/README.md)。
+在现有部署机上继续使用本目录入口，它们保留原代理及精确服务维护权限：
 
 ```bash
 sudo ./prepare-support-access.sh \
@@ -71,16 +73,8 @@ sudo ./prepare-support-access.sh \
   --operator-user adam
 ```
 
-把命令输出的两个公钥复制到 edge，在 edge 的固定版本仓库中执行：
-
-```bash
-sudo support-session/bastion/install-console-bridge.sh \
-  --bridge-public-key /secure/path/bridge_ed25519.pub \
-  --edge-operator-public-key /secure/path/edge_operator_ed25519.pub \
-  --operator-user tsuite-operator
-```
-
-最后将 OAuth Client Secret 写入仅 root 可读文件，在控制机执行：
+将输出的两个公钥传到 edge，在独立 `tsuite-support` 的固定版本源码中运行
+`bastion/install-console-bridge.sh`，参数见独立安装说明；然后回到部署机执行：
 
 ```bash
 sudo ./install-support-console.sh \
@@ -89,63 +83,14 @@ sudo ./install-support-console.sh \
   --github-allowed-org transinfosh
 ```
 
-已有控制机原地升级时，可以省略 `--github-client-secret-file`，安装器会以 root 身份沿用现有 OAuth
-配置中的 Secret；首次安装仍必须显式提供 Secret 文件。
+升级可省略 Secret 文件以沿用现有 OAuth 配置；本地管理员初始化参数由入口原样传递。
+控制台默认通过既有 `http://127.0.0.1:18080` 代理访问 GitHub；可显式传入 `--https-proxy` 覆盖。
+支持工具安装器直接检查本机 8765，部署集成还应验证 Nginx 的
+`http://127.0.0.1:8081/support/` 与公网 `https://edge.trinfo.net/support/` 均返回未登录 401。
 
-Web 页面 broker 的最小 sudoers 权限包含 `create`、`set-platform`、`show`、`list`、普通 `close` 和
-`claim`。`set-platform` 只允许在客户接入前修改被控机系统类型；堡垒机会拒绝已接入会话的切换。
-新增此权限后，必须同时更新控制机 `prepare-support-access.sh` 和 edge 会话管理器及其 sudoers。
-
-从旧版固定 operator key 升级时，先确认 edge 上没有 `issued`、`enrolled` 或 `revoking` 会话，再按上述
-顺序更新。控制机安装器只有在新 broker 自检通过后，才会删除旧 `/etc/tsuite-support-console/` 中的共享
-私钥副本；未结束的旧会话不能自动迁移到每会话独立 key。
-
-OAuth App 的 Homepage URL 为 `https://edge.trinfo.net/support/`，Callback URL 为
-`https://edge.trinfo.net/support/auth/github/callback`。页面进程不能运行任意 Shell；它只能使用
-限定 sudo 调用 broker 的 create/show/list/close。broker 为每个会话生成独立 operator key，并且只有
-运维账号可以通过 broker 调用 ssh/run/force-close；页面进程不能读取 bridge、edge 或会话私钥。
-edge 上的 `tsuite-operator` 使用专用受限 Shell：只允许 sshd 已绑定的 bridge/proxy forced-command，
-不能进入交互式 Shell，也不能执行任意命令。
-控制机 broker 账号继续使用 `nologin`；仅在执行代码生成的 SSH `ProxyCommand` 子进程时局部使用
-`SHELL=/bin/sh`，不会开放 broker 登录能力。
-
-页面支持本地账号密码加 TOTP 登录，并保留 GitHub OAuth 作为备用。安装器使用
-`--local-admin-user`、`--local-admin-password-file` 和 `--local-admin-totp-secret-file` 初始化首个本地
-管理员；密码只保存 scrypt 哈希。管理员登录后可在“用户管理”中生成 30 分钟有效的一次性邀请链接。
-新用户通过邀请自行设置至少 16 位密码、添加 TOTP 密钥并输入动态码确认，验证成功后账号才启用。
-邀请链接只展示一次，不持久保存明文 Token；管理员也可生成一次性 TOTP 重绑链接。禁用用户或完成
-TOTP 重绑都会同步撤销该用户现有 Web 会话。
-
-安装器会同时验证 forced-command bridge 和 edge forced proxy 通道。代理 key 不能取得 edge Shell，也
-不能转发任意回环端口；edge 会根据会话 ID 只代理已接入会话登记的端口。日常命令：
-
-```bash
-sudo -n -u tsuite-support-operator tsuite-support-console-action list
-sudo -n -u tsuite-support-operator tsuite-support-console-action show SESSION_ID
-sudo -n -u tsuite-support-operator tsuite-support-console-action ssh SESSION_ID
-sudo -n -u tsuite-support-operator tsuite-support-console-action run SESSION_ID -- sudo tsuite-deploy
-sudo -n -u tsuite-support-operator tsuite-support-console-action close SESSION_ID --closed-by adam
-sudo -n -u tsuite-support-operator tsuite-support-console-action force-close SESSION_ID \
-  --closed-by adam --reason "客户服务器已离线；工单记录了待到期回收的本地残留"
-```
-
-普通 `close` 会先确认客户侧清理已经调度，再撤销堡垒机，并记录关闭人。只有客户不可达且已记录残留
-风险时，运维人员才能显式使用带 `--reason` 的 `force-close`；Web 页面没有该权限。关闭方式、关闭人和
-原因会保留在 edge 会话历史中。
-
-## 便携支持机授权
-
-新建支持会话一次返回默认 Linux 客户命令和支持机命令；在两条命令各自的标题旁使用 Linux/Windows
-按钮切换系统。客户接入后被控机系统锁定，支持机命令仍可切换。Windows 支持端使用原生
-PowerShell/OpenSSH，无需 WSL、Python 或 PuTTY。支持机自动通过公开域名的 HTTPS
-`/support/operator-claim` 领取会话专属证书，无需到控制机的 SSH 权限或额外 GitHub 登录。
-控制机只参与授权；终端数据经 Edge 直接到客户。页面 sudoers 增加无参数 `claim`，请求正文
-经 stdin 交给 broker；broker 保存凭据哈希，授权领取、系统切换、关闭与回收共用会话锁，
-避免已消费授权被其他状态更新恢复，不向页面暴露任何私钥。
-`install-support-console.sh` 同时安装 Linux portable client、活动上报模块及 Windows PowerShell/C# 客户端。
-两种支持端都持久保存最新确认的租约期限；已下载的旧程序需通过新建会话获取修复版本。
-详见 [临时支持会话](../support-session/README.md#任意-linux--windows-支持机接入)与
-[2026-10-09 修复及部署验证](../docs/validation/support-session-review-fixes-20261009.md)。
+本次源码拆分保持 installed commands、HTTP 路径、配置和会话状态不变，不需重启服务。
+升级操作和安全边界以[工具运维手册](https://github.com/transinfosh/tsuite-support/blob/main/docs/operations.md)为准；
+便携 Linux/Windows 支持端及 AI 操作说明见[工具 README](https://github.com/transinfosh/tsuite-support)。
 
 ## 安全约束
 

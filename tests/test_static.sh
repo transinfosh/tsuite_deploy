@@ -6,22 +6,12 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 bash -n "$repo_root/single-node/deploy.sh"
 bash -n "$repo_root/install.sh"
 bash -n "$repo_root/multi-node/tools/create-source-bundle.sh"
-bash -n "$repo_root/support-session/bastion/install.sh"
-bash -n "$repo_root/support-session/customer/bootstrap.sh"
-bash -n "$repo_root/support-session/operator/install.sh"
 python3 -m py_compile \
-	"$repo_root/support-session/bastion/tsuite_support_session.py" \
-	"$repo_root/support-session/operator/tsuite-support" \
-	"$repo_root/support-session/operator/tsuite_support_portable.py" \
-	"$repo_root/support-session/console/tsuite_support_console.py" \
-	"$repo_root/support-session/console/tsuite_support_remote_action.py" \
-	"$repo_root/support-session/bastion/tsuite_support_console_action.py" \
 	"$repo_root/patch-deploy/patch.py" \
 	"$repo_root/patch-deploy/remote.py"
+python3 -m unittest discover -s "$repo_root/tests" -p 'test_support_release.py'
 python3 -m unittest discover -s "$repo_root/patch-deploy/tests" -p 'test_*.py'
-python3 -m unittest discover -s "$repo_root/support-session/tests" -p 'test_*.py'
 "$repo_root/tests/test_single_node_adopt.sh"
-"$repo_root/support-session/tests/test_ssh_restrictions.sh"
 "$repo_root/single-node/deploy.sh" --help | grep -q -- "--dry-run"
 grep -q "single-node/deploy.sh" "$repo_root/install.sh"
 python3 - "$repo_root/.github/workflows/build-images.yml" <<'PY'
@@ -43,11 +33,11 @@ assert len(checkouts) == 1, "Expected one deployment build definitions checkout"
 assert re.fullmatch(r"[a-f0-9]{40}", checkouts[0]["ref"]), "Pin deployment definitions to their own commit"
 PY
 
+for script in "$repo_root"/control-node/*.sh "$repo_root"/control-node/github-egress/*.sh; do bash -n "$script"; done
+
 if command -v shellcheck >/dev/null 2>&1; then
 	shellcheck "$repo_root/single-node/deploy.sh" "$repo_root/install.sh" "$repo_root/multi-node/tools/create-source-bundle.sh"
-	shellcheck "$repo_root/support-session/bastion/install.sh" \
-		"$repo_root/support-session/customer/bootstrap.sh" \
-		"$repo_root/support-session/operator/install.sh"
+	shellcheck --severity=warning "$repo_root"/control-node/*.sh "$repo_root"/control-node/github-egress/*.sh
 fi
 
 python3 - "$repo_root/multi-node/ansible" "$repo_root/single-node/deploy.sh" "$repo_root/install.sh" <<'PY'
