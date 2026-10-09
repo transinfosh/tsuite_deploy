@@ -32,9 +32,9 @@ Agent 应自行完成状态盘点、版本包含关系验证、构建跟踪、�
 | 角色 | 当前地址或入口 | 主要职责 | 事实来源 |
 | --- | --- | --- | --- |
 | GitHub | `transinfosh/*` | 源码、不可变 Tag、Actions、GHCR | 远端仓库与 Actions 运行记录 |
-| 部署控制机 | `adam@192.168.2.52` | 部署仓库、Ansible、发布文件、支持页面、FRPC | `/srv/tsuite-deploy`、`/etc/frp`、`/etc/tsuite-support-control` |
+| 部署控制机 | `adam@192.168.2.52` | 部署仓库、Ansible、发布文件、支持页面、FRPC | `/srv/tsuite-deploy`、`/etc/frp`、`/etc/tsuite-connect-control` |
 | 公网 edge | `edge.trinfo.net` | Caddy、FRPS、SSH enrollment 和反向隧道 | `/etc/caddy`、`/etc/frp`、`/etc/tsuite-support` |
-| 支持管理页 | `https://edge.trinfo.net/support/` | 本地密码+TOTP（GitHub SSO 备用）、创建/查看/关闭支持会话 | 控制机 `tsuite-support-console.service` |
+| 支持管理页 | `https://edge.trinfo.net/connect/` | 本地密码+TOTP（GitHub SSO 备用）、创建/查看/关闭支持会话 | 控制机 `tsuite-connect-console.service` |
 | 客户单机部署 | 临时支持隧道内访问 | Frappe、Redis、队列、调度器及站点 | `/opt/tsuite-deploy/deployment.state` 和 Docker 实际状态 |
 
 部署控制机是唯一日常部署工作台。开发机可修改和推送代码，但不应作为长期发布制品、Vault、客户文件
@@ -48,20 +48,20 @@ Agent 应自行完成状态盘点、版本包含关系验证、构建跟踪、�
 /srv/tsuite-deploy/logs/           部署日志
 /srv/tsuite-deploy/backups/        控制面配置备份
 /etc/frp/frpc.toml                 FRPC 配置和 Token（受限权限）
-/etc/tsuite-support-console/       GitHub OAuth 配置
-/etc/tsuite-support-control/       固定 Host Key 与 broker 通道配置
+/etc/tsuite-connect-console/       GitHub OAuth 配置
+/etc/tsuite-connect-control/       固定 Host Key 与 broker 通道配置
 ```
 
-控制机支持通道由专用 `tsuite-support-operator` broker 管理：
+控制机支持通道由专用 `tsuite-connect-operator` broker 管理：
 
 ```text
-/etc/tsuite-support-control/bridge_ed25519         调用 edge forced-command 的固定 key
-/etc/tsuite-support-control/edge_operator_ed25519  edge forced session proxy key（不能登录 Shell）
-/var/lib/tsuite-support-operator/sessions/          每会话独立 customer operator key
+/etc/tsuite-connect-control/bridge_ed25519         调用 edge forced-command 的固定 key
+/etc/tsuite-connect-control/edge_operator_ed25519  edge forced session proxy key（不能登录 Shell）
+/var/lib/tsuite-connect-operator/sessions/          每会话独立 customer operator key
 ```
 
 Web 服务不能读取以上私钥。`adam` 也不直接读取私钥，只能通过最小 sudo 调用 broker 的受限动作。
-固定私钥必须归 `tsuite-support-operator` 所有且权限为 `0600`；不能使用组可读的 `0640`，否则
+固定私钥必须归 `tsuite-connect-operator` 所有且权限为 `0600`；不能使用组可读的 `0640`，否则
 OpenSSH 会因私钥权限过宽而拒绝加载。
 
 客户单机关键目录：
@@ -108,16 +108,16 @@ git fetch --tags origin
 检查控制面：
 
 ```bash
-systemctl is-active nginx tsuite-frpc tsuite-support-console tsuite-github-egress
+systemctl is-active nginx tsuite-frpc tsuite-connect-console tsuite-github-egress
 curl -fsS http://127.0.0.1:8081/_tsuite-control-health
 curl -sS -o /dev/null -w '%{http_code}\n' https://edge.trinfo.net/_tsuite-control-health
-curl -sS -o /dev/null -w '%{http_code}\n' https://edge.trinfo.net/support/
+curl -sS -o /dev/null -w '%{http_code}\n' https://edge.trinfo.net/connect/
 ```
 
 预期公网健康检查为 `200`，未登录支持页面通常为 `401` 或进入 GitHub 登录流程。若服务异常，先读取：
 
 ```bash
-journalctl -u tsuite-frpc -u tsuite-support-console -u tsuite-github-egress -n 200 --no-pager
+journalctl -u tsuite-frpc -u tsuite-connect-console -u tsuite-github-egress -n 200 --no-pager
 ```
 
 不得在未诊断原因前反复重装服务。
@@ -195,7 +195,7 @@ gh run watch --repo transinfosh/<repo> <run-id> --exit-status
 
 ## 7. 创建客户临时支持会话
 
-1. 运维人员打开 `https://edge.trinfo.net/support/`，使用获准的本地账号、密码和 TOTP 登录；GitHub 组织账号作为备用登录方式；
+1. 运维人员打开 `https://edge.trinfo.net/connect/`，使用获准的本地账号、密码和 TOTP 登录；GitHub 组织账号作为备用登录方式；
 2. 使用固定、可复用的客户环境标识，例如 `dtaut-srm-prod-01`；同一机器不要每次换名字；
 3. 点击“创建会话”；一次创建即返回默认 Linux 客户命令和支持端命令。需要 Windows 客户机时点击客户命令旁的 Windows 按钮，页面自动更新命令；客户接入前可以切换，接入后被控机系统锁定；
 4. 将页面生成的客户执行命令通过安全渠道交给客户；领取链接默认 15 分钟有效；
@@ -213,10 +213,10 @@ gh run watch --repo transinfosh/<repo> <run-id> --exit-status
 在控制机查看会话状态的受限命令为：
 
 ```bash
-sudo -n -u tsuite-support-operator \
-  /usr/local/bin/tsuite-support-console-action list
-sudo -n -u tsuite-support-operator \
-  /usr/local/bin/tsuite-support-console-action show <SESSION_ID>
+sudo -n -u tsuite-connect-operator \
+  /usr/local/bin/tsuite-connect-console-action list
+sudo -n -u tsuite-connect-operator \
+  /usr/local/bin/tsuite-connect-console-action show <SESSION_ID>
 ```
 
 开始部署前必须确认状态为 `enrolled`、`tunnel_reachable` 为 true，且未超过当前 `expires_at`。
@@ -229,23 +229,23 @@ sudo -n -u tsuite-support-operator \
 私钥，通过 Edge 的 HTTPS 接口向控制机领取一次性会话专属证书，然后直接经 Edge 的受限
 SSH 代理到客户；无需 GitHub 再登录或到控制机的 SSH 权限。客户未接入时自动等待。
 凭据默认 15 分钟内领取且仅能领取一次，必须像密码一样保管完整命令。再次连接使用工具
-输出的本机 `support.py --resume` 命令；支持机不保存控制机或 Edge 的长期私钥。
+输出的本机 `connect.py --resume` 命令；支持机不保存控制机或 Edge 的长期私钥。
 
 Windows 支持机在会话命令页选择“支持机操作系统 = Windows”，使用原生 64 位 PowerShell 5.1/7
 和 OpenSSH Client，无需 WSL/Python。AI 首次执行网页支持命令时追加 `-Command 'hostname'`；
-再次连接通过独立 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <本机会话目录>/support.ps1
+再次连接通过独立 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <本机会话目录>/connect.ps1
 -Mode Resume -Command '<远端命令>'` 进程执行，并检查退出码。Linux 客户命令传给远端 Shell，Windows
 客户命令自动以 PowerShell UTF-16LE 编码执行。支持机与客户机系统选项独立；客户命令仍按客户机系统生成。
 Windows 原生支持机要求 Windows 10 1809+ / Windows 11 / Server 2019+；详细生命周期和验收见专项说明。
 
 支持机的真实输入沿用原活动上报机制，状态轮询不续期。网页普通关闭仍由控制机原有独立
 operator key 确认客户清理，随后撤销 Edge CA 信任和隧道；支持机的本地清理程序按会话状态和
-最后确认租约删除临时文件。客户 Linux/Windows CA 信任、Edge manager/bridge/受限 Shell 与
+最后确认租约删除临时文件。协议变更时，客户 Linux/Windows CA 信任、Edge manager/bridge/受限 Shell 与
 控制机 broker/页面/sudoers 必须同步更新；已接入旧会话继续使用原连接方式。
 
 ### 控制机到客户的 SSH 前置条件
 
-控制机的 `tsuite-support-operator` broker 独占 bridge、edge forced proxy 和每会话客户私钥；Web
+控制机的 `tsuite-connect-operator` broker 独占 bridge、edge forced proxy 和每会话客户私钥；Web
 服务与日常账号均不能直接读取这些文件。broker 固定 edge 与客户 Host Key，并根据完整 12 位会话 ID
 选择对应的独立客户 identity。禁止绕过 broker 读取密钥、手工拼接 SSH，或使用
 `StrictHostKeyChecking=no`。
@@ -254,17 +254,17 @@ operator key 确认客户清理，随后撤销 Edge CA 信任和隧道；支持�
 
 ```bash
 SESSION_ID=<SESSION_ID>
-sudo -n -u tsuite-support-operator \
-  /usr/local/bin/tsuite-support-console-action show "$SESSION_ID"
-sudo -n -u tsuite-support-operator \
-  /usr/local/bin/tsuite-support-console-action ssh "$SESSION_ID"
+sudo -n -u tsuite-connect-operator \
+  /usr/local/bin/tsuite-connect-console-action show "$SESSION_ID"
+sudo -n -u tsuite-connect-operator \
+  /usr/local/bin/tsuite-connect-console-action ssh "$SESSION_ID"
 ```
 
 执行单条远端命令使用 broker 的 `run`，不要把密码或 Token 拼入命令行：
 
 ```bash
-sudo -n -u tsuite-support-operator \
-  /usr/local/bin/tsuite-support-console-action run "$SESSION_ID" -- sudo tsuite-deploy
+sudo -n -u tsuite-connect-operator \
+  /usr/local/bin/tsuite-connect-console-action run "$SESSION_ID" -- sudo tsuite-deploy
 ```
 
 ## 8. 客户单机升级标准流程
@@ -405,17 +405,17 @@ ansible-playbook -i inventories/<inventory>/hosts.yml playbooks/verify.yml \
 ```text
 nginx.service
 tsuite-frpc.service
-tsuite-support-console.service
+tsuite-connect-console.service
 tsuite-github-egress.service
-tsuite-support-operator-gc.timer
+tsuite-connect-operator-gc.timer
 ```
 
 控制机日常免密权限由 `/etc/sudoers.d/tsuite-deploy-operator` 限定，只允许：
 
-- 页面以 `tsuite-support-operator` broker 身份执行会话 `create`、接入前 `set-platform`、`list`、`show`、普通 `close`；
+- 页面以 `tsuite-connect-operator` broker 身份执行会话 `create`、接入前 `set-platform`、`list`、`show`、普通 `close`；
 - `adam` 以 broker 身份执行 `list`、`show`、带关闭人参数的普通 `close`、带原因的 `force-close`、
   `ssh` 和 `run`；
-- 精确重启 `nginx`、`tsuite-frpc`、`tsuite-support-console`、`tsuite-github-egress`。
+- 精确重启 `nginx`、`tsuite-frpc`、`tsuite-connect-console`、`tsuite-github-egress`。
 
 2026-09-08 现场更新：用户已为 `adam` 增加 `(ALL : ALL) NOPASSWD: ALL`，
 已通过 `sudo -n -l` 和 `sudo -n /usr/bin/id -u`（返回 `0`）核实；当前控制机部署无需再次输入 sudo 密码。
@@ -433,9 +433,9 @@ tsuite-support-gc.timer
 控制面备份必须异机保存，至少包含：
 
 - `/etc/frp/frpc.toml`；
-- `/etc/tsuite-support-console/`（仅 OAuth 配置）；
-- `/etc/tsuite-support-control/`（必须作为 Secret 加密备份）；
-- 不备份 `/var/lib/tsuite-support-operator/sessions/`；其中是短期会话私钥，关闭或过期后必须删除；
+- `/etc/tsuite-connect-console/`（仅 OAuth 配置）；
+- `/etc/tsuite-connect-control/`（必须作为 Secret 加密备份）；
+- 不备份 `/var/lib/tsuite-connect-operator/sessions/`；其中是短期会话私钥，关闭或过期后必须删除；
 - `/srv/tsuite-deploy/repositories/` 中的 inventory 与加密 Vault；
 - Vault 密码文件和部署 identity（通过独立 Secret Manager 或离线加密备份）；
 - edge 的 Caddy、FRPS、support-session 配置和 SSH Host Key。
@@ -458,7 +458,7 @@ Agent 每次开始部署时应先检查这些事项的当前状态。若缺项�
 
 - [仓库总览](../README.md)
 - [部署控制机](../control-node/README.md)
-- [临时远程支持会话](https://github.com/transinfosh/tsuite-support)
+- [临时远程支持会话](https://github.com/transinfosh/tsuite-connect)
 - [单机部署](../single-node/README.md)
 - [多节点部署](../multi-node/README.md)
 - [共享部署契约](../shared/contracts/README.md)
@@ -479,10 +479,10 @@ Agent 每次开始部署时应先检查这些事项的当前状态。若缺项�
 ## 使用独立支持服务
 
 业务部署统一使用 `adam@192.168.2.52` 上现有的支持服务，入口为
-[支持管理页面](https://edge.trinfo.net/support/)。按本手册创建会话、执行页面当前生成的命令、
+[支持管理页面](https://edge.trinfo.net/connect/)。按本手册创建会话、执行页面当前生成的命令、
 完成业务部署并关闭会话，无需在部署仓库下载或安装支持工具。
 
-支持工具源码、发布、安装和升级由 [tsuite-support](https://github.com/transinfosh/tsuite-support)
+支持工具源码、发布、安装和升级由 [tsuite-support](https://github.com/transinfosh/tsuite-connect)
 独立维护。`tsuite_deploy` 不锁定支持工具版本，也不自动升级服务；安装新的业务部署节点不安装支持服务。
 支持服务维护应在独立仓库执行，并先阅读其 `docs/operations.md`；
 本手册继续负责业务部署、部署机及现有 FRP、Nginx/Caddy 共享路由。

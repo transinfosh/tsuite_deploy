@@ -27,14 +27,14 @@ edge.trinfo.net（Caddy、FRPS、SSH enrollment/tunnel）
 - `/srv/tsuite-deploy/logs/`：部署日志；
 - `/srv/tsuite-deploy/backups/`：控制面配置备份；
 - `/etc/frp/frpc.toml`：FRPC Token，权限 `0640 root:tsuite-deploy`；
-- `/etc/tsuite-support-console/`：支持页面 OAuth 配置；
-- `/etc/tsuite-support-control/`：broker 的固定 Host Key 与受限 SSH 配置；
-- `/var/lib/tsuite-support-operator/`：每会话独立私钥和最小会话索引。
-- `/etc/tsuite-support-control/*_ed25519`：固定桥接私钥，仅
-  `tsuite-support-operator` 可读，权限为 `0600`。
+- `/etc/tsuite-connect-console/`：支持页面 OAuth 配置；
+- `/etc/tsuite-connect-control/`：broker 的固定 Host Key 与受限 SSH 配置；
+- `/var/lib/tsuite-connect-operator/`：每会话独立私钥和最小会话索引。
+- `/etc/tsuite-connect-control/*_ed25519`：固定桥接私钥，仅
+  `tsuite-connect-operator` 可读，权限为 `0600`。
 
-控制面备份应加密保存 `/etc/tsuite-support-control/`，但必须排除
-`/var/lib/tsuite-support-operator/sessions/`；短期会话私钥不能进入长期备份。
+控制面备份应加密保存 `/etc/tsuite-connect-control/`，但必须排除
+`/var/lib/tsuite-connect-operator/sessions/`；短期会话私钥不能进入长期备份。
 
 ## 基础安装
 
@@ -54,15 +54,15 @@ sudo ./install.sh \
 
 ## 使用现有支持服务
 
-业务部署统一使用已部署在 `192.168.2.52` 的 TSuite Support，管理入口为
-[支持管理页面](https://edge.trinfo.net/support/)。登录后创建会话，将客户命令交给客户，
+业务部署统一使用已部署在 `192.168.2.52` 的 TSuite Connect，管理入口为
+[支持管理页面](https://edge.trinfo.net/connect/)。登录后创建会话，将客户命令交给客户，
 在支持机执行页面生成的支持端命令，连接后进行业务部署；完成后关闭会话。
 具体操作见 [AI Agent 部署运行手册](../docs/AI_AGENT_DEPLOYMENT_RUNBOOK.md)。
 
 `tsuite_deploy` 只消费现有支持服务，不下载支持工具源码、不锁定其版本，也不负责安装或升级支持服务。
 支持服务独立维护，更新后业务部署使用服务当前生成的接入命令即可。
 支持服务安装、升级、备份和权限维护统一由
-[tsuite-support](https://github.com/transinfosh/tsuite-support) 仓库负责。
+[tsuite-support](https://github.com/transinfosh/tsuite-connect) 仓库负责。
 
 本仓库仍维护现有控制机的 FRP、Nginx/Caddy 混合路由，因为它们同时承载部署文件与支持页面。
 安装新的业务部署节点无需部署支持服务；维护上述共享路由时应确保现有 `/support/` 与
