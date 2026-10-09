@@ -148,9 +148,14 @@ public static class RelayFixture {
     $inputStream.Position = 0
     $outputStream = New-Object IO.MemoryStream
     $errorStream = New-Object IO.MemoryStream
+    $inputEncoding = [Console]::InputEncoding
     try {
+        if ($windows) { [Console]::InputEncoding = New-Object Text.UTF8Encoding($true) }
         $exitCode = [TSuiteSupport.WindowsRelay]::RunCommand($relayExecutable, $fixtureArgs, $reportArgs,
             $inputStream, $outputStream, $errorStream)
+        if ($windows) {
+            Assert-True ([Console]::InputEncoding.GetPreamble().Length -eq 3) 'Relay changed the host input encoding.'
+        }
         Assert-True ($exitCode -eq 7) 'Remote command exit code was lost.'
         $outputBytes = $outputStream.ToArray()
         Assert-True ($outputBytes.Length -eq 131076) ("Binary stdout/stdin truncated: received $($outputBytes.Length), expected 131076.")
@@ -162,6 +167,7 @@ public static class RelayFixture {
         $reports = [IO.File]::ReadAllText($activityLog)
         Assert-True ($reports -eq 'activity' -or $reports -eq 'activityactivity') 'Output caused spurious activity reporting.'
     } finally {
+        if ($windows) { [Console]::InputEncoding = $inputEncoding }
         $inputStream.Dispose(); $outputStream.Dispose(); $errorStream.Dispose()
     }
     Assert-Rejected {

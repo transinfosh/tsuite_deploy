@@ -45,6 +45,25 @@ namespace TSuiteSupport {
             };
         }
 
+        static readonly object StartLock = new object();
+
+        static Process StartProcess(string executable, string[] arguments) {
+            // Framework 4.x has no StandardInputEncoding option. Process.Start
+            // creates an AutoFlush writer using Console.InputEncoding, emitting
+            // its BOM before any raw BaseStream input. Keep the same UTF-8 code
+            // page but suppress that preamble during process creation only.
+            lock (StartLock) {
+                Encoding original = Console.InputEncoding;
+                bool suppress = original.CodePage == 65001 && original.GetPreamble().Length != 0;
+                try {
+                    if (suppress) Console.InputEncoding = new UTF8Encoding(false);
+                    return Process.Start(StartInfo(executable, arguments));
+                } finally {
+                    if (suppress) Console.InputEncoding = original;
+                }
+            }
+        }
+
         public sealed class Result {
             public int ExitCode;
             public string Output;
@@ -61,7 +80,7 @@ namespace TSuiteSupport {
         }
 
         public static Result Capture(string executable, string[] arguments, int timeoutMilliseconds) {
-            using (Process process = Process.Start(StartInfo(executable, arguments))) {
+            using (Process process = StartProcess(executable, arguments)) {
                 process.StandardInput.Close();
                 string output = null, error = null;
                 Exception failure = null;
@@ -163,7 +182,7 @@ namespace TSuiteSupport {
 
         public static int RunCommand(string executable, string[] arguments, string[] activityArguments,
                                      Stream input, Stream output, Stream error) {
-            using (Process process = Process.Start(StartInfo(executable, arguments)))
+            using (Process process = StartProcess(executable, arguments))
             using (Activity activity = new Activity(executable, activityArguments, true))
             using (InputPump pump = new InputPump(input, process.StandardInput.BaseStream, activity)) {
                 Exception failure = null;
