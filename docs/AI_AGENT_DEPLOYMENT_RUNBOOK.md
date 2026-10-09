@@ -476,9 +476,13 @@ Agent 每次开始部署时应先检查这些事项的当前状态。若缺项�
 镜像准备就绪后，在同一维护窗口撤回补丁，再按现有正式升级流程执行迁移与验证。
 这一步需要明确执行；第一版未自动嵌入全部历史单机与 Ansible 部署入口。
 
-## 独立支持工具版本
+## 使用独立支持服务
 
-支持工具已拆至 [tsuite-support](https://github.com/transinfosh/tsuite-support)，源码、测试、CI 与工具文档在该仓库维护。
-本仓库 `control-node/support-release.env` 固定其 Release 和 SHA-256，两个安装入口只负责调用。
-线上现有会话和目录不因源码拆分迁移。修改支持运行时前阅读其 `docs/operations.md`；
-本手册继续负责部署机、FRP、Nginx/Caddy 混合路由及业务部署流程。
+业务部署统一使用 `adam@192.168.2.52` 上现有的支持服务，入口为
+[支持管理页面](https://edge.trinfo.net/support/)。按本手册创建会话、执行页面当前生成的命令、
+完成业务部署并关闭会话，无需在部署仓库下载或安装支持工具。
+
+支持工具源码、发布、安装和升级由 [tsuite-support](https://github.com/transinfosh/tsuite-support)
+独立维护。`tsuite_deploy` 不锁定支持工具版本，也不自动升级服务；安装新的业务部署节点不安装支持服务。
+支持服务维护应在独立仓库执行，并先阅读其 `docs/operations.md`；
+本手册继续负责业务部署、部署机及现有 FRP、Nginx/Caddy 共享路由。

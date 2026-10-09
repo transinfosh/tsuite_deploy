@@ -52,45 +52,21 @@ sudo ./install.sh \
 [edge-support.caddy](edge-support.caddy) 仅转发 `/support/*`、`/deploy-files/*` 和健康检查路径；
 原 `/tsuite-support/*` enrollment 文件仍由堡垒机本地提供。
 
-## 支持管理页面
+## 使用现有支持服务
 
-支持工具已迁至独立仓库 [tsuite-support](https://github.com/transinfosh/tsuite-support)。
-源码、客户端、权限规则、测试、CI 和工具说明统一在该仓库维护。本仓库保留部署机的
-FRP、Nginx/Caddy 路由与两个兼容安装入口。
+业务部署统一使用已部署在 `192.168.2.52` 的 TSuite Support，管理入口为
+[支持管理页面](https://edge.trinfo.net/support/)。登录后创建会话，将客户命令交给客户，
+在支持机执行页面生成的支持端命令，连接后进行业务部署；完成后关闭会话。
+具体操作见 [AI Agent 部署运行手册](../docs/AI_AGENT_DEPLOYMENT_RUNBOOK.md)。
 
-`support-release.env` 固定 Release 版本和归档 SHA-256；安装入口下载并校验归档后调用
-独立安装器，不保存运行时代码副本。显式升级时同时更新版本与摘要。
-离线安装可使用 `sudo env TSUITE_SUPPORT_ARCHIVE=/绝对路径/源码归档 ./安装入口.sh ...`，
-归档仍须匹配固定摘要。
+`tsuite_deploy` 只消费现有支持服务，不下载支持工具源码、不锁定其版本，也不负责安装或升级支持服务。
+支持服务独立维护，更新后业务部署使用服务当前生成的接入命令即可。
+支持服务安装、升级、备份和权限维护统一由
+[tsuite-support](https://github.com/transinfosh/tsuite-support) 仓库负责。
 
-控制机依赖和首次安装顺序见[独立安装说明](https://github.com/transinfosh/tsuite-support/blob/main/control/README.md)。
-在现有部署机上继续使用本目录入口，它们保留原代理及精确服务维护权限：
-
-```bash
-sudo ./prepare-support-access.sh \
-  --bastion-host edge.trinfo.net \
-  --bastion-host-key-file /secure/path/edge-known-hosts \
-  --operator-user adam
-```
-
-将输出的两个公钥传到 edge，在独立 `tsuite-support` 的固定版本源码中运行
-`bastion/install-console-bridge.sh`，参数见独立安装说明；然后回到部署机执行：
-
-```bash
-sudo ./install-support-console.sh \
-  --github-client-id YOUR_CLIENT_ID \
-  --github-client-secret-file /secure/path/github-client-secret \
-  --github-allowed-org transinfosh
-```
-
-升级可省略 Secret 文件以沿用现有 OAuth 配置；本地管理员初始化参数由入口原样传递。
-控制台默认通过既有 `http://127.0.0.1:18080` 代理访问 GitHub；可显式传入 `--https-proxy` 覆盖。
-支持工具安装器直接检查本机 8765，部署集成还应验证 Nginx 的
-`http://127.0.0.1:8081/support/` 与公网 `https://edge.trinfo.net/support/` 均返回未登录 401。
-
-本次源码拆分保持 installed commands、HTTP 路径、配置和会话状态不变，不需重启服务。
-升级操作和安全边界以[工具运维手册](https://github.com/transinfosh/tsuite-support/blob/main/docs/operations.md)为准；
-便携 Linux/Windows 支持端及 AI 操作说明见[工具 README](https://github.com/transinfosh/tsuite-support)。
+本仓库仍维护现有控制机的 FRP、Nginx/Caddy 混合路由，因为它们同时承载部署文件与支持页面。
+安装新的业务部署节点无需部署支持服务；维护上述共享路由时应确保现有 `/support/` 与
+`/tsuite-support/` 路由可用。
 
 ## 安全约束
 

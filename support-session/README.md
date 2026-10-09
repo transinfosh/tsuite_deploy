@@ -1,8 +1,9 @@
-# 临时支持工具已迁移
+# 使用现有远程支持服务
 
-源代码、客户端、安装器、测试及说明已迁至独立仓库
-[transinfosh/tsuite-support](https://github.com/transinfosh/tsuite-support)。
+业务部署直接使用 `192.168.2.52` 上已部署的 TSuite Support：
+[支持管理页面](https://edge.trinfo.net/support/)。操作流程见
+[部署运行手册](../docs/AI_AGENT_DEPLOYMENT_RUNBOOK.md)。
 
-本仓库只维护部署集成，控制服务安装入口固定版本并校验 SHA-256。
-现有服务命令、HTTP 路径、配置和会话状态无需迁移；详见
-[控制机集成](../control-node/README.md#支持管理页面)。
+支持工具的源码、客户端、安装升级、测试及说明由独立仓库
+[transinfosh/tsuite-support](https://github.com/transinfosh/tsuite-support) 维护。
+本仓库不下载、不锁定版本、不安装支持工具。
