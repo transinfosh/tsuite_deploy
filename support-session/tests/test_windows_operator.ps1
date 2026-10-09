@@ -113,17 +113,47 @@ exit 7
     $reportScript = "[IO.File]::AppendAllText('" + $activityLog.Replace("'", "''") + "', 'activity'); exit 0"
     $reportArgs = [string[]]@('-NoProfile', '-NonInteractive', '-EncodedCommand',
         [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($reportScript)))
+    $relayExecutable = $hostExecutable
+    if ($windows) {
+        # Windows PowerShell's host can consume redirected stdin before the script
+        # opens it. Exercise raw pipes with a native child, as we do with ssh.exe.
+        $relayExecutable = Join-Path $script:testRoot 'relay-fixture.exe'
+        Add-Type -OutputAssembly $relayExecutable -OutputType ConsoleApplication -TypeDefinition @'
+using System;
+using System.IO;
+public static class RelayFixture {
+    public static int Main(string[] args) {
+        if (args.Length == 2 && args[0] == "report") {
+            File.AppendAllText(args[1], "activity");
+            return 0;
+        }
+        using (Stream output = Console.OpenStandardOutput())
+        using (Stream error = Console.OpenStandardError()) {
+            byte[] payload = new byte[131072];
+            for (int i = 0; i < payload.Length; i++) payload[i] = (byte)(i % 256);
+            output.Write(payload, 0, payload.Length);
+            error.WriteByte(69);
+            Console.OpenStandardInput().CopyTo(output);
+            output.Flush(); error.Flush();
+        }
+        return 7;
+    }
+}
+'@
+        $fixtureArgs = [string[]]@()
+        $reportArgs = [string[]]@('report', $activityLog)
+    }
     $inputStream = New-Object IO.MemoryStream
     $inputStream.Write([byte[]]@(0, 255, 13, 10), 0, 4)
     $inputStream.Position = 0
     $outputStream = New-Object IO.MemoryStream
     $errorStream = New-Object IO.MemoryStream
     try {
-        $exitCode = [TSuiteSupport.WindowsRelay]::RunCommand($hostExecutable, $fixtureArgs, $reportArgs,
+        $exitCode = [TSuiteSupport.WindowsRelay]::RunCommand($relayExecutable, $fixtureArgs, $reportArgs,
             $inputStream, $outputStream, $errorStream)
         Assert-True ($exitCode -eq 7) 'Remote command exit code was lost.'
         $outputBytes = $outputStream.ToArray()
-        Assert-True ($outputBytes.Length -eq 131076) 'Binary stdout/stdin truncated.'
+        Assert-True ($outputBytes.Length -eq 131076) ("Binary stdout/stdin truncated: received $($outputBytes.Length), expected 131076.")
         for ($index = 0; $index -lt 131072; $index++) {
             if ($outputBytes[$index] -ne ($index % 256)) { throw 'Binary stdout transcoded.' }
         }

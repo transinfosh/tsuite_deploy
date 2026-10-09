@@ -10,6 +10,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import types
 import urllib.parse
@@ -33,6 +34,21 @@ def write_private(path, value):
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w") as output:
         output.write(value)
+
+
+def save_lease(root, settings, deadline):
+    updated = dict(settings, expires_at=deadline)
+    fd, temporary = tempfile.mkstemp(prefix=".session.", dir=root)
+    try:
+        with os.fdopen(fd, "w") as output:
+            json.dump(updated, output)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, root / "session.json")
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    settings["expires_at"] = deadline
 
 
 def claim(grant, public_key):
@@ -139,6 +155,8 @@ def cleanup_watch(root, settings):
                     shutil.rmtree(root)
                     return 0
                 deadline = remote["expires_at"]
+                if deadline != settings["expires_at"]:
+                    save_lease(root, settings, deadline)
             except AuthorizationRevoked:
                 shutil.rmtree(root, ignore_errors=True)
                 return 0

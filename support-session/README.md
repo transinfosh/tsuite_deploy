@@ -99,6 +99,7 @@ Edge 的受限 SSH 代理到客户，不经过控制机。公开 `/support/opera
 支持机自动生成 Ed25519 私钥并保存在本机。控制机仅保存公钥，原始领取凭据只在创建结果
 显示一次，持久状态保存其 SHA-256；领取期限与客户领取期限相同，默认 15 分钟，但两者
 独立消费。并发领取由会话文件锁保护，只有一次成功领取；领取成功后不能换绑到另一把密钥。
+控制机的系统切换、关闭和后台回收共用这把锁，避免其他状态写入恢复已消费的授权。
 如领取响应丢失且本机未保存证书，关闭旧会话后重新创建，不回退到共享私钥或重复授权。
 
 每个新会话的控制机 operator key 同时作为该会话专属 SSH CA。客户仍保留原 operator 公钥，
@@ -117,6 +118,7 @@ python3 ~/.config/tsuite-support/portable/SESSION_ID/support.py --resume 'hostna
 ```
 
 本机后台清理程序每 30 秒核对会话状态，确认结束或超过最后确认租约时删除本次会话目录。
+Linux 与 Windows 支持端都将最新确认期限原子保存到本地会话文件；程序重启后临时断网也按此期限清理。
 网络不可用时按最后确认期限清理，不自行续期；支持机休眠或进程退出会延迟本机文件删除，
 但服务端到期/撤销仍生效。如已领取授权而客户没有接入，授权随客户领取窗口结束。
 
@@ -153,7 +155,7 @@ HTTPS POST 领取既有会话专属证书，拒绝重定向，并保持 Edge 与
 后台清理每 30 秒查询状态，并持久保存确认过的最新期限。关闭、撤销或最后确认期限到期时删除本机会话
 目录；网络故障不制造新期限。休眠或清理进程被终止会延迟本机删除，服务端租约与撤销仍生效。
 
-兼容影响：新增公开下载地址与创建表单 `operator_platform`，缺省 `linux`；原客户 `platform`、领取接口、
+兼容影响：新增公开下载地址与命令页 `operator_platform`，缺省 `linux`；原客户 `platform`、领取接口、
 CA/会话结构及 Linux 接入命令保持兼容。部署时更新控制机 console 和两个 Windows operator 文件并重启
 console 服务；安装器已包含这些文件。不需要为本次客户端扩展修改 Edge/客户的既有 portable 协议。
 已领取的 Linux 授权不能再用 Windows 领取；切换支持机需新建会话。
@@ -172,6 +174,11 @@ ConPTY、证书经 Edge 登录、持续输入续期与关闭清理验收；发�
 manager/bridge/受限 Shell、Linux/Windows bootstrap/续期程序、控制机 broker/页面及精确 sudoers
 中的 `claim` 与 `set-platform` 动作。`set-platform` 只允许尚未接入的会话更新被控机系统并重写
 客户脚本；页面仍不能读取私钥或执行 ssh/run/force-close。
+
+创建流程直接使用 `platform=linux` 并一次返回两端命令，不再创建 `pending` 中间态；CLI、bridge 与 broker
+均在创建资源前拒绝新的 `pending` 请求。旧版已持久化的 `pending` 会话仍可通过 `set-platform` 选定系统，
+无需迁移或修改已接入会话。更新须同步控制机 console/broker/Linux 支持端下载文件和 Edge manager/bridge；
+已下载到支持端的旧程序不会被远程覆盖，下次新建会话获取修复版本。
 
 验证范围：网页两条命令、先后执行顺序、错误/过期/重复及并发领取、跨会话隔离、Edge Shell
 拒绝、原生到期、租约同步及普通关闭。真实 OpenSSH 验证命令：

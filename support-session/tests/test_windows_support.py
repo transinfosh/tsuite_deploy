@@ -99,15 +99,15 @@ class WindowsSessionTest(unittest.TestCase):
 				SUPPORT.create_session(self.store, 'windows-one', sessions.PUBLIC_KEY, 'alice', 'upgrade', 'windows')
 		create.assert_not_called()
 
-	def test_pending_session_can_select_windows_before_enrollment_and_locks_after(self):
+	def test_linux_session_can_select_windows_before_enrollment_and_locks_after(self):
 		for name in ('bootstrap.ps1', 'windows-client.ps1'):
 			self.settings.bootstrap_path.with_name(name).write_bytes((sessions.ROOT / 'customer' / name).read_bytes())
 		with mock.patch.object(SUPPORT, 'create_tunnel_identity', return_value=('test-user', 'private', 'key')), \
 			mock.patch.object(SUPPORT, 'create_key_pair', return_value=('private', sessions.PUBLIC_KEY)), \
 			mock.patch.object(SUPPORT, 'chown_to_user'), mock.patch.object(SUPPORT, 'allocate_port', return_value=22000), \
 			mock.patch.object(SUPPORT, 'rewrite_enrollment_authorized_keys'):
-			session, _ = SUPPORT.create_session(self.store, 'windows-one', sessions.PUBLIC_KEY, 'alice', '', 'pending')
-		self.assertEqual(session['platform'], 'pending')
+			session, _ = SUPPORT.create_session(self.store, 'windows-one', sessions.PUBLIC_KEY, 'alice', '', 'linux')
+		self.assertEqual(session['platform'], 'linux')
 		updated = SUPPORT.set_customer_platform(self.store, session['id'], 'windows')
 		self.assertEqual(updated['platform'], 'windows')
 		self.assertTrue(updated['customer_command'].startswith('powershell.exe'))
@@ -115,6 +115,18 @@ class WindowsSessionTest(unittest.TestCase):
 			SUPPORT.enroll(self.store, '', 'a' * 32, sessions.PUBLIC_KEY, session['id'], key_authenticated=True)
 		with self.assertRaisesRegex(SUPPORT.SupportError, '不能再切换'):
 			SUPPORT.set_customer_platform(self.store, session['id'], 'linux')
+
+	def test_pending_creation_is_rejected_before_allocating_resources(self):
+		with mock.patch.object(SUPPORT, 'create_tunnel_identity') as create:
+			with self.assertRaisesRegex(SUPPORT.SupportError, '操作系统无效'):
+				SUPPORT.create_session(self.store, 'customer-one', sessions.PUBLIC_KEY, 'alice', '', 'pending')
+		create.assert_not_called()
+		self.assertFalse(self.settings.downloads_dir.exists())
+		with mock.patch.object(SUPPORT.sys, 'stderr', io.StringIO()):
+			with self.assertRaises(SystemExit) as rejected:
+				SUPPORT.build_parser().parse_args(['create', '--customer', 'customer-one',
+					'--operator-public-key', '-', '--created-by', 'alice', '--platform', 'pending'])
+		self.assertEqual(rejected.exception.code, 2)
 
 	def test_legacy_enrollment_defaults_to_linux(self):
 		token = sessions.SupportSessionTest.save_issued_session(self)
@@ -193,11 +205,11 @@ class WindowsConsoleTest(unittest.TestCase):
 		app = console.CONSOLE.Application(self.settings)
 		session_id, csrf = app.store.new_session('alice', 'Alice')
 		cookie = f'tsuite_support_session={session_id}'
-		created = {'id': '012345abcdef', 'token': 'secret', 'platform': 'pending',
+		created = {'id': '012345abcdef', 'token': 'secret', 'platform': 'linux', 'customer_command': 'linux-command',
 			'operator_claim_token': 'A' * 43}
 		configured = {'id': '012345abcdef', 'platform': 'windows', 'customer_command': 'powershell.exe test'}
 		default = {'id': '012345abcdef', 'platform': 'linux', 'customer_command': 'linux-command'}
-		with mock.patch.object(console.CONSOLE, 'manager', side_effect=[json.dumps(created), json.dumps(default), json.dumps({'platform': 'linux'}), json.dumps(configured)]) as manager:
+		with mock.patch.object(console.CONSOLE, 'manager', side_effect=[json.dumps(created), json.dumps({'platform': 'linux'}), json.dumps(configured)]) as manager:
 			captured, content = self.call(app, '/session', 'POST', f'csrf={csrf}&customer=windows-one&purpose=maintenance', cookie)
 			self.assertTrue(captured['status'].startswith('200'))
 			self.assertIn('name="platform"', content)

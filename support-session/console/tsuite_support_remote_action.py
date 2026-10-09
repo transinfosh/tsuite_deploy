@@ -211,6 +211,16 @@ def load_local_session(settings: Settings, session_id: str) -> dict[str, Any]:
 	return value
 
 
+@contextlib.contextmanager
+def local_session_lock(settings: Settings, session_id: str):
+	# Keep the existing claim lock path so all state writers serialize with claim.
+	session_state_path(settings, session_id)
+	lock_path = settings.state_dir / "sessions" / f"{session_id}.claim.lock"
+	with lock_path.open("a", encoding="utf-8") as lock:
+		fcntl.flock(lock, fcntl.LOCK_EX)
+		yield
+
+
 def remove_local_session(settings: Settings, session_id: str) -> None:
 	for path in (identity_path(settings, session_id), session_state_path(settings, session_id)):
 		with contextlib.suppress(FileNotFoundError):
@@ -246,7 +256,7 @@ def close_remote(
 def create_session(
 	settings: Settings, customer: str, created_by: str, purpose: str = "", platform: str = "linux",
 ) -> dict[str, Any]:
-	if platform not in ("linux", "windows", "pending"):
+	if platform not in ("linux", "windows"):
 		raise RemoteActionError("客户操作系统无效")
 	sessions_dir = settings.state_dir / "sessions"
 	sessions_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -277,7 +287,7 @@ def create_session(
 		if created.get("platform", "linux") != platform:
 			close_remote(settings, session_id, "system:broker", "force", "堡垒机未返回请求的操作系统")
 			raise RemoteActionError("堡垒机不支持请求的操作系统，请同步升级")
-		if not isinstance(created.get("token"), str) or (platform != "pending" and not isinstance(created.get("customer_command"), str)):
+		if not isinstance(created.get("token"), str) or not isinstance(created.get("customer_command"), str):
 			close_remote(settings, session_id, "system:broker", "force", "堡垒机返回的会话凭据无效")
 			raise RemoteActionError("堡垒机返回的会话凭据无效")
 		if (created.get("portable_operator") is not True or type(created.get("token_expires_at")) is not int
@@ -316,21 +326,22 @@ def create_session(
 def set_customer_platform(settings: Settings, session_id: str, platform: str) -> dict[str, Any]:
 	if platform not in ("linux", "windows"):
 		raise RemoteActionError("客户操作系统无效")
-	remote = remote_session(settings, session_id)
-	if remote.get("status") != "issued":
-		raise RemoteActionError("客户已接入，不能再切换客户机操作系统")
-	request = json.dumps({"platform": platform}, separators=(",", ":")) + "\n"
-	result = remote_action(settings, "set-platform", session_id, input_text=request)
-	try:
-		updated = json.loads(ensure_success(result, "无法设置客户机操作系统"))
-	except json.JSONDecodeError as error:
-		raise RemoteActionError("堡垒机返回了无效系统设置") from error
-	if not isinstance(updated, dict) or updated.get("id") != session_id or updated.get("platform") != platform:
-		raise RemoteActionError("堡垒机返回的系统设置与请求不一致")
-	local = load_local_session(settings, session_id)
-	local["platform"] = platform
-	atomic_write(session_state_path(settings, session_id), json.dumps(local, ensure_ascii=False, sort_keys=True) + "\n")
-	return updated
+	with local_session_lock(settings, session_id):
+		remote = remote_session(settings, session_id)
+		if remote.get("status") != "issued":
+			raise RemoteActionError("客户已接入，不能再切换客户机操作系统")
+		request = json.dumps({"platform": platform}, separators=(",", ":")) + "\n"
+		result = remote_action(settings, "set-platform", session_id, input_text=request)
+		try:
+			updated = json.loads(ensure_success(result, "无法设置客户机操作系统"))
+		except json.JSONDecodeError as error:
+			raise RemoteActionError("堡垒机返回了无效系统设置") from error
+		if not isinstance(updated, dict) or updated.get("id") != session_id or updated.get("platform") != platform:
+			raise RemoteActionError("堡垒机返回的系统设置与请求不一致")
+		local = load_local_session(settings, session_id)
+		local["platform"] = platform
+		atomic_write(session_state_path(settings, session_id), json.dumps(local, ensure_ascii=False, sort_keys=True) + "\n")
+		return updated
 
 
 def windows_command(command: list[str]) -> str:
@@ -430,44 +441,45 @@ def close_session(
 	force: bool = False,
 	reason: str | None = None,
 ) -> None:
-	remote = remote_session(settings, session_id)
-	status = str(remote.get("status", ""))
-	if status in {"closed", "expired"}:
-		remove_local_session(settings, session_id)
-		return
-	if status in {"enrolled", "revoking"} and not force:
-		local = load_local_session(settings, session_id)
-		if not local.get("cleanup_confirmed_at"):
-			with tempfile.TemporaryDirectory(prefix="tsuite-support-known-hosts.") as temporary_dir:
-				known_hosts = pathlib.Path(temporary_dir) / "known_hosts"
-				arguments = customer_ssh_args(settings, session_id, remote, known_hosts)
-				cleanup = run(
-					[*arguments, windows_cleanup(session_id) if remote.get("platform") == "windows"
-					 else "sudo -n /usr/local/sbin/tsuite-support-client close"],
-					env=customer_proxy_environment(),
+	with local_session_lock(settings, session_id):
+		remote = remote_session(settings, session_id)
+		status = str(remote.get("status", ""))
+		if status in {"closed", "expired"}:
+			remove_local_session(settings, session_id)
+			return
+		if status in {"enrolled", "revoking"} and not force:
+			local = load_local_session(settings, session_id)
+			if not local.get("cleanup_confirmed_at"):
+				with tempfile.TemporaryDirectory(prefix="tsuite-support-known-hosts.") as temporary_dir:
+					known_hosts = pathlib.Path(temporary_dir) / "known_hosts"
+					arguments = customer_ssh_args(settings, session_id, remote, known_hosts)
+					cleanup = run(
+						[*arguments, windows_cleanup(session_id) if remote.get("platform") == "windows"
+						 else "sudo -n /usr/local/sbin/tsuite-support-client close"],
+						env=customer_proxy_environment(),
+					)
+					# The customer emits this marker only after its cleanup task starts.
+					# That task deliberately tears down the SSH tunnel, so the SSH process
+					# may report a connection-loss exit code after delivering the marker.
+					if f"cleanup-scheduled:{session_id}" not in cleanup.stdout:
+						raise RemoteActionError("客户侧清理未确认；会话未撤销，请重试或由运维显式 force-close")
+				local["cleanup_confirmed_at"] = int(time.time())
+				atomic_write(
+					session_state_path(settings, session_id),
+					json.dumps(local, ensure_ascii=False, sort_keys=True) + "\n",
 				)
-				# The customer emits this marker only after its cleanup task starts.
-				# That task deliberately tears down the SSH tunnel, so the SSH process
-				# may report a connection-loss exit code after delivering the marker.
-				if f"cleanup-scheduled:{session_id}" not in cleanup.stdout:
-					raise RemoteActionError("客户侧清理未确认；会话未撤销，请重试或由运维显式 force-close")
-			local["cleanup_confirmed_at"] = int(time.time())
-			atomic_write(
-				session_state_path(settings, session_id),
-				json.dumps(local, ensure_ascii=False, sort_keys=True) + "\n",
-			)
-	close_reason = reason if force else (
-		"客户侧清理已确认" if status in {"enrolled", "revoking"} else "客户尚未接入"
-	)
-	result = close_remote(
-		settings,
-		session_id,
-		closed_by,
-		"force" if force else "normal",
-		close_reason or "运维人员强制撤销会话",
-	)
-	ensure_success(result, "堡垒机会话关闭失败")
-	remove_local_session(settings, session_id)
+		close_reason = reason if force else (
+			"客户侧清理已确认" if status in {"enrolled", "revoking"} else "客户尚未接入"
+		)
+		result = close_remote(
+			settings,
+			session_id,
+			closed_by,
+			"force" if force else "normal",
+			close_reason or "运维人员强制撤销会话",
+		)
+		ensure_success(result, "堡垒机会话关闭失败")
+		remove_local_session(settings, session_id)
 
 
 def garbage_collect(settings: Settings) -> None:
@@ -477,16 +489,17 @@ def garbage_collect(settings: Settings) -> None:
 		session_id = state_path.stem
 		if not SESSION_RE.fullmatch(session_id):
 			continue
-		try:
-			remote = remote_session(settings, session_id)
-		except RemoteActionError:
-			with contextlib.suppress(RemoteActionError, KeyError, TypeError, ValueError):
-				local = load_local_session(settings, session_id)
-				if not local.get("idle_timeout_seconds") and int(local["expires_at"]) <= int(time.time()):
-					remove_local_session(settings, session_id)
-			continue
-		if remote.get("status") in {"closed", "expired"}:
-			remove_local_session(settings, session_id)
+		with local_session_lock(settings, session_id):
+			try:
+				remote = remote_session(settings, session_id)
+			except RemoteActionError:
+				with contextlib.suppress(RemoteActionError, KeyError, TypeError, ValueError):
+					local = load_local_session(settings, session_id)
+					if not local.get("idle_timeout_seconds") and int(local["expires_at"]) <= int(time.time()):
+						remove_local_session(settings, session_id)
+				continue
+			if remote.get("status") in {"closed", "expired"}:
+				remove_local_session(settings, session_id)
 	for key_path in sessions_dir.glob("*.ed25519"):
 		session_id = key_path.name.removesuffix(".ed25519")
 		if (
@@ -494,8 +507,9 @@ def garbage_collect(settings: Settings) -> None:
 			and not session_state_path(settings, session_id).exists()
 			and int(key_path.stat().st_mtime) <= now - 300
 		):
-			with contextlib.suppress(FileNotFoundError):
-				key_path.unlink()
+			with local_session_lock(settings, session_id), contextlib.suppress(FileNotFoundError):
+				if not session_state_path(settings, session_id).exists():
+					key_path.unlink()
 
 
 def claim_operator(settings: Settings, request: dict[str, Any]) -> dict[str, Any]:
@@ -509,9 +523,7 @@ def claim_operator(settings: Settings, request: dict[str, Any]) -> dict[str, Any
 		raise RemoteActionError("授权请求无效")
 	if not session_state_path(settings, session_id).is_file():
 		raise RemoteActionError("授权请求无效")
-	lock_path = settings.state_dir / "sessions" / f"{session_id}.claim.lock"
-	with lock_path.open("a", encoding="utf-8") as lock:
-		fcntl.flock(lock, fcntl.LOCK_EX)
+	with local_session_lock(settings, session_id):
 		local = load_local_session(settings, session_id)
 		if (local.get("claim_consumed_at") or int(time.time()) >= local.get("claim_expires_at", 0)
 			or not secrets.compare_digest(local.get("claim_hash", ""), hashlib.sha256(token.encode()).hexdigest())):
@@ -550,7 +562,7 @@ def parser() -> argparse.ArgumentParser:
 	create.add_argument("customer", type=validate_customer)
 	create.add_argument("--created-by", required=True, type=validate_created_by)
 	create.add_argument("--purpose", default="", type=lambda value: validate_purpose(value, allow_empty=True))
-	create.add_argument("--platform", choices=("linux", "windows", "pending"), default="linux")
+	create.add_argument("--platform", choices=("linux", "windows"), default="linux")
 	show = subparsers.add_parser("show")
 	show.add_argument("session_id", type=validate_session_id)
 	close = subparsers.add_parser("close")

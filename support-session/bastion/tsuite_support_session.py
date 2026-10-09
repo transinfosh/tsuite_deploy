@@ -353,7 +353,7 @@ def create_session(
 		raise SupportError("客户标识仅允许小写字母、数字和连字符")
 	created_by = validate_created_by(created_by)
 	purpose = validate_purpose(purpose, allow_empty=True)
-	if platform not in {"linux", "windows", "pending"}:
+	if platform not in {"linux", "windows"}:
 		raise SupportError("客户操作系统无效")
 	settings = store.settings
 	settings.validate()
@@ -814,7 +814,7 @@ def build_parser() -> argparse.ArgumentParser:
 	create.add_argument("--operator-public-key", required=True)
 	create.add_argument("--created-by", required=True)
 	create.add_argument("--purpose", default="")
-	create.add_argument("--platform", choices=("linux", "windows", "pending"), default="linux")
+	create.add_argument("--platform", choices=("linux", "windows"), default="linux")
 	create.add_argument("--json", action="store_true")
 	create.add_argument("--portable-operator", action="store_true")
 	show = subparsers.add_parser("show")

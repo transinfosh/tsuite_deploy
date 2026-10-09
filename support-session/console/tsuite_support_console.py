@@ -717,7 +717,7 @@ def operator_command(public_url: str, grant: str, operator_platform: str) -> tup
 
 def configured_session_content(created: dict[str, Any], csrf: str, customer: str, purpose: str,
 		operator_platform: str, grant: str, public_url: str) -> str:
-	platform = str(created.get("platform", "pending"))
+	platform = str(created.get("platform", "linux"))
 	command, operator_label, operator_hint = operator_command(public_url, grant, operator_platform)
 	session_id = html.escape(str(created["id"]))
 	hidden = (
@@ -748,8 +748,6 @@ def configured_session_content(created: dict[str, Any], csrf: str, customer: str
 {os_button("platform", "windows", "Windows 被控机（客户执行命令）", windows_icon, platform == "windows")}
 </form>'''
 	operator_section = '<div class="secret-section"><div class="secret-heading"><h2>支持机执行命令（' + operator_label + '）</h2><div class="heading-actions">' + operator_selector + '<button type="button" class="copy-button" data-copy-target="operator-command">复制</button></div></div><div id="operator-command" class="secret">' + html.escape(command) + '</div><p class="muted">自动生成本机密钥并领取一次性授权，无需登录 GitHub 或部署控制机。客户尚未接入时自动等待。请勿分享此命令。' + operator_hint + '</p></div>'
-	if platform == "pending":
-		return f'''<header><h1>会话已创建</h1><a href="/support/">返回会话列表</a></header><section class="card"><p>会话 ID：<code>{session_id}</code>。请先选择被控机操作系统。</p>{operator_section}{customer_selector}</section>'''
 	customer_title = "管理员 PowerShell" if platform == "windows" else "Linux 终端"
 	ai_text = operator_ai_instructions(customer, purpose, str(created["id"]), operator_platform, platform, command)
 	ai_section = '<div class="secret-section"><div class="secret-heading"><h2>交给 AI 的操作说明</h2><button type="button" class="copy-button" data-copy-target="ai-instructions">复制</button></div><div id="ai-instructions" class="secret">' + html.escape(ai_text) + '</div><p class="muted">复制给 AI，在末尾补充操作任务。含一次性授权，请勿公开分享。</p></div>'
@@ -1077,13 +1075,12 @@ class Application:
 				purpose = form.get("purpose", "").strip()
 				if len(purpose) > 200 or any(ord(character) < 32 for character in purpose):
 					raise ConsoleError("支持用途最多为 200 个可见字符")
-				platform = "pending"
 				operator_platform = "linux"
 				created = json.loads(manager(
 					"create", customer,
 					"--created-by", str(session["login"]),
 					"--purpose", purpose,
-					"--platform", "pending",
+					"--platform", "linux",
 				))
 				if not isinstance(created, dict) or not isinstance(created.get("token"), str):
 					raise ConsoleError("支持会话服务返回无效数据")
@@ -1094,7 +1091,6 @@ class Application:
 					content = f'''<header><h1>支持会话已创建</h1><a href="/support/">返回会话列表</a></header><section class="card"><p>会话 ID：<code>{html.escape(str(created.get("id", "")))}</code></p><div class="secret-section"><div class="secret-heading"><h2>客户执行命令</h2><button type="button" class="copy-button" data-copy-target="customer-command">复制</button></div><div id="customer-command" class="secret">{html.escape(created["customer_command"])}</div></div><p class="muted">此会话使用兼容接入方式。{legacy_hint}</p></section>'''
 					return self.response(start_response, HTTPStatus.OK, page("会话已创建", content))
 				grant = json.dumps({"id": created["id"], "token": created["operator_claim_token"], "url": self.settings.public_url}, separators=(",", ":"))
-				created = json.loads(manager("set-platform", str(created["id"]), "linux"))
 				if not isinstance(created, dict) or created.get("platform") != "linux" or not isinstance(created.get("customer_command"), str):
 					raise ConsoleError("支持会话服务未能生成默认 Linux 接入命令")
 				content = configured_session_content(created, str(session["csrf"]), customer, purpose,

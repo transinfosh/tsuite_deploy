@@ -138,7 +138,7 @@ def read_create_request() -> dict[str, str]:
 		raise ActionError("支持用途最多为 200 个可见字符")
 	fields["purpose"] = purpose
 	platform = value.get("platform", "linux")
-	if platform not in ("linux", "windows", "pending"):
+	if platform not in ("linux", "windows"):
 		raise ActionError("客户操作系统无效")
 	fields["platform"] = platform
 	if type(value.get("portable_operator", False)) is not bool:

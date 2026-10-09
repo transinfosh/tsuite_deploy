@@ -12,6 +12,7 @@ import pathlib
 import re
 import subprocess
 import tempfile
+import threading
 import time
 import types
 import unittest
@@ -98,6 +99,56 @@ class PortableClaimTest(unittest.TestCase):
         with mock.patch.object(REMOTE, "remote_session", return_value=self.remote):
             with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
                 self.assertEqual(sum(executor.map(attempt, range(4))), 1)
+
+    def test_platform_change_cannot_restore_a_consumed_grant(self):
+        read = threading.Event()
+        resume = threading.Event()
+        claiming = threading.Event()
+        platform_thread = []
+        original_load = REMOTE.load_local_session
+
+        def pause_platform_read(*args):
+            state = original_load(*args)
+            if threading.get_ident() == platform_thread[0]:
+                read.set()
+                if not resume.wait(5):
+                    raise RuntimeError("Platform update was not released")
+            return state
+
+        def switch():
+            platform_thread.append(threading.get_ident())
+            return REMOTE.set_customer_platform(self.settings, self.session_id, "windows")
+
+        def claim():
+            claiming.set()
+            return REMOTE.claim_operator(self.settings, self.request)
+
+        result = subprocess.CompletedProcess([], 0, json.dumps({"id": self.session_id, "platform": "windows"}))
+        with (
+            mock.patch.object(REMOTE, "load_local_session", side_effect=pause_platform_read),
+            mock.patch.object(REMOTE, "remote_session", return_value=self.remote),
+            mock.patch.object(REMOTE, "remote_action", return_value=result),
+            concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor,
+        ):
+            changing = executor.submit(switch)
+            try:
+                self.assertTrue(read.wait(5))
+                signing = executor.submit(claim)
+                self.assertTrue(claiming.wait(5))
+                with self.assertRaises(concurrent.futures.TimeoutError):
+                    signing.result(timeout=0.1)
+            finally:
+                resume.set()
+            changing.result(timeout=5)
+            signing.result(timeout=5)
+        state = original_load(self.settings, self.session_id)
+        self.assertEqual(state["platform"], "windows")
+        self.assertEqual(state["claimed_public_key"], self.public)
+        self.assertNotIn("claim_hash", state)
+        other_key = public_key(pathlib.Path(self.temporary.name) / "other-operator")
+        with mock.patch.object(REMOTE, "remote_session", return_value=self.remote):
+            with self.assertRaises(REMOTE.RemoteActionError):
+                REMOTE.claim_operator(self.settings, self.request | {"public_key": other_key})
 
     def test_expired_wrong_token_closed_and_cross_session_grants_are_rejected(self):
         for change in (
@@ -190,10 +241,9 @@ class PortableConsoleTest(unittest.TestCase):
         app = CONSOLE.Application(self.settings)
         session_id, csrf = app.store.new_session("alice", "Alice")
         created = {"id": "012345abcdef", "token": "legacy-token", "auth_mode": "enrollment-key",
-            "platform": "pending", "operator_claim_token": "A" * 43}
+            "platform": "linux", "customer_command": "linux-customer-command", "operator_claim_token": "A" * 43}
         body = f"customer=customer-one&csrf={csrf}"
-        configured = {"id": "012345abcdef", "platform": "linux", "customer_command": "linux-customer-command"}
-        with mock.patch.object(CONSOLE, "manager", side_effect=[json.dumps(created), json.dumps(configured), json.dumps({"platform": "linux"})]) as broker:
+        with mock.patch.object(CONSOLE, "manager", side_effect=[json.dumps(created), json.dumps({"platform": "linux"})]) as broker:
             captured, content = self.call(app, "/session", "POST", body,
                 cookie="tsuite_support_session=" + session_id)
             self.assertTrue(captured["status"].startswith("200"))
@@ -215,9 +265,8 @@ class PortableConsoleTest(unittest.TestCase):
         self.assertIn('id="customer-command"', content)
         self.assertIn("linux-customer-command", content)
         self.assertIn('aria-label="切换为Windows 支持机（PowerShell / OpenSSH）"', content)
-        self.assertEqual(broker.call_args_list[0].args, ("create", "customer-one", "--created-by", "alice", "--purpose", "", "--platform", "pending"))
-        self.assertEqual(broker.call_args_list[1].args, ("set-platform", "012345abcdef", "linux"))
-        self.assertEqual(broker.call_args_list[2].args, ("show", "012345abcdef"))
+        self.assertEqual(broker.call_args_list[0].args, ("create", "customer-one", "--created-by", "alice", "--purpose", "", "--platform", "linux"))
+        self.assertEqual(broker.call_args_list[1].args, ("show", "012345abcdef"))
 
     def test_invalid_operator_platform_does_not_create_a_session(self):
         app = CONSOLE.Application(self.settings)
@@ -243,14 +292,14 @@ class PortableConsoleTest(unittest.TestCase):
             for platform in ("linux", "windows"):
                 with self.subTest(operator=operator, customer=platform):
                     created = {"id": "012345abcdef", "token": "legacy-token", "auth_mode": "enrollment-key",
-                        "platform": "pending", "operator_claim_token": "A" * 43}
+                        "platform": "linux", "customer_command": "linux-customer-command", "operator_claim_token": "A" * 43}
                     default = {"id": "012345abcdef", "platform": "linux",
                         "customer_command": "default-linux-command"}
                     configured = {"id": "012345abcdef", "platform": platform,
                         "customer_command": "customer-command"}
                     body = urllib.parse.urlencode({"customer": "customer-one", "purpose": purpose, "csrf": csrf})
                     cookie = "tsuite_support_session=" + session_id
-                    side_effect = [json.dumps(created), json.dumps(default), json.dumps({"platform": "linux"})]
+                    side_effect = [json.dumps(created | default), json.dumps({"platform": "linux"})]
                     if platform != "linux":
                         side_effect.append(json.dumps(configured))
                     with mock.patch.object(CONSOLE, "manager", side_effect=side_effect) as broker:
@@ -282,10 +331,10 @@ class PortableConsoleTest(unittest.TestCase):
                         self.assertIn("python3 -c", content)
                         self.assertIn("支持机执行命令（Linux 终端）", content)
                     self.assertIn("远端命令使用 " + ("PowerShell" if platform == "windows" else "Linux Shell") + " 语法", prompt)
-                    self.assertEqual(broker.call_args_list[0].args, ("create", "customer-one", "--created-by", "alice", "--purpose", purpose, "--platform", "pending"))
-                    self.assertEqual(broker.call_args_list[2].args, ("show", "012345abcdef"))
+                    self.assertEqual(broker.call_args_list[0].args, ("create", "customer-one", "--created-by", "alice", "--purpose", purpose, "--platform", "linux"))
+                    self.assertEqual(broker.call_args_list[1].args, ("show", "012345abcdef"))
                     if platform != "linux":
-                        self.assertEqual(broker.call_args_list[3].args, ("set-platform", "012345abcdef", platform))
+                        self.assertEqual(broker.call_args_list[2].args, ("set-platform", "012345abcdef", platform))
         with app.store.connection() as connection:
             self.assertNotIn("A" * 43, "\n".join(connection.iterdump()))
 
@@ -318,10 +367,9 @@ class PortableConsoleTest(unittest.TestCase):
         app = CONSOLE.Application(self.settings)
         session_id, csrf = app.store.new_session("alice", "Alice")
         created = {"id": "012345abcdef", "token": "legacy-token", "auth_mode": "enrollment-key",
-            "platform": "pending", "operator_claim_token": "A" * 43}
-        configured = {"id": "012345abcdef", "platform": "linux", "customer_command": "linux-customer-command"}
+            "platform": "linux", "customer_command": "linux-customer-command", "operator_claim_token": "A" * 43}
         body = "customer=customer-one&purpose=&csrf=" + csrf
-        with mock.patch.object(CONSOLE, "manager", side_effect=[json.dumps(created), json.dumps(configured)]) as broker:
+        with mock.patch.object(CONSOLE, "manager", return_value=json.dumps(created)) as broker:
             captured, content = self.call(app, "/session", "POST", body,
                 cookie="tsuite_support_session=" + session_id)
         self.assertTrue(captured["status"].startswith("200"))
@@ -341,8 +389,8 @@ class PortableConsoleTest(unittest.TestCase):
         self.assertIn('data-os-icon="windows-logo"', content)
         self.assertIn('fill="#facc15"', content)
         self.assertIn('action="/support/session/012345abcdef/platform"', content)
-        self.assertEqual(broker.call_args_list[0].args, ("create", "customer-one", "--created-by", "alice", "--purpose", "", "--platform", "pending"))
-        self.assertEqual(broker.call_args_list[1].args, ("set-platform", "012345abcdef", "linux"))
+        self.assertEqual(broker.call_args_list[0].args, ("create", "customer-one", "--created-by", "alice", "--purpose", "", "--platform", "linux"))
+        self.assertEqual(broker.call_count, 1)
         self.assertIn(("Cache-Control", "no-store"), captured["headers"])
 
     def test_claim_endpoint_rejects_oversized_and_invalid_lengths(self):
@@ -354,6 +402,36 @@ class PortableConsoleTest(unittest.TestCase):
 
 
 class PortableCleanupTest(unittest.TestCase):
+    def test_confirmed_lease_survives_watcher_restart_and_network_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary) / "session"
+            root.mkdir()
+            (root / "identity").write_text("test-key")
+            settings = {"id": "012345abcdef", "expires_at": 1000}
+            PORTABLE.write_private(root / "session.json", json.dumps(settings))
+            with (
+                mock.patch.object(PORTABLE, "session_status", return_value={"status": "enrolled", "expires_at": 3000}),
+                mock.patch.object(PORTABLE.time, "time", return_value=1500),
+                mock.patch.object(PORTABLE.time, "sleep", side_effect=RuntimeError("watcher stopped")),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "watcher stopped"):
+                    PORTABLE.cleanup_watch(root, settings)
+            saved = json.loads((root / "session.json").read_text())
+            self.assertEqual(saved["expires_at"], 3000)
+            self.assertEqual((root / "session.json").stat().st_mode & 0o777, 0o600)
+
+            def sleep(_):
+                self.assertTrue((root / "identity").exists())
+
+            with (
+                mock.patch.object(PORTABLE, "session_status", side_effect=OSError),
+                mock.patch.object(PORTABLE.time, "time", side_effect=[1500, 1500, 3001]),
+                mock.patch.object(PORTABLE.time, "sleep", side_effect=sleep) as waiting,
+            ):
+                self.assertEqual(PORTABLE.cleanup_watch(root, saved), 0)
+            waiting.assert_called_once()
+            self.assertFalse(root.exists())
+
     def test_edge_authentication_rejection_removes_local_credentials(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary) / "session"
