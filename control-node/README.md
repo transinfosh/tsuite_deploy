@@ -135,12 +135,17 @@ sudo -n -u tsuite-support-operator tsuite-support-console-action force-close SES
 
 ## 便携支持机授权
 
-新建支持会话同时生成客户命令和 Linux 支持机命令。支持机自动通过公开域名的 HTTPS
+新建支持会话一次返回默认 Linux 客户命令和支持机命令；在两条命令各自的标题旁使用 Linux/Windows
+按钮切换系统。客户接入后被控机系统锁定，支持机命令仍可切换。Windows 支持端使用原生
+PowerShell/OpenSSH，无需 WSL、Python 或 PuTTY。支持机自动通过公开域名的 HTTPS
 `/support/operator-claim` 领取会话专属证书，无需到控制机的 SSH 权限或额外 GitHub 登录。
 控制机只参与授权；终端数据经 Edge 直接到客户。页面 sudoers 增加无参数 `claim`，请求正文
-经 stdin 交给 broker；broker 保存凭据哈希并在文件锁内单次消费，不向页面暴露任何私钥。
-`install-support-console.sh` 同时安装公开的 portable client 和活动上报模块。
-详见 [临时支持会话](../support-session/README.md#任意-linux-支持机接入)。
+经 stdin 交给 broker；broker 保存凭据哈希，授权领取、系统切换、关闭与回收共用会话锁，
+避免已消费授权被其他状态更新恢复，不向页面暴露任何私钥。
+`install-support-console.sh` 同时安装 Linux portable client、活动上报模块及 Windows PowerShell/C# 客户端。
+两种支持端都持久保存最新确认的租约期限；已下载的旧程序需通过新建会话获取修复版本。
+详见 [临时支持会话](../support-session/README.md#任意-linux--windows-支持机接入)与
+[2026-10-09 修复及部署验证](../docs/validation/support-session-review-fixes-20261009.md)。
 
 ## 安全约束
 

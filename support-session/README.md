@@ -158,13 +158,16 @@ HTTPS POST 领取既有会话专属证书，拒绝重定向，并保持 Edge 与
 兼容影响：新增公开下载地址与命令页 `operator_platform`，缺省 `linux`；原客户 `platform`、领取接口、
 CA/会话结构及 Linux 接入命令保持兼容。部署时更新控制机 console 和两个 Windows operator 文件并重启
 console 服务；安装器已包含这些文件。不需要为本次客户端扩展修改 Edge/客户的既有 portable 协议。
-已领取的 Linux 授权不能再用 Windows 领取；切换支持机需新建会话。
+授权领取前可自由切换支持端命令；领取后若更换支持机或密钥，必须新建会话，不能再次领取同一授权。
 
 验证：`python3 -m unittest discover -s support-session/tests -p 'test_*.py'` 验证网页与既有授权；
 `powershell.exe -NoProfile -File support-session/tests/test_windows_operator.ps1` 在隔离目录验证原生权限、
 真实 keygen、带空格路径、SSH 配置、命令编码、二进制转发、退出码、超时和清理。
 Windows CI 已纳入此测试。Linux 上 pwsh 可验证语法、配置和命令转发，但不能代替真实 Windows 上的
 ConPTY、证书经 Edge 登录、持续输入续期与关闭清理验收；发布前仍需完成这些系统集成验证。
+2026-10-09 的完整 Windows CI 已通过，包括原生字节流、带 UTF-8 BOM 的宿主环境、管理员运行时
+凭据所有权、租约清理及两套 OpenSSH 认证测试；100 项 Python 测试与真实 SSH 集成验证也已通过。
+代码版本、部署备份、结果及验证边界见[本次修复验证记录](../docs/validation/support-session-review-fixes-20261009.md)。
 具备 sudo 的 Linux 测试机还可运行 `python3 support-session/tests/verify_portable_ssh.py --operator-pwsh
 <pwsh路径>`，用两个隔离 sshd 验证 PowerShell/C# 构造的证书连接、Edge 代理与主机密钥拒绝。
 
@@ -278,7 +281,8 @@ Compose 容器和旧 volume 必须放在新部署健康检查、站点登录与�
 
 ## Windows 接入
 
-创建会话时选择 **Windows**，然后在客户机上以管理员身份打开 **64 位 Windows PowerShell
+创建会话后，在“客户执行命令”标题旁点击 **Windows** 按钮，再将更新后的命令发给客户。
+客户机上以管理员身份打开 **64 位 Windows PowerShell
 5.1**，执行页面的一次性命令，无需另输会话码。公司 CLI 同样支持：
 
 ```bash
