@@ -89,6 +89,11 @@ function Write-OperatorFile([string]$Path, [string]$Value) {
         $writer = New-Object IO.StreamWriter($stream, $encoding)
         try { $writer.Write($Value) } finally { $writer.Dispose() }
     } finally { $stream.Dispose() }
+    # Elevated tokens may default new files to Administrators ownership even
+    # inside our user-only directory. Normalize metadata as well as keygen files.
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        Set-OperatorFilePermissions $Path
+    }
 }
 
 function Save-OperatorLease([string]$Root, $Settings) {
