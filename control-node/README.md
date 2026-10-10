@@ -76,5 +76,5 @@ sudo ./install.sh \
 - 镜像构建继续使用 GitHub Actions，控制机只负责发布编排，避免本机资源耗尽；
 - 控制机 SSH 只允许公钥，禁止 root 与密码登录。
 
-旧登录入口 `/support/` 在控制机 Nginx 中以 308 跳转到 `/connect/`，保留查询参数。
-其余 `/support/*` 继续直接代理，兼容既有 operator-client 下载、授权 POST 和 GitHub OAuth 回调。
+`/support/` 与 `/connect/` 均直接代理至控制台，不做入口地址跳转。
+既有 operator-client 下载、授权 POST 和 GitHub OAuth 回调继续兼容。
