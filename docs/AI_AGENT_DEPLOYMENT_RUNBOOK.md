@@ -74,6 +74,13 @@ OpenSSH 会因私钥权限过宽而拒绝加载。
 /opt/tsuite-deploy/rollback/
 ```
 
+### 内网 Project Management 现场补充（2026-10-10）
+
+- `adam@192.168.2.50` 的实际运行站点为 `portal.trinfo.net`，Compose project 为 `frappe`，配置位于 `/home/adam/gitops/frappe-compose.yml`，sites volume 为 `frappe_docker_sites`。
+- 盘点时应用镜像为 `ghcr.io/transinfosh/project_management:0.0.19`；`/opt/tsuie-deploy/deployment.state` 仍记录旧站点 `office.trinfo.net` 和 0.0.3，不能作为该节点的升级输入，也不要在此次升级中接管或重建部署。
+- 该节点升级沿用现场 Compose，先停止入口和后台写入，备份数据库、站点文件与 Compose，再更新应用镜像、迁移并验证。备份复制到控制机后校验 SHA-256。
+- 控制机通过其独立 identity `~/.ssh/tsuite_deploy_ed25519` 连接该内网节点，无需临时支持隧道。
+
 ## 3. 不可违反的边界
 
 - 不在 Git、聊天、命令参数或普通日志中写入 OAuth Secret、FRP Token、GHCR Token、Vault 密码、
