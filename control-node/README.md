@@ -49,7 +49,7 @@ sudo ./install.sh \
 
 安装器创建专用 `tsuite-deploy` 服务账户、部署目录、仅回环监听的 Nginx、FRPC systemd 服务，
 并验证 `127.0.0.1:8081/_tsuite-control-health`。公网堡垒机使用
-[edge-support.caddy](edge-support.caddy) 仅转发 `/support/*`、`/deploy-files/*` 和健康检查路径；
+[edge-support.caddy](edge-support.caddy) 转发 `/connect/*`、兼容 `/support/*`、`/deploy-files/*` 和健康检查路径；
 原 `/tsuite-support/*` enrollment 文件仍由堡垒机本地提供。
 
 ## 使用现有支持服务
@@ -65,7 +65,7 @@ sudo ./install.sh \
 [tsuite-support](https://github.com/transinfosh/tsuite-connect) 仓库负责。
 
 本仓库仍维护现有控制机的 FRP、Nginx/Caddy 混合路由，因为它们同时承载部署文件与支持页面。
-安装新的业务部署节点无需部署支持服务；维护上述共享路由时应确保现有 `/support/` 与
+安装新的业务部署节点无需部署支持服务；维护上述共享路由时应确保现有 `/connect/`、`/support/*` 与
 `/tsuite-support/` 路由可用。
 
 ## 安全约束
@@ -75,3 +75,6 @@ sudo ./install.sh \
 - 客户下载目录禁止目录索引，发布文件应使用不可猜测路径并提供 SHA-256；
 - 镜像构建继续使用 GitHub Actions，控制机只负责发布编排，避免本机资源耗尽；
 - 控制机 SSH 只允许公钥，禁止 root 与密码登录。
+
+旧登录入口 `/support/` 在控制机 Nginx 中以 308 跳转到 `/connect/`，保留查询参数。
+其余 `/support/*` 继续直接代理，兼容既有 operator-client 下载、授权 POST 和 GitHub OAuth 回调。
