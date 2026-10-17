@@ -81,6 +81,18 @@ OpenSSH 会因私钥权限过宽而拒绝加载。
 - 该节点升级沿用现场 Compose，先停止入口和后台写入，备份数据库、站点文件与 Compose，再更新应用镜像、迁移并验证。备份复制到控制机后校验 SHA-256。
 - 控制机通过其独立 identity `~/.ssh/tsuite_deploy_ed25519` 连接该内网节点，无需临时支持隧道。
 
+### 内网 TAI/TBI 查询服务现场补充（2026-10-17）
+
+- `192.168.2.183` 的站点为 `tai.trinfo.net`，Compose project `frappe-customer`，配置目录
+  `/opt/tsuite-deploy/frappe-customer`；数据库位于 `192.168.2.185`，不要按单机接管流程操作。
+- 该节点的 `tbi-query` 与普通 backend 使用同一应用镜像、sites volume 和 Secret 挂载。
+  Frontend 将镜像声明的精确查询路由转发到 `tbi-query:8082`，Engine 桥接仍使用 `backend:8000`。
+- 不得只升级 Engine 或恢复旧 Compose 而遗漏查询服务。新部署使用当前 `frappe_stack` 的自动配置
+  和检查；验收必须执行 [TBI 查询部署检查](../multi-node/README.md#tbi-独立查询服务与部署检查)，
+  并实际并发加载使用 Gateway 的仪表板，不能仅以首页 ping 或逐张查询代替。
+- 配置补齐不涉及业务镜像或数据库迁移。2026-10-17 回退配置及部署记录保存在控制机
+  `/srv/tsuite-deploy/files/releases/tai-query-20261017/`；不要覆盖旧发布目录里的不可变工具快照。
+
 ## 3. 不可违反的边界
 
 - 不在 Git、聊天、命令参数或普通日志中写入 OAuth Secret、FRP Token、GHCR Token、Vault 密码、

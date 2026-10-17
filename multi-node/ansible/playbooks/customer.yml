@@ -126,6 +126,7 @@
           TBI_ENGINE_DATA_ROOT: /var/lib/tbi-engine
           TBI_ENGINE_TOKEN_FILE: /run/secrets/tbi_engine_token
           TBI_ENGINE_FAULT_LOG: /var/log/tbi-engine/fault.log
+          TBI_ENGINE_GATEWAY_BRIDGE_URL: http://backend:8000/api/method/tbi.engine_gateway_bridge.exchange
         python_container_secrets:
           tbi_engine_token: "{{ vault_tbi_engine_token }}"
         python_container_data_dirs:

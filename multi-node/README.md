@@ -36,3 +36,34 @@ ansible-playbook playbooks/deploy-all.yml --ask-vault-pass
 ```bash
 multi-node/tools/create-source-bundle.sh
 ```
+
+## TBI 独立查询服务与部署检查
+
+安装 `tbi` 的 Frappe Stack 必须配套独立 `tbi-query` 服务。普通后端处理元数据和 Engine
+网关桥接，图表／仪表板等长查询走独立 ASGI 服务；两者共用原站点、Secret 文件和同一不可变
+应用镜像。查询端口仅在 Compose 网络内开放，不发布到宿主机。
+
+`frappe_stack` 从目标镜像读取查询入口清单和原始 Nginx 模板，生成精确路由；不手工复制接口
+列表，不把 `/api/` 整段转发给查询服务，也不把 Engine 桥接接口转入查询服务。Frontend 等待查询
+容器健康后启动。配置生成保留原 Nginx 的 HTTPS 转发信息、静态资源和 WebSocket 路由。
+
+上线前检查镜像的查询模块及依赖、Compose 中的服务／镜像／站点与 Secret 挂载、健康检查、
+前端依赖和完整查询路由；缺项立即中止。部署后检查实际运行镜像、容器健康、Nginx 生效路由和
+容器间可达性。`playbooks/verify.yml` 额外检查 Engine 回调仍指向普通后端。
+
+已有部署可单独执行只读检查：
+
+```bash
+sudo python3 /opt/tsuite-deploy/frappe-customer/tbi_query_config.py verify \
+  --root /opt/tsuite-deploy/frappe-customer --stack customer --site tai.trinfo.net \
+  --engine-container tai-tbi-engine-service-1
+```
+
+兼容影响：本部署工具要求带 `tbi.query_service` 的应用镜像（TAI 0.0.49 / TBI 0.0.17 已验证）；
+不改变业务 API、数据库 schema 或权限。旧镜像缺少该能力会在启动前拒绝，不能通过关闭检查上线。
+回退旧业务版本需使用与该版本相配套的部署工具，并同时评估 Engine 的兼容性。
+
+2026-10-17，2.183 因查询和桥接共用普通 Frappe 线程出现随机 `gateway_bridge_unavailable`。
+在不更换应用镜像、不迁移数据库的情况下补齐服务和 25 条精确路由；7 张图的仪表板连续 3 次加载
+共 21 个结果全部成功。部署前配置备份与修复过程保存在控制机
+`/srv/tsuite-deploy/files/releases/tai-query-20261017/`。

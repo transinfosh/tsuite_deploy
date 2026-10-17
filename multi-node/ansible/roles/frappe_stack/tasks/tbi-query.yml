@@ -1,0 +1,113 @@
+---
+- name: 安装 TBI 查询部署检查器
+  ansible.builtin.copy:
+    src: tbi_query_config.py
+    dest: "{{ frappe_stack_root }}/tbi_query_config.py"
+    mode: "0644"
+
+- name: 从目标镜像读取 Nginx 原始模板
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --network
+      - none
+      - --entrypoint
+      - cat
+      - "{{ frappe_image }}"
+      - /templates/nginx/frappe.conf.template
+  register: tbi_nginx_template
+  changed_when: false
+
+- name: 从目标镜像读取查询服务路由并检查依赖
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --network
+      - none
+      - --entrypoint
+      - /home/frappe/frappe-bench/env/bin/python
+      - "{{ frappe_image }}"
+      - -m
+      - tbi.query_service
+      - --nginx-locations
+      - --upstream
+      - tbi-query:8082
+      - --site-name
+      - "{{ frappe_site_name }}"
+  register: tbi_query_locations
+  changed_when: false
+
+- name: 读取本次生成的 Compose
+  ansible.builtin.slurp:
+    src: "{{ frappe_stack_root }}/compose.generated.yml"
+  register: tbi_compose_source
+  no_log: true
+
+- name: 生成并校验独立查询服务及精确路由
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ frappe_stack_root }}/tbi_query_config.py"
+      - prepare
+      - --root
+      - "{{ frappe_stack_root }}"
+      - --image
+      - "{{ frappe_image }}"
+    stdin: "{{ {'compose': tbi_compose_source.content | b64decode | from_yaml, 'template': tbi_nginx_template.stdout, 'locations': tbi_query_locations.stdout} | to_json }}"
+  register: tbi_query_config
+  changed_when: false
+  no_log: true
+
+- name: 写入 TBI 查询路由模板
+  ansible.builtin.copy:
+    content: "{{ (tbi_query_config.stdout | from_json).nginx }}"
+    dest: "{{ frappe_stack_root }}/nginx.tbi-query.template"
+    mode: "0644"
+  notify: 刷新 Frappe frontend 上游解析
+
+- name: 写入包含独立查询服务的 Compose
+  ansible.builtin.copy:
+    content: "{{ (tbi_query_config.stdout | from_json).compose | to_nice_yaml }}"
+    dest: "{{ frappe_stack_root }}/compose.generated.yml"
+    mode: "0640"
+  no_log: true
+
+- name: 展开 Compose 用于启动前校验
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --env-file
+      - "{{ frappe_stack_root }}/.env"
+      - -p
+      - "frappe-{{ frappe_stack_name }}"
+      - -f
+      - "{{ frappe_stack_root }}/frappe_docker/compose.yaml"
+      - -f
+      - "{{ frappe_stack_root }}/frappe_docker/overrides/compose.redis.yaml"
+      - -f
+      - "{{ frappe_stack_root }}/frappe_docker/overrides/compose.postgres.yaml"
+      - -f
+      - "{{ frappe_stack_root }}/compose.generated.yml"
+      - config
+      - --format
+      - json
+  register: tbi_resolved_compose
+  changed_when: false
+  no_log: true
+
+- name: 启动前拒绝缺少查询隔离的部署
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ frappe_stack_root }}/tbi_query_config.py"
+      - check
+      - --root
+      - "{{ frappe_stack_root }}"
+    stdin: "{{ {'compose': tbi_resolved_compose.stdout | from_json, 'nginx': (tbi_query_config.stdout | from_json).nginx, 'locations': tbi_query_locations.stdout} | to_json }}"
+  changed_when: false
+  no_log: true

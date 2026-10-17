@@ -9,6 +9,7 @@ bash -n "$repo_root/multi-node/tools/create-source-bundle.sh"
 python3 -m py_compile \
 	"$repo_root/patch-deploy/patch.py" \
 	"$repo_root/patch-deploy/remote.py"
+python3 -m unittest discover -s "$repo_root/tests" -p 'test_tbi_query_config.py'
 python3 -m unittest discover -s "$repo_root/patch-deploy/tests" -p 'test_*.py'
 "$repo_root/tests/test_single_node_adopt.sh"
 "$repo_root/single-node/deploy.sh" --help | grep -q -- "--dry-run"

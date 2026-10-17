@@ -96,6 +96,10 @@
     mode: "0640"
   notify: 重启 Frappe Stack
 
+- name: 配置必需的 TBI 独立查询服务
+  ansible.builtin.include_tasks: tbi-query.yml
+  when: "'tbi' in frappe_apps"
+
 - name: 校验 Frappe Compose
   ansible.builtin.command:
     argv:
@@ -282,3 +286,26 @@
     exec -T backend bench --site {{ frappe_site_name }} migrate
   register: frappe_migrate
   changed_when: "'Migrating' in frappe_migrate.stdout"
+
+- name: 应用查询路由变更后再验收
+  ansible.builtin.meta: flush_handlers
+  when: "'tbi' in frappe_apps"
+
+- name: 验证 TBI 实际查询服务与路由
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ frappe_stack_root }}/tbi_query_config.py"
+      - verify
+      - --root
+      - "{{ frappe_stack_root }}"
+      - --stack
+      - "{{ frappe_stack_name }}"
+      - --site
+      - "{{ frappe_site_name }}"
+  register: tbi_query_verify
+  until: tbi_query_verify.rc == 0
+  retries: 12
+  delay: 5
+  changed_when: false
+  when: "'tbi' in frappe_apps"

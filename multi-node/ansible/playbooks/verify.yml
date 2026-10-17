@@ -42,6 +42,21 @@
         headers:
           Host: "{{ customer_site_name }}"
         status_code: 200
+    - name: 验证独立查询服务、路由及 Engine 回调配置
+      ansible.builtin.command:
+        argv:
+          - python3
+          - /opt/tsuite-deploy/frappe-customer/tbi_query_config.py
+          - verify
+          - --root
+          - /opt/tsuite-deploy/frappe-customer
+          - --stack
+          - customer
+          - --site
+          - "{{ customer_site_name }}"
+          - --engine-container
+          - tai-tbi-engine-service-1
+      changed_when: false
     - name: 验证 tBI Engine
       ansible.builtin.uri:
         url: "http://127.0.0.1:{{ tbi_engine_port }}/readyz"
