@@ -19,3 +19,5 @@ frappe_common_site_config: {}
 frappe_queue_short_queues: "short,default"
 frappe_queue_long_queues: "long,default,short"
 frappe_enable_delivery_watcher_queue: false
+frappe_enable_tai_runtime_queue: false
+frappe_tai_runtime_queues: "tai_runtime"

@@ -309,3 +309,18 @@
   delay: 5
   changed_when: false
   when: "'tbi' in frappe_apps"
+
+- name: 验证第一方 TAI Runtime worker 使用目标镜像
+  ansible.builtin.command:
+    argv:
+      - docker
+      - inspect
+      - --format
+      - "{{ '{{.State.Status}} {{.Config.Image}}' }}"
+      - "frappe-{{ frappe_stack_name }}-queue-tai-runtime-1"
+  register: tai_runtime_worker_image
+  until: tai_runtime_worker_image.rc == 0 and tai_runtime_worker_image.stdout == ('running ' ~ frappe_image)
+  retries: 12
+  delay: 5
+  changed_when: false
+  when: frappe_enable_tai_runtime_queue | bool

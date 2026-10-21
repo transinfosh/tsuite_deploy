@@ -92,6 +92,10 @@ OpenSSH 会因私钥权限过宽而拒绝加载。
   并实际并发加载使用 Gateway 的仪表板，不能仅以首页 ping 或逐张查询代替。
 - 配置补齐不涉及业务镜像或数据库迁移。2026-10-17 回退配置及部署记录保存在控制机
   `/srv/tsuite-deploy/files/releases/tai-query-20261017/`；不要覆盖旧发布目录里的不可变工具快照。
+- 2026-10-21 核实：现场第一方问答使用 `queue-tai-runtime` 消费 `tai_runtime`，与 backend 和
+  tbi-query 使用同一应用镜像、sites volume 及 Secret。客户升级必须启用
+  `frappe_enable_tai_runtime_queue`；普通 short/long worker 不消费这个队列。升级后检查专用
+  worker 的运行状态、镜像和实际 RQ 订阅，并以真实问答验收，避免配置重建遗漏现场 worker。
 
 ## 3. 不可违反的边界
 
