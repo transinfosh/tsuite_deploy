@@ -48,6 +48,8 @@
         frappe_queue_short_queues: "tai_delivery_short,short,default"
         frappe_queue_long_queues: "tai_delivery_long,long,default,short"
         frappe_enable_delivery_watcher_queue: true
+        frappe_enable_tai_runtime_queue: true
+        frappe_tai_runtime_queues: tai_runtime
         frappe_common_site_config:
           scheduler_tick_interval: 60
           workers:
@@ -57,6 +59,8 @@
               timeout: 1500
             tai_delivery_watcher:
               timeout: 1500
+            tai_runtime:
+              timeout: 86400
         frappe_apps:
           - frappe_ext
           - tbi
