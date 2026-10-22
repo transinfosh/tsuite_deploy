@@ -291,6 +291,18 @@
   ansible.builtin.meta: flush_handlers
   when: "'tbi' in frappe_apps"
 
+- name: 容器重启后刷新 frontend 查询上游解析
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "frappe-{{ frappe_stack_name }}-frontend-1"
+      - nginx
+      - -s
+      - reload
+  changed_when: false
+  when: "'tbi' in frappe_apps"
+
 - name: 验证 TBI 实际查询服务与路由
   ansible.builtin.command:
     argv:
