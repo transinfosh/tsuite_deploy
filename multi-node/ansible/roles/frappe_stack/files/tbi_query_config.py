@@ -121,6 +121,13 @@ def verify(root, stack, site, engine_container=None):
     locations = run(['docker', 'exec', containers['tbi-query'], PYTHON, '-m', 'tbi.query_service', '--nginx-locations', '--upstream', 'tbi-query:8082', '--site-name', site])
     nginx = run(['docker', 'exec', containers['frontend'], 'nginx', '-T'])
     check_routes(nginx, query_paths(locations))
+    # Nginx can retain a retired container IP even when DNS and route syntax are correct.
+    # Anonymous dashboard calls must reach Frappe and be denied, never return a proxy 502.
+    frontend_status = run(['docker', 'exec', containers['frontend'], 'curl', '--noproxy', '*',
+                          '--silent', '--show-error', '--output', '/dev/null', '--write-out', '%{http_code}',
+                          '--max-time', '10', '--header', 'Host: ' + site,
+                          'http://127.0.0.1:8080/api/method/tbi.bi.dashboard.execute_dashboard']).strip()
+    require(frontend_status in ('401', '403'), 'Frontend query proxy did not reach Frappe authentication; reload frontend upstream resolution')
     run(['docker', 'exec', containers['backend'], PYTHON, '-c', "import json,urllib.request; r=urllib.request.urlopen('http://tbi-query:8082/healthz',timeout=5); assert json.load(r)=={'service':'tbi-query','ok':True}"])
     if engine_container:
         engine = json.loads(run(['docker', 'inspect', engine_container]))[0]
