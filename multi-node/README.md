@@ -71,3 +71,5 @@ sudo python3 /opt/tsuite-deploy/frappe-customer/tbi_query_config.py verify \
 2026-10-22：查询路由检查同时接受镜像声明的精确路径和唯一受限的 `^/tbi/shared/chart/[^/\r\n]+/?$` 共享图表规则。配置及实际 Nginx 必须完整匹配两类路由；宽泛 API 前缀、未知正则、未锚定规则和重复项仍拒绝。TAI 0.0.58 / TBI 0.0.19 需要此版本检查器。
 
 实际验证还通过 frontend 请求匿名仪表板方法，要求返回 Frappe 的 401/403；这可发现容器重启后 Nginx 仍缓存旧查询 IP、但 DNS/healthz/路由文本均正常的情况。重启 backend 或 tbi-query 后，应待服务健康再重新加载 frontend 上游，并复验真实 HTTP 请求。
+
+升级维护窗口内，验证器读取有效站点维护开关；只有明确开启维护时接受 Frappe 的 503。恢复服务后仍要求 401/403，502 始终失败，不能为通过检查而关闭维护。

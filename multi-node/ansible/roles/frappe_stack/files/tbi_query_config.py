@@ -127,7 +127,12 @@ def verify(root, stack, site, engine_container=None):
                           '--silent', '--show-error', '--output', '/dev/null', '--write-out', '%{http_code}',
                           '--max-time', '10', '--header', 'Host: ' + site,
                           'http://127.0.0.1:8080/api/method/tbi.bi.dashboard.execute_dashboard']).strip()
-    require(frontend_status in ('401', '403'), 'Frontend query proxy did not reach Frappe authentication; reload frontend upstream resolution')
+    maintenance = run(['docker', 'exec', containers['backend'], PYTHON, '-c',
+                       'import json,sys,frappe; frappe.init(site=sys.argv[1],sites_path=sys.argv[2]); print(json.dumps(bool(frappe.conf.maintenance_mode))); frappe.destroy()',
+                       site, SITES]).strip()
+    require(maintenance in ('true', 'false'), 'Could not determine site maintenance mode')
+    require(frontend_status in ('401', '403') or (frontend_status == '503' and maintenance == 'true'),
+            'Frontend query proxy did not reach Frappe authentication or declared maintenance; reload frontend upstream resolution')
     run(['docker', 'exec', containers['backend'], PYTHON, '-c', "import json,urllib.request; r=urllib.request.urlopen('http://tbi-query:8082/healthz',timeout=5); assert json.load(r)=={'service':'tbi-query','ok':True}"])
     if engine_container:
         engine = json.loads(run(['docker', 'inspect', engine_container]))[0]
