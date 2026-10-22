@@ -85,6 +85,31 @@ class QueryDeploymentTest(unittest.TestCase):
                 if change == 'health': query['healthcheck']['disable'] = True
                 with self.assertRaises(ValueError): module.check_compose(config)
 
+    def test_declared_shared_chart_route_is_installed_and_verified(self):
+        selector = r'~ ^/tbi/shared/chart/[^/\r\n]+/?$'
+        locations = LOCATIONS + '\nlocation ' + selector + ' { proxy_pass http://tbi-query:8082; }'
+        expected = [*PATHS, selector]
+        self.assertEqual(module.query_paths(locations), expected)
+        result = self.prepare(locations)
+        module.check_routes(result['nginx'], expected)
+        with self.assertRaisesRegex(ValueError, 'differ from the image contract'):
+            module.check_routes(self.prepare()['nginx'], expected)
+        self.assertEqual(result, module.configure(result['compose'], 'app@sha256:abc', '/stack', TEMPLATE, locations))
+
+    def test_unknown_regex_prefix_and_unanchored_shared_routes_are_rejected(self):
+        for selector in ('~ ^/api/.*$', '~ ^/tbi/shared/chart/.*', '/api/', '~ ^/api/method/tbi.engine_gateway_bridge.*$'):
+            with self.subTest(selector=selector):
+                locations = LOCATIONS + '\nlocation ' + selector + ' { proxy_pass http://tbi-query:8082; }'
+                with self.assertRaisesRegex(ValueError, 'exact locations'):
+                    self.prepare(locations)
+                with self.assertRaisesRegex(ValueError, 'exact locations'):
+                    module.check_routes(locations, PATHS)
+
+    def test_duplicate_shared_chart_route_is_rejected(self):
+        location = r'location ~ ^/tbi/shared/chart/[^/\r\n]+/?$ { proxy_pass http://tbi-query:8082; }'
+        with self.assertRaisesRegex(ValueError, 'empty or duplicated'):
+            self.prepare(LOCATIONS + '\n' + location + '\n' + location)
+
     def test_old_image_without_query_contract_cannot_be_deployed(self):
         with self.assertRaisesRegex(ValueError, 'empty or duplicated'):
             self.prepare('')

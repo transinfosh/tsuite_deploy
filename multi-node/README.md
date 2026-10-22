@@ -67,3 +67,5 @@ sudo python3 /opt/tsuite-deploy/frappe-customer/tbi_query_config.py verify \
 在不更换应用镜像、不迁移数据库的情况下补齐服务和 25 条精确路由；7 张图的仪表板连续 3 次加载
 共 21 个结果全部成功。部署前配置备份与修复过程保存在控制机
 `/srv/tsuite-deploy/files/releases/tai-query-20261017/`。
+
+2026-10-22：查询路由检查同时接受镜像声明的精确路径和唯一受限的 `^/tbi/shared/chart/[^/\r\n]+/?$` 共享图表规则。配置及实际 Nginx 必须完整匹配两类路由；宽泛 API 前缀、未知正则、未锚定规则和重复项仍拒绝。TAI 0.0.58 / TBI 0.0.19 需要此版本检查器。

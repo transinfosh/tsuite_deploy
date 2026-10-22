@@ -10,6 +10,7 @@ PYTHON = '/home/frappe/frappe-bench/env/bin/python'
 SITES = '/home/frappe/frappe-bench/sites'
 TEMPLATE = '/templates/nginx/frappe.conf.template'
 UPSTREAM = 'http://tbi-query:8082'
+SHARED_QUERY_LOCATIONS = {r'~ ^/tbi/shared/chart/[^/\r\n]+/?$'}
 
 
 def require(condition, message):
@@ -18,10 +19,12 @@ def require(condition, message):
 
 
 def query_paths(locations):
-    paths = re.findall(r'location = (\S+) \{', locations)
+    selectors = [s.strip() for s in re.findall(r'location\s+([^{}]+)\{', locations)]
+    require(all(s.startswith('= ') or s in SHARED_QUERY_LOCATIONS for s in selectors), 'Query proxy must use exact locations or the declared shared chart route')
+    paths = [s[2:].strip() if s.startswith('= ') else s for s in selectors]
     require(len(paths) == len(set(paths)) and bool(paths), 'Query route list is empty or duplicated')
     require('/api/method/tbi.bi.dashboard.execute_dashboard' in paths, 'Dashboard query route is missing')
-    require(all(p.startswith(('/api/method/tbi.', '/api/v1/method/tbi.')) or p == '/tbi/shared_chart' for p in paths), 'Unexpected query route')
+    require(all(p.startswith(('/api/method/tbi.', '/api/v1/method/tbi.')) or p == '/tbi/shared_chart' or p in SHARED_QUERY_LOCATIONS for p in paths), 'Unexpected query route')
     require(not any('engine_gateway_bridge' in p for p in paths), 'Bridge must stay on the ordinary backend')
     return paths
 
@@ -65,8 +68,9 @@ def check_routes(nginx, expected):
     routed = []
     for selector, body in re.findall(r'location\s+([^{}]+)\{([^{}]*)\}', nginx):
         if re.search(r'proxy_pass\s+' + re.escape(UPSTREAM) + r'\s*;', body):
-            require(selector.strip().startswith('= '), 'Query proxy must use exact locations')
-            routed.append(selector.strip()[2:].strip())
+            selector = selector.strip()
+            require(selector.startswith('= ') or selector in SHARED_QUERY_LOCATIONS, 'Query proxy must use exact locations or the declared shared chart route')
+            routed.append(selector[2:].strip() if selector.startswith('= ') else selector)
     require(sorted(routed) == sorted(expected), 'Active Nginx query routes differ from the image contract')
     require('engine_gateway_bridge' not in ' '.join(routed), 'Bridge routed into the query service')
 
