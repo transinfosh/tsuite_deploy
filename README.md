@@ -20,7 +20,7 @@ TSuite 平台部署仓库；其中包含面向 Ubuntu 单机服务器的交互�
 - 检测并通过 Docker 官方 apt 仓库安装 Docker Engine、Buildx 和 Compose 插件；
 - PostgreSQL 可选择容器部署或安装在 Ubuntu 本机；
 - 支持任意包含 Frappe 应用的自定义镜像；
-- 私有 GHCR 镜像拉取失败时，安全提示输入用户名和只读 Token；
+- 默认从自建 Registry 拉取；首次认证安全提示输入只读账号，兼容显式选择其他仓库；
 - 在修改系统前确认代理设置，并可同时应用到 APT、Docker daemon 和 Frappe 容器；
 - 自动部署 Redis、后端、前端、WebSocket、队列和调度器；
 - 新站点自动创建并安装指定应用，已有站点升级前自动备份；当旧镜像的
@@ -45,7 +45,7 @@ curl -fsSL https://raw.githubusercontent.com/transinfosh/tsuite_deploy/main/inst
 默认镜像为：
 
 ```text
-ghcr.io/transinfosh/project_management:0.0.2
+registry.trinfo.net/transinfosh/project_management:0.0.25
 ```
 
 脚本会逐项询问镜像、应用名、站点名、数据库模式、端口、代理和密码。密码输入
@@ -107,13 +107,19 @@ sudo tsuite-deploy
 
 ## 私有镜像和私有源码
 
-部署脚本只需要拉取已经构建完成的镜像。私有 GHCR 镜像需要 **Personal access token (classic)**，
-至少具有 `read:packages` 权限；GitHub Container Registry 不接受 fine-grained Token。输入的
-用户名必须是该 Token 所属的个人 GitHub 用户名，并且该账号必须具有镜像包的读取权限。Token 只传给 `docker login`，
-不会写入 Compose 配置或 `deployment.inputs`。首次登录成功后，脚本会将用户名和 Token
-保存到部署目录的 `.ghcr-credentials`（执行部署的 root 用户所有、权限 `0600`）；下次拉取先使用该凭据，
-只有登录失败时才重新询问并覆盖保存。该文件不会输出到日志或写进容器环境变量；如同数据库
-`.env`，它依赖服务器 root 权限保护，不能替代独立的密钥管理服务。
+部署默认从 `registry.trinfo.net` 拉取。使用运维发放的 `registry-pull` 只读账号，首次登录后
+凭据保存在 Docker Client 和部署目录 `.registry-credentials` 中（执行用户所有、权限 `0600`）。
+凭据按仓库域名匹配，不写入 Compose、`deployment.inputs`、业务容器环境或日志。
+
+已有部署的 GHCR 镜像会在交互默认值中改为自建仓库的同名、同版本地址；显式输入其他仓库仍然有效。
+镜像不存在时中止，先由运维补齐原版本，不会自动升级版本或回源 GHCR。
+数据库与 Redis 沿用已有 Compose 中的版本，仅变更可识别的镜像来源；新安装默认 PostgreSQL 15.17
+和 Redis 8.6-alpine。可通过 `TSUITE_IMAGE_REGISTRY`、`TSUITE_POSTGRES_IMAGE`、`TSUITE_REDIS_IMAGE`
+显式覆盖镜像来源。选择 GHCR 时保留旧 `.ghcr-credentials` 的读取和保存兼容性；GHCR 只读
+Token 和自建仓库密码相互独立。
+
+AI 直接维护现场 Compose 的流程见[部署镜像来源契约](shared/contracts/README.md#镜像来源)，
+不需要为了使用自建仓库先接管或重建现有站点。
 
 ## 代理
 
@@ -223,39 +229,26 @@ Tag 后，由各仓库调用 `transinfosh/frappe_docker` 的共享工作流构�
 
 | Tag 所在仓库 | 发布镜像 |
 | --- | --- |
-| `tai-service` | `ghcr.io/transinfosh/tai-service:<tag>` |
-| `tbi-engine` | `ghcr.io/transinfosh/tbi-engine:<tag>` |
-| `tai-auth` | `ghcr.io/transinfosh/tai-auth:<tag>` |
+| `tai-service` | `registry.trinfo.net/transinfosh/tai-service:<tag>` |
+| `tbi-engine` | `registry.trinfo.net/transinfosh/tbi-engine:<tag>` |
+| `tai-auth` | `registry.trinfo.net/transinfosh/tai-auth:<tag>` |
 
-工作流使用 `type=gha,mode=max` 保存 BuildKit layer cache。服务器仍使用 inventory 中现有的
-Docker daemon 代理拉取 GHCR 镜像；部署时只执行 `docker pull`、迁移和容器重建。
+工作流使用 `type=gha,mode=max` 保存 BuildKit layer cache。GHCR 保留发布源，构建完成后由
+公共 `mirror-release-image.yml` 将版本和摘要同步到自建 Registry。部署必须等待同步 job 成功，
+并检查目标 manifest；不能仅凭 GHCR 构建成功开始升级。
 
-### 内外网 GHCR 拉取代理
+### 自建 Registry 拉取与代理
 
-正式镜像统一由 GitHub Actions 构建，部署机只从 GHCR 拉取。代理按 inventory 选择：
+两个示例 inventory 的 `deployment_registry` 默认是 `registry.trinfo.net`，应用及 Redis、PostgreSQL、
+Phoenix 等运行依赖均从该仓库读取；只读凭据由加密 Vault 的 `vault_registry_username` 与
+`vault_registry_password` 提供。发布账号 `registry-ci` 仅供 CI/运维同步，不能发给客户部署。
+`registry_images` 在备份、迁移和重建服务前检查本次所需的镜像；缺少任一版本时停止。
 
-- `internal-demo` 使用内网 PassWall：`http://192.168.2.254:1082`；
-- 外网 inventory 使用 `vault_external_deployment_http_proxy`，该变量必须仅写入对应的
-  `vault.yml` 并用 `ansible-vault` 加密，格式为
-  `http://<用户名>:<URL 编码后的密码>@<公网地址>:10820`。
+`internal-demo` 的内网代理和外网的 `vault_external_deployment_http_proxy` 可继续用于 Git、apt 等
+剩余上游下载。Registry 已加入 `NO_PROXY`，不经这些代理。Docker daemon 代理文件权限为 `0600`；
+默认不向业务容器传播代理。更改代理配置可能重启 Docker，本次仅换镜像来源时应保留现场代理设置。
 
-例如首次配置 `ruisu-customer`：
-
-```bash
-cd multi-node/ansible
-cp inventories/ruisu-customer/vault.example.yml inventories/ruisu-customer/vault.yml
-ansible-vault encrypt inventories/ruisu-customer/vault.yml
-ansible-vault edit inventories/ruisu-customer/vault.yml
-```
-
-Docker daemon 的代理 Systemd 文件权限为 `0600`，且部署默认不会把代理 URL 注入业务容器，
-避免认证凭据出现在容器环境变量或 `docker inspect` 输出中。确有构建阶段需要容器代理时，
-才在 inventory 显式设置 `deployment_proxy_propagate_to_containers: true`。
-首次应用此规则会从已有 Docker Client 配置中移除旧的 `proxies` 项，但会保留 GHCR 登录凭据等
-其余 Docker 配置。
-
-外网代理必须启用账号认证，并由 OpenWrt 防火墙限制允许的来源地址；更优先的方案是让部署机
-通过 WireGuard/Tailscale 接入内网后使用内网代理，避免在公网传输 HTTP 代理认证信息。
+新客户先从 `vault.example.yml` 创建并加密 Vault，再由运维注入只读密码。示例文件不含真实密码。
 
 ### 独立公网 Customer 节点
 
@@ -265,7 +258,7 @@ Docker daemon 的代理 Systemd 文件权限为 `0600`，且部署默认不会�
 使用本机 Caddy 自动申请 HTTPS 证书，不经过内部 FRP；部署前需放行 TCP 80/443。当前节点无法访问
 内部 Benchmark SQL Server，因此 `enable_benchmark` 保持关闭。
 
-该节点暂时复用内部演示 Vault 中的 GHCR、数据库及服务级部署 Secret，执行命令时显式加载。
+该节点暂时复用内部演示 Vault 中的 Registry 只读、数据库及服务级部署 Secret，执行命令时显式加载。
 客户专属的 Control Client ID 和 Client Secret 由客户在本站 `TAI Settings` 中维护，部署 inventory
 将对应覆盖值留空，不得使用内部演示租户凭据覆盖客户设置：
 
@@ -295,8 +288,7 @@ ansible-playbook -i inventories/ruisu-customer/hosts.yml playbooks/customer.yml 
    done
    unset app_source_token_value
    ```
-3. 确认 Actions 的 `GITHUB_TOKEN` 具有 `packages: write`，服务器 Vault 中的 GHCR Token 具有
-   `read:packages`。如果容器包保持私有，还需在 GHCR 包设置中授予对应仓库 Actions 写入权限；
+3. 确认 Actions 的 `GITHUB_TOKEN` 具有 `packages: write`，服务器 Vault 配置自建 Registry 只读凭据。如果容器包保持私有，还需在 GHCR 包设置中授予对应仓库 Actions 写入权限；
 4. 如果标准 GitHub Runner 的磁盘不足，在仓库变量 `TAI_BUILD_RUNNER` 中填写大磁盘或
    self-hosted runner 标签。
 
@@ -322,22 +314,21 @@ ansible-playbook playbooks/deploy-all.yml --vault-password-file ../.vault-pass
 1. 先发布 `frappe_docker` 的共享工作流，再把 `tai`、`tai_control` 的
    `publish-image.yml` 更新为固定的共享提交 SHA；不要引用可变分支。
 2. 配置并核验五个发布仓库都能读取统一的 `APP_SOURCE_TOKEN`，同时检查 GHCR 包权限和服务器
-   Vault 中的 `vault_ghcr_username`、`vault_ghcr_token`。服务器拉取 Token 应单独创建并只授予
-   `read:packages`，不要与源码读取 Token 共用。可以先手动运行一个发布仓库的
+   Vault 中的 `vault_registry_username`、`vault_registry_password`，并确认自动同步 job 成功。可以先手动运行一个发布仓库的
    `Publish GHCR image` workflow，使用临时演练标签验证权限；手动运行不会代替正式 Tag 发布。
 3. 为组合镜像中变更的依赖应用创建并推送各自的发布 Tag，然后将对应 Tag 和 40 位提交 SHA
    更新到 `tai` 或 `tai_control` 的发布工作流。基础镜像已经固定 `frappe_ext`；仅在更新基础镜像时
    才需要先发布新的 `tsuite-base`。
 4. 在 `tai`、`tai_control` 的目标 commit 上创建并推送各自与 `__version__` 匹配的 Tag，触发两个
    聚合镜像；独立服务仍按原流程发布。全部相关镜像构建成功后，再进入部署阶段。
-5. 确认 GHCR 中存在以下五个不可变镜像，并记录构建对应的 commit：
+5. 确认自建 Registry 中存在以下五个不可变镜像，并记录构建对应的 commit：
 
    ```text
-   ghcr.io/transinfosh/tai-customer:0.1.0-internal-demo.1
-   ghcr.io/transinfosh/tai-control:0.1.0-internal-demo.1
-   ghcr.io/transinfosh/tai-service:v0.1.0-internal-demo.1
-   ghcr.io/transinfosh/tbi-engine:v0.1.0-internal-demo.1
-   ghcr.io/transinfosh/tai-auth:v0.1.0-internal-demo.1
+   registry.trinfo.net/transinfosh/tai-customer:0.1.0-internal-demo.1
+   registry.trinfo.net/transinfosh/tai-control:0.1.0-internal-demo.1
+   registry.trinfo.net/transinfosh/tai-service:v0.1.0-internal-demo.1
+   registry.trinfo.net/transinfosh/tbi-engine:v0.1.0-internal-demo.1
+   registry.trinfo.net/transinfosh/tai-auth:v0.1.0-internal-demo.1
    ```
 
 6. 把 inventory 中的 `customer_image_tag`、`control_image_tag` 更新为对应的 Docker 镜像版本
@@ -379,7 +370,7 @@ allow_unlocked_revisions: true
 ```
 
 这表示内部演示暂时允许使用 Tag，而不强制锁定镜像 digest。默认的 `registry` 模式直接拉取
-同一个 `deployment_image_tag` 对应的五个 GHCR 镜像；`local_bundle` 仅作为故障恢复路径，启用时
+同一个 `deployment_image_tag` 对应的五个自建 Registry 镜像；`local_bundle` 仅作为故障恢复路径，启用时
 才需要运行 `multi-node/tools/create-source-bundle.sh` 生成带 SHA256 的统一源码快照。
 `production` inventory 会拒绝 `unlocked` 状态。
 
@@ -391,7 +382,7 @@ tai_service_release_lock: true
 tai_service_release_version: "0.1.1"
 tai_service_source_commit: "<发布 Tag 所指向的 40 位 commit>"
 tai_service_image: >-
-  ghcr.io/transinfosh/tai-service@sha256:<Publish GHCR image 工作流输出的 digest>
+  registry.trinfo.net/transinfosh/tai-service@sha256:<Publish GHCR image 工作流输出的 digest>
 ```
 
 正式 tai-service Tag 必须与 `pyproject.toml` 的版本完全匹配（如 `0.1.1` 对应

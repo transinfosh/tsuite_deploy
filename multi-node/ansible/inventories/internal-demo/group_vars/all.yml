@@ -5,26 +5,26 @@ allow_unlocked_revisions: false
 
 # 当前阶段可以使用可变标签；切换 production inventory 前必须改为 digest 或不可变标签。
 image_delivery_mode: registry
-deployment_registry: ghcr.io
-deployment_registry_username: "{{ vault_ghcr_username | default('') }}"
-deployment_registry_token: "{{ vault_ghcr_token | default('') }}"
+deployment_registry: registry.trinfo.net
+deployment_registry_username: "{{ vault_registry_username | default('registry-pull') }}"
+deployment_registry_token: "{{ vault_registry_password | default('') }}"
 deployment_image_tag: v0.1.0-internal-demo.2
 customer_image_tag: 0.0.21.post1
 customer_source_commit: 0f4b40e268496a25d7bf2cb83aefa984a7e806c8
-customer_frappe_image: "ghcr.io/transinfosh/tai-customer@sha256:368768c7d0220de7ad481f15ed99fc4f741bc3945d7ebe570ab12ac6529eea92"
+customer_frappe_image: "{{ deployment_registry }}/transinfosh/tai-customer@sha256:368768c7d0220de7ad481f15ed99fc4f741bc3945d7ebe570ab12ac6529eea92"
 control_image_tag: 0.0.18
 control_source_commit: e026daaee3044b77a001f1f84c9ac786fbf7973c
-control_frappe_image: "ghcr.io/transinfosh/tai-control@sha256:38a0de14f09a0f45f935fa9aa002f39fb27d3fde878d6562a3b0cc3ca9843669"
+control_frappe_image: "{{ deployment_registry }}/transinfosh/tai-control@sha256:38a0de14f09a0f45f935fa9aa002f39fb27d3fde878d6562a3b0cc3ca9843669"
 # Runtime database migrations rely on SECURITY DEFINER ownership. Pin this
 # service independently so a later full deployment cannot roll it back.
 tai_service_release_lock: true
 tai_service_release_version: 0.1.20.fix1
 tai_service_source_commit: 8ff4dac7da6a5d75af0c6ef69c170e692420366c
-tai_service_image: "ghcr.io/transinfosh/tai-service@sha256:07e63519c344f230967fd7def50802739e4a4badb93ea610a56c8cac18a860fd"
+tai_service_image: "{{ deployment_registry }}/transinfosh/tai-service@sha256:07e63519c344f230967fd7def50802739e4a4badb93ea610a56c8cac18a860fd"
 tbi_engine_release_version: 0.1.5
 tbi_engine_source_commit: a99648b2dcc4baa7d25173f59837d776a96dbdd8
-tbi_engine_image: "ghcr.io/transinfosh/tbi-engine@sha256:728ee0f3ec4518030a7e29c08990463a3da6a47408cc86598c99f945772ea3ad"
-tai_auth_image: "ghcr.io/transinfosh/tai-auth:{{ deployment_image_tag }}"
+tbi_engine_image: "{{ deployment_registry }}/transinfosh/tbi-engine@sha256:728ee0f3ec4518030a7e29c08990463a3da6a47408cc86598c99f945772ea3ad"
+tai_auth_image: "{{ deployment_registry }}/transinfosh/tai-auth:{{ deployment_image_tag }}"
 frappe_docker_repo: https://github.com/transinfosh/frappe_docker.git
 frappe_docker_ref: main
 
@@ -38,14 +38,14 @@ portal_site_name: portal.trinfo.net
 ingress_provider: frp
 cloudflared_download_url: https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
 
-# 内部节点通过局域网 PassWall HTTP 代理拉取镜像。
+# 上游源码与软件包仍可按需使用代理；自建 Registry 始终直连。
 # 该地址不含认证信息，可安全保留在 inventory 中。
 deployment_http_proxy: http://192.168.2.254:1082
-# 正式镜像由 GitHub Actions 构建；部署节点只需让 Docker daemon 经代理拉取，
+# 正式镜像由 GitHub Actions 构建并同步到自建 Registry，部署节点直接拉取；
 # 不应将代理地址传入业务容器或写入容器 inspect 信息。
 deployment_proxy_propagate_to_containers: false
 deployment_no_proxy: >-
-  localhost,127.0.0.1,::1,host.docker.internal,
+  localhost,127.0.0.1,::1,host.docker.internal,{{ deployment_registry }},
   192.168.2.0/24,10.0.0.0/8,172.16.0.0/12,
   db,redis-cache,redis-queue,websocket,frontend,frappe-control-frontend-1,tbi-engine,{{ control_site_name }},
   tai-runtime-postgres,mirrors.aliyun.com
@@ -140,9 +140,9 @@ benchmark_knowledge_container_path: >-
 
 enable_phoenix: true
 phoenix_port: 6006
-phoenix_image: arizephoenix/phoenix:latest
+phoenix_image: "{{ deployment_registry }}/arizephoenix/phoenix@sha256:db93e6fa2819a2c19d67fb7b7af12ed40c708c11383ccfc2c3b02e3b683fd7fc"
 phoenix_retention_days: 30
-phoenix_postgres_image: postgres:16
+phoenix_postgres_image: "{{ deployment_registry }}/library/postgres:16"
 phoenix_manage_postgres: "{{ not external_database_enabled }}"
 phoenix_database_host: "{{ external_database_host }}"
 phoenix_database_port: "{{ external_database_port }}"

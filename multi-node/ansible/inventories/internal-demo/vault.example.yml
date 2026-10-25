@@ -20,9 +20,9 @@ vault_deepseek_api_key: replace-me
 vault_openai_api_key: replace-me
 vault_qwen_api_key: replace-me
 
-# 私有 GHCR 镜像拉取凭据。Token 只需要 read:packages；公开镜像可留空。
-vault_ghcr_username: ""
-vault_ghcr_token: ""
+# 自建 Registry 只读凭据；由运维注入加密 Vault，禁止使用 registry-ci 发布账号。
+vault_registry_username: registry-pull
+vault_registry_password: ""
 
 # 外网部署节点的认证 HTTP 代理。复制到 vault.yml 后用 ansible-vault 加密。
 # 密码中的 @、:、/、#、% 等字符必须 URL 编码；例如：

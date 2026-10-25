@@ -58,20 +58,20 @@
     that:
       - image_delivery_mode in ['registry', 'local_bundle']
       - image_delivery_mode != 'registry' or deployment_image_tag is match('^[a-zA-Z0-9._-]+$')
-      - image_delivery_mode != 'registry' or customer_frappe_image is match('^ghcr\\.io/')
-      - image_delivery_mode != 'registry' or control_frappe_image is match('^ghcr\\.io/')
-      - image_delivery_mode != 'registry' or tai_service_image is match('^ghcr\\.io/')
-      - image_delivery_mode != 'registry' or tbi_engine_image is match('^ghcr\\.io/')
-      - image_delivery_mode != 'registry' or tai_auth_image is match('^ghcr\\.io/')
+      - image_delivery_mode != 'registry' or customer_frappe_image.startswith(deployment_registry ~ '/')
+      - image_delivery_mode != 'registry' or control_frappe_image.startswith(deployment_registry ~ '/')
+      - image_delivery_mode != 'registry' or tai_service_image.startswith(deployment_registry ~ '/')
+      - image_delivery_mode != 'registry' or tbi_engine_image.startswith(deployment_registry ~ '/')
+      - image_delivery_mode != 'registry' or tai_auth_image.startswith(deployment_registry ~ '/')
 
 - name: 校验已锁定的 TAI Service 正式版本
   ansible.builtin.assert:
     that:
-      - tai_service_release_version is match('^[0-9]+\\.[0-9]+\\.[0-9]+$')
+      - tai_service_release_version is match('^[0-9]+[.][0-9]+[.][0-9]+([.][a-zA-Z0-9]+)?$')
       - tai_service_source_commit is match('^[0-9a-f]{40}$')
-      - tai_service_image is match('^ghcr\\.io/transinfosh/tai-service@sha256:[0-9a-f]{64}$')
+      - tai_service_image is match("^" ~ (deployment_registry | regex_escape) ~ "/transinfosh/tai-service@sha256:[0-9a-f]{64}$")
     fail_msg: >-
-      锁定 TAI Service Release 必须提供语义版本、40 位源码提交和 GHCR sha256 digest，
+      锁定 TAI Service Release 必须提供语义版本、40 位源码提交和 部署仓库 sha256 digest，
       不能只部署镜像 Tag。
   when:
     - image_delivery_mode == 'registry'

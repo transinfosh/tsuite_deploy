@@ -132,7 +132,6 @@
     stdin: "{{ deployment_registry_token }}"
     stdin_add_newline: true
   when:
-    - image_delivery_mode == 'registry'
     - deployment_registry_username | length > 0
     - deployment_registry_token | length > 0
   changed_when: false

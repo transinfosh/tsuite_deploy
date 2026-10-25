@@ -113,12 +113,13 @@ jq() {
 # shellcheck disable=SC2317
 docker() {
 	case "$1 $2" in
+		"pull registry.trinfo.net/library/postgres:18") return 0 ;;
 		"volume inspect") printf '%s\n' "$fixture/source-volume" ;;
 		"exec -e") printf '180006\n' ;;
 		"run --rm")
 			local argument
 			for argument in "$@"; do
-				if [[ "$argument" == "postgres:18" ]]; then
+				if [[ "$argument" == "registry.trinfo.net/library/postgres:18" ]]; then
 					COMPATIBLE_IMAGE_USED=true
 				fi
 			done

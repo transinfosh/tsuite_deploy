@@ -7,6 +7,12 @@
   roles:
     - role: common
     - role: docker
+    - role: registry_images
+      vars:
+        deployment_required_images: >-
+          {{ [tai_service_image]
+             + ([deployment_registry ~ '/library/postgres:16']
+                if not (external_database_enabled | default(false) | bool) else []) }}
     - role: deployment_backup
       vars:
         deployment_backup_component: runtime

@@ -2,3 +2,7 @@
 # 外网部署节点专用密钥。复制为 vault.yml 后使用 ansible-vault 加密。
 # 用户名和密码中的保留字符必须 URL 编码。
 vault_external_deployment_http_proxy: ""
+
+# 自建 Registry 只读凭据，不能提交真实密码。
+vault_registry_username: registry-pull
+vault_registry_password: ""

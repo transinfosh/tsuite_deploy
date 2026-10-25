@@ -18,3 +18,7 @@ multi-node/ansible/inventories/*/vault.yml
 multi-node/ansible/inventories/*/control_private.yml
 multi-node/ansible/artifacts/*
 !multi-node/ansible/artifacts/.gitkeep
+
+# Registry pull credentials are runtime secrets.
+.registry-credentials
+.ghcr-credentials

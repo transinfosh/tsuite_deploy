@@ -31,7 +31,8 @@ Agent 应自行完成状态盘点、版本包含关系验证、构建跟踪、�
 
 | 角色 | 当前地址或入口 | 主要职责 | 事实来源 |
 | --- | --- | --- | --- |
-| GitHub | `transinfosh/*` | 源码、不可变 Tag、Actions、GHCR | 远端仓库与 Actions 运行记录 |
+| GitHub | `transinfosh/*` | 源码、不可变 Tag、Actions、GHCR 发布源 | 远端仓库与 Actions 运行记录 |
+| 镜像仓库 | `registry.trinfo.net` → FRP → 2.52 | 客户部署默认镜像来源 | Registry manifest 与发布同步记录 |
 | 部署控制机 | `adam@192.168.2.52` | 部署仓库、Ansible、发布文件、支持页面、FRPC | `/srv/tsuite-deploy`、`/etc/frp`、`/etc/tsuite-connect-control` |
 | 公网 edge | `edge.trinfo.net` | Caddy、FRPS、SSH enrollment 和反向隧道 | `/etc/caddy`、`/etc/frp`、`/etc/tsuite-support` |
 | 支持管理页 | `https://edge.trinfo.net/connect/` | 本地密码+TOTP（GitHub SSO 备用）、创建/查看/关闭支持会话 | 控制机 `tsuite-connect-console.service` |
@@ -99,7 +100,7 @@ OpenSSH 会因私钥权限过宽而拒绝加载。
 
 ## 3. 不可违反的边界
 
-- 不在 Git、聊天、命令参数或普通日志中写入 OAuth Secret、FRP Token、GHCR Token、Vault 密码、
+- 不在 Git、聊天、命令参数或普通日志中写入 OAuth Secret、FRP Token、Registry 密码、GHCR Token、Vault 密码、
   数据库密码或 SSH 私钥；只记录受限文件路径。
 - 不把开发机私钥复制到控制机。控制机必须使用独立 identity，公钥按最小权限授权。
 - 不移动或覆盖已经发布的 Git Tag，不覆盖已经部署过的镜像 Tag；修复后递增版本重新发布。
@@ -213,8 +214,19 @@ gh run list --repo transinfosh/<repo> --limit 10
 gh run watch --repo transinfosh/<repo> <run-id> --exit-status
 ```
 
-完成后记录 Actions 摘要中的源码 commit、版本和镜像 digest，并验证 GHCR manifest 可读取。构建失败时
+完成后记录 Actions 摘要中的源码 commit、版本和镜像 digest，并等待自建 Registry 同步 job 成功，核对部署地址的 manifest 和 digest 可读取。构建失败时
 修复根因并发布新 Tag，不复用失败或已发布的 Tag。
+
+### 6.4 部署镜像来源与已有 Compose
+
+部署与升级先按[镜像来源契约](../shared/contracts/README.md#镜像来源)读取本次全部镜像，
+包括数据库、Redis、独立服务和临时备份工具。默认使用自建仓库和只读账号；部署前检查完整镜像清单，
+未同步版本先补齐再部署。构建工作流继续向 GHCR 发布，由后置 job 同步到自建仓库。
+
+AI 直接维护现场 Compose 时也执行该契约。保留项目名、volume、端口、Secret、网络与原版本；
+先备份原 Compose/`.env`，只变更镜像来源并核对源目标摘要。运行中的容器无需为了修改拉取地址而重建，
+配置准备完成与容器实际切换分别记录；下一次经授权升级时再按原流程重建、迁移和验收。
+旧 `deployment.state` 与实际运行版本不一致时，以现场证据为准，不根据旧 inventory 覆盖运行版本。
 
 ## 7. 创建客户临时支持会话
 

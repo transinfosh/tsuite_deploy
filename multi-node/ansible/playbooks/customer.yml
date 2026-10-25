@@ -7,6 +7,13 @@
   roles:
     - role: common
     - role: docker
+    - role: registry_images
+      vars:
+        deployment_required_images: >-
+          {{ [customer_frappe_image, tbi_engine_image,
+              customer_redis_image | default(deployment_registry ~ '/library/redis:8.6-alpine')]
+             + ([customer_postgres_image | default(deployment_registry ~ '/library/postgres:16')]
+                if not (external_database_enabled | default(false) | bool) else []) }}
     - role: deployment_backup
       vars:
         deployment_backup_component: customer
@@ -73,8 +80,8 @@
         frappe_db_user: "{{ customer_database_user | default('') }}"
         frappe_manage_postgres: "{{ not (external_database_enabled | default(false) | bool) }}"
         frappe_admin_password: "{{ vault_customer_admin_password }}"
-        frappe_postgres_image: "{{ customer_postgres_image | default('postgres:16') }}"
-        frappe_redis_image: "{{ customer_redis_image | default('redis:8.6-alpine') }}"
+        frappe_postgres_image: "{{ customer_postgres_image | default(deployment_registry ~ '/library/postgres:16') }}"
+        frappe_redis_image: "{{ customer_redis_image | default(deployment_registry ~ '/library/redis:8.6-alpine') }}"
         frappe_http_port: 8080
         frappe_docker_subnet: 172.31.10.0/24
         frappe_secret_files: >-

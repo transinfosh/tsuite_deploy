@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:16
+    image: {{ (deployment_registry ~ "/library/postgres:16") | to_json }}
     container_name: tai-runtime-postgres
     restart: unless-stopped
     environment:

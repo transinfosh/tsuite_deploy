@@ -1,5 +1,12 @@
 # 多节点部署
 
+## 镜像来源
+
+默认使用 `registry.trinfo.net`，应用与运行依赖共用只读登录。将 `vault_registry_username`、
+`vault_registry_password` 写入目标加密 Vault；不要将 CI 发布密码用于部署。每次部署在备份、
+迁移和重建前校验所需镜像存在。完整约定见[镜像来源契约](../shared/contracts/README.md#镜像来源)。
+Registry 加入 `NO_PROXY`；Git、apt 等其他下载仍可按需使用原代理。仅换源时保留原版本与现场拓扑。
+
 ## 发布前数据库备份
 
 `customer.yml`、`control.yml` 和 `runtime.yml` 在修改服务前都会执行强制数据库备份。

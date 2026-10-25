@@ -8,6 +8,15 @@
   roles:
     - role: common
     - role: docker
+    - role: registry_images
+      vars:
+        deployment_required_images: >-
+          {{ [control_frappe_image, tai_auth_image, deployment_registry ~ '/library/redis:8.6-alpine']
+             + ([deployment_registry ~ '/pgvector/pgvector:pg16']
+                if not (external_database_enabled | default(false) | bool) else [])
+             + ([phoenix_image] if enable_phoenix | bool else [])
+             + ([phoenix_postgres_image] if (enable_phoenix | bool)
+                and not (external_database_enabled | default(false) | bool) else []) }}
     - role: deployment_backup
       vars:
         deployment_backup_component: control
@@ -82,7 +91,7 @@
         frappe_db_user: "{{ control_database_user | default('') }}"
         frappe_manage_postgres: "{{ not (external_database_enabled | default(false) | bool) }}"
         frappe_admin_password: "{{ vault_control_admin_password }}"
-        frappe_postgres_image: pgvector/pgvector:pg16
+        frappe_postgres_image: "{{ deployment_registry }}/pgvector/pgvector:pg16"
         frappe_http_port: 8080
         frappe_bind_addresses:
           - 127.0.0.1

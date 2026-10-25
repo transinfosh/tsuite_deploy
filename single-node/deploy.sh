@@ -5,7 +5,10 @@ set -Eeuo pipefail
 DEFAULT_DEPLOY_DIR="/opt/tsuite-deploy"
 DEFAULT_FRAPPE_DOCKER_REPO="https://github.com/transinfosh/frappe_docker.git"
 DEFAULT_FRAPPE_DOCKER_REF="main"
-DEFAULT_IMAGE="ghcr.io/transinfosh/project_management:0.0.2"
+DEFAULT_REGISTRY="${TSUITE_IMAGE_REGISTRY:-registry.trinfo.net}"
+DEFAULT_IMAGE="$DEFAULT_REGISTRY/transinfosh/project_management:0.0.25"
+POSTGRES_IMAGE="${TSUITE_POSTGRES_IMAGE:-$DEFAULT_REGISTRY/library/postgres:15.17}"
+REDIS_IMAGE="${TSUITE_REDIS_IMAGE:-$DEFAULT_REGISTRY/library/redis:8.6-alpine}"
 DEFAULT_APPS="project_management"
 DEFAULT_SITE_NAME="project.localhost"
 DEFAULT_DB_MODE="container"
@@ -17,6 +20,7 @@ DEFAULT_DOCKER_SUBNET="172.30.0.0/24"
 DEFAULT_HTTP_PROXY="${HTTP_PROXY:-${http_proxy:-}}"
 DEFAULT_HTTPS_PROXY="${HTTPS_PROXY:-${https_proxy:-$DEFAULT_HTTP_PROXY}}"
 DEFAULT_NO_PROXY="${NO_PROXY:-${no_proxy:-localhost,127.0.0.1,::1,host.docker.internal,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,db,redis-cache,redis-queue,configurator,backend,frontend,websocket,queue-short,queue-long,scheduler}}"
+DEFAULT_NO_PROXY="$DEFAULT_NO_PROXY,$DEFAULT_REGISTRY"
 LEGACY_DEPLOY_DIR="/opt/tsuie-deploy"
 LEGACY_APT_PROXY_FILE="/etc/apt/apt.conf.d/90-tsuie-deploy-proxy"
 LEGACY_DOCKER_PROXY_FILE="/etc/systemd/system/docker.service.d/tsuie-deploy-proxy.conf"
@@ -416,6 +420,37 @@ validate_inputs() {
 	fi
 }
 
+preferred_image() {
+	case "$1" in
+		ghcr.io/transinfosh/*) printf '%s/%s' "$DEFAULT_REGISTRY" "${1#ghcr.io/}" ;;
+		postgres:* | postgres@* | redis:* | redis@* | alpine:* | alpine@*) printf '%s/library/%s' "$DEFAULT_REGISTRY" "$1" ;;
+		docker.io/library/*) printf '%s/library/%s' "$DEFAULT_REGISTRY" "${1#docker.io/library/}" ;;
+		*) printf '%s' "$1" ;;
+	esac
+}
+
+load_dependency_images() {
+	"$EXISTING_DEPLOYMENT" || return 0
+	[[ -f "$DEPLOY_DIR/frappe_docker/compose.yaml" ]] || return 0
+	STATE_DB_MODE="${EXISTING_DB_MODE:-container}"
+	compose_args_from_state "$DEPLOY_DIR"
+	local service dependency_image
+	local dependencies
+	dependencies="$(docker compose "${COMPOSE_ARGS[@]}" config --format json | python3 -c '
+import json,sys
+services=json.load(sys.stdin)["services"]
+for name in ("db", "redis-cache"):
+    if name in services:
+        print(name, services[name]["image"])
+')" || die "无法读取现有数据库和 Redis 镜像；保留现场配置并停止"
+	while read -r service dependency_image; do
+		case "$service" in
+			db) POSTGRES_IMAGE="${TSUITE_POSTGRES_IMAGE:-$(preferred_image "$dependency_image")}" ;;
+			redis-cache) REDIS_IMAGE="${TSUITE_REDIS_IMAGE:-$(preferred_image "$dependency_image")}" ;;
+		esac
+	done <<<"$dependencies"
+}
+
 split_image() {
 	local last_segment="${IMAGE##*/}"
 	if [[ "$last_segment" == *:* ]]; then
@@ -469,6 +504,8 @@ collect_proxy_settings() {
 		HTTPS_PROXY_VALUE=""
 		NO_PROXY_VALUE="$no_proxy_default"
 	fi
+	NO_PROXY_VALUE="$NO_PROXY_VALUE,$DEFAULT_REGISTRY"
+	export NO_PROXY="$NO_PROXY_VALUE" no_proxy="$NO_PROXY_VALUE"
 }
 
 collect_deployment_settings() {
@@ -482,7 +519,7 @@ collect_deployment_settings() {
 	prompt DEPLOY_DIR "部署目录" "$DEFAULT_DEPLOY_DIR"
 	load_existing_deployment
 	load_saved_deployment_inputs
-	image_default="${SAVED_IMAGE:-${PREVIOUS_IMAGE:-$DEFAULT_IMAGE}}"
+	image_default="$(preferred_image "${SAVED_IMAGE:-${PREVIOUS_IMAGE:-$DEFAULT_IMAGE}}")"
 	frappe_docker_ref_default="${SAVED_FRAPPE_DOCKER_REF:-${PREVIOUS_FRAPPE_DOCKER_COMMIT:-$DEFAULT_FRAPPE_DOCKER_REF}}"
 
 	prompt IMAGE "应用镜像（修改标签即可升级）" "$image_default"
@@ -846,7 +883,8 @@ backup_running_site() {
 		run docker compose "${COMPOSE_ARGS[@]}" exec -T backend bench --site "$site_name" backup --with-files
 		return
 	fi
-	warn "backend 的 pg_dump 为 $pg_dump_major，低于 PostgreSQL $server_major；改用 postgres:$server_major 客户端备份"
+	pull_image "$DEFAULT_REGISTRY/library/postgres:$server_major"
+	warn "backend 的 pg_dump 为 $pg_dump_major，低于 PostgreSQL $server_major；改用 $DEFAULT_REGISTRY/library/postgres:$server_major 客户端备份"
 	backup_postgres_with_compatible_client "$site_name" "$db_name" "$db_user" "$db_password" "$db_host" "$db_port" "$server_major"
 }
 
@@ -873,7 +911,7 @@ backup_postgres_with_compatible_client() {
 	if ! docker run --rm --network "$backend_network" --add-host "host.docker.internal:host-gateway" \
 		--volumes-from "$backend_id" --user "$backend_uid:$backend_gid" -e "PGPASSWORD=$db_password" \
 		-e "PGHOST=$db_host" -e "PGPORT=$db_port" -e "PGUSER=$db_user" -e "PGDATABASE=$db_name" \
-		-e "BACKUP_DATABASE=$backup_database" "postgres:$server_major" \
+		-e "BACKUP_DATABASE=$backup_database" "$DEFAULT_REGISTRY/library/postgres:$server_major" \
 		bash -o pipefail -ceu 'pg_dump --no-password | gzip >>"$BACKUP_DATABASE"'; then
 		docker compose "${COMPOSE_ARGS[@]}" exec -T -e "BACKUP_DATABASE=$backup_database" backend bash -ceu 'rm -f "$BACKUP_DATABASE"'
 		die "兼容 PostgreSQL 客户端的数据库备份失败，升级已中止"
@@ -1049,10 +1087,11 @@ backup_adopted_database_with_postgres_client() {
 	((server_major >= 10)) || die "不支持 PostgreSQL $server_version_num 的接管备份"
 
 	warn "旧 backend 的 pg_dump 与数据库版本不兼容，改用 PostgreSQL $server_major 客户端备份数据库"
+	pull_image "$DEFAULT_REGISTRY/library/postgres:$server_major"
 	docker run --rm --network "$ADOPT_NETWORK_NAME" --add-host "host.docker.internal:host-gateway" \
 		-e "PGPASSWORD=$db_password" \
 		-v "$ADOPT_SOURCE_VOLUME:/sites" \
-		"postgres:$server_major" bash -o pipefail -ceu '
+		"$DEFAULT_REGISTRY/library/postgres:$server_major" bash -o pipefail -ceu '
 			backup_dir="/sites/$1/private/backups"
 			mkdir -p "$backup_dir"
 			partial="$backup_dir/$6.partial"
@@ -1095,10 +1134,11 @@ backup_and_clone_adopted_site() {
 	docker stop "${container_ids[@]}"
 	ADOPT_SOURCE_STOPPED=true
 	docker volume create "$ADOPT_TARGET_VOLUME" >/dev/null
+	pull_image "$DEFAULT_REGISTRY/library/alpine:3.20"
 	docker run --rm \
 		-v "$ADOPT_SOURCE_VOLUME:/from:ro" \
 		-v "$ADOPT_TARGET_VOLUME:/to" \
-		alpine:3.20 sh -ec '
+		"$DEFAULT_REGISTRY/library/alpine:3.20" sh -ec '
 			cp -a /from/. /to/
 			find /to -mindepth 1 -maxdepth 1 -type d -name "*" \
 				! -name "'"$SITE_NAME"'" -exec sh -c "[ -f \"\$1/site_config.json\" ] && rm -rf \"\$1\" || true" _ {} \;
@@ -1116,6 +1156,8 @@ write_env_file() {
 	{
 		printf 'CUSTOM_IMAGE=%s\n' "$IMAGE_REPOSITORY"
 		printf 'CUSTOM_TAG=%s\n' "$IMAGE_TAG"
+		printf 'POSTGRES_IMAGE=%s\n' "$POSTGRES_IMAGE"
+		printf 'REDIS_IMAGE=%s\n' "$REDIS_IMAGE"
 		printf 'ERPNEXT_VERSION=\n'
 		printf 'PULL_POLICY=missing\n'
 		printf 'RESTART_POLICY=unless-stopped\n'
@@ -1137,6 +1179,10 @@ write_generated_compose() {
 	{
 		cat <<EOF
 services:
+  redis-cache:
+    image: $(yaml_quote "$REDIS_IMAGE")
+  redis-queue:
+    image: $(yaml_quote "$REDIS_IMAGE")
   configurator:
     environment:
       DB_HOST: $(yaml_quote "$db_host")
@@ -1165,6 +1211,9 @@ services:
       - "host.docker.internal:host-gateway"
 
 EOF
+		if [[ "$DB_MODE" == "container" ]]; then
+			printf '  db:\n    image: %s\n\n' "$(yaml_quote "$POSTGRES_IMAGE")"
+		fi
 		cat <<EOF
 networks:
   default:
@@ -1238,60 +1287,83 @@ prepare_compose() {
 	STATE_DB_MODE="$DB_MODE"
 	compose_args_from_state "$DEPLOY_DIR"
 	run docker compose "${COMPOSE_ARGS[@]}" config --quiet
+	"$DRY_RUN" && return 0
+	local images dependency_image
+	images="$(docker compose "${COMPOSE_ARGS[@]}" config --images)" || die "无法读取部署镜像清单"
+	[[ -n "$images" ]] || die "部署镜像清单为空"
+	log "在重建服务前检查全部镜像"
+	while read -r dependency_image; do
+		[[ -n "$dependency_image" ]] || continue
+		docker manifest inspect "$dependency_image" >/dev/null ||
+			die "镜像不可读取：$dependency_image；先同步原版本并检查只读登录"
+	done < <(sort -u <<<"$images")
 }
 
-login_and_pull_image() {
+pull_image() {
+	local requested_image="$1"
 	log "拉取应用镜像"
-	if run docker pull "$IMAGE_REPOSITORY:$IMAGE_TAG"; then
+	if run docker pull "$requested_image"; then
 		return
 	fi
 	"$DRY_RUN" && return
 
-	if [[ "$IMAGE_REPOSITORY" != ghcr.io/* ]]; then
-		die "无法拉取镜像，请先登录对应镜像仓库"
+	local registry_server="${requested_image%%/*}"
+	if [[ "$requested_image" != */* || ( "$registry_server" != *.* && "$registry_server" != *:* && "$registry_server" != localhost ) ]]; then
+		registry_server="docker.io"
 	fi
-
-	local registry_user
-	local registry_token
-	local credentials_file="$DEPLOY_DIR/.ghcr-credentials"
+	local registry_user registry_token
+	local credentials_file="$DEPLOY_DIR/.registry-credentials"
+	local username_key=REGISTRY_USERNAME password_key=REGISTRY_PASSWORD
+	local username_default=registry-pull
+	if [[ "$registry_server" == ghcr.io ]]; then
+		credentials_file="$DEPLOY_DIR/.ghcr-credentials"
+		username_key=GHCR_USERNAME
+		password_key=GHCR_TOKEN
+		username_default="${SUDO_USER:-${USER:-}}"
+	fi
 	if [[ -f "$credentials_file" && ! -L "$credentials_file" && -O "$credentials_file" ]] &&
 		[[ "$(stat -c '%a' "$credentials_file")" == "600" ]]; then
-		registry_user="$(read_config_value "$credentials_file" GHCR_USERNAME)"
-		registry_token="$(read_config_value "$credentials_file" GHCR_TOKEN)"
-		if [[ -n "$registry_user" && -n "$registry_token" ]]; then
-			log "使用已保存的 GHCR 凭据登录"
-			if printf '%s' "$registry_token" | docker login ghcr.io -u "$registry_user" --password-stdin; then
-				unset registry_token
-				if run docker pull "$IMAGE_REPOSITORY:$IMAGE_TAG"; then
+		if [[ "$registry_server" == ghcr.io || "$(read_config_value "$credentials_file" REGISTRY_SERVER)" == "$registry_server" ]]; then
+			registry_user="$(read_config_value "$credentials_file" "$username_key")"
+			registry_token="$(read_config_value "$credentials_file" "$password_key")"
+			if [[ -n "$registry_user" && -n "$registry_token" ]]; then
+				log "使用已保存的 $registry_server 只读凭据登录"
+				if printf '%s' "$registry_token" | docker login "$registry_server" -u "$registry_user" --password-stdin; then
+					unset registry_token
+					run docker pull "$requested_image" ||
+						die "登录成功，但目标镜像不可用；请先同步该版本，不会自动切换上游或升级版本"
 					return
 				fi
-				die "GHCR 登录成功，但仍无法拉取镜像；请检查镜像名称、标签和 read:packages 权限"
+				warn "已保存的镜像仓库凭据登录失败，需要重新输入"
 			fi
-			warn "已保存的 GHCR 凭据登录失败，需要重新输入"
-			unset registry_token
 		fi
 	elif [[ -e "$credentials_file" ]]; then
-		warn "已保存的 GHCR 凭据文件权限或所有者不安全，已忽略；请重新输入凭据"
+		warn "镜像仓库凭据文件权限或所有者不安全，已忽略"
 	fi
 
-	prompt registry_user "GHCR 用户名" "${SUDO_USER:-${USER:-}}"
-	prompt_secret registry_token "GHCR Personal access token (classic，至少需要 read:packages)"
-	[[ -n "$registry_token" ]] || die "GHCR Token 不能为空"
-	if ! printf '%s' "$registry_token" | docker login ghcr.io -u "$registry_user" --password-stdin; then
+	prompt registry_user "$registry_server 只读用户名" "$username_default"
+	prompt_secret registry_token "$registry_server 只读密码或 Token"
+	[[ -n "$registry_token" ]] || die "镜像仓库凭据不能为空"
+	if ! printf '%s' "$registry_token" | docker login "$registry_server" -u "$registry_user" --password-stdin; then
 		unset registry_token
-		die "GHCR 登录失败，请检查用户名和 Token"
+		die "$registry_server 登录失败，请检查只读账号"
 	fi
-
 	local credentials_temp
-	credentials_temp="$(mktemp "$DEPLOY_DIR/.ghcr-credentials.XXXXXX")"
+	credentials_temp="$(mktemp "$DEPLOY_DIR/.registry-credentials.XXXXXX")"
 	{
-		printf 'GHCR_USERNAME=%s\n' "$registry_user"
-		printf 'GHCR_TOKEN=%s\n' "$registry_token"
+		printf 'REGISTRY_SERVER=%s\n' "$registry_server"
+		printf '%s=%s\n' "$username_key" "$registry_user"
+		printf '%s=%s\n' "$password_key" "$registry_token"
 	} >"$credentials_temp"
 	chmod 600 "$credentials_temp"
 	mv "$credentials_temp" "$credentials_file"
 	unset registry_token
-	run docker pull "$IMAGE_REPOSITORY:$IMAGE_TAG"
+	run docker pull "$requested_image" ||
+		die "目标镜像不可用；请先同步该版本，不会自动切换上游或升级版本"
+}
+
+login_and_pull_image() {
+	pull_image "$IMAGE_REPOSITORY:$IMAGE_TAG"
 }
 
 wait_for_backend() {
@@ -1435,16 +1507,17 @@ main() {
 	apply_apt_proxy
 	install_base_packages
 	install_docker
+	load_dependency_images
 	backup_existing_site
 	create_upgrade_snapshot
 	apply_docker_proxy
 	login_and_pull_image
 	download_frappe_docker
-	backup_and_clone_adopted_site
 	write_env_file
 	write_generated_compose
 	write_proxy_compose
 	prepare_compose
+	backup_and_clone_adopted_site
 	install_local_postgres
 	install_or_upgrade_site
 	verify_deployment

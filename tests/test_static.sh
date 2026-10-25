@@ -10,6 +10,7 @@ python3 -m py_compile \
 	"$repo_root/patch-deploy/patch.py" \
 	"$repo_root/patch-deploy/remote.py"
 python3 -m unittest discover -s "$repo_root/tests" -p 'test_tbi_query_config.py'
+python3 -m unittest discover -s "$repo_root/tests" -p 'test_registry_images.py'
 python3 -m unittest discover -s "$repo_root/patch-deploy/tests" -p 'test_*.py'
 "$repo_root/tests/test_single_node_adopt.sh"
 "$repo_root/single-node/deploy.sh" --help | grep -q -- "--dry-run"
@@ -249,7 +250,13 @@ locked_runtime_release = next(
     if task["name"] == "校验已锁定的 TAI Service 正式版本"
 )
 locked_runtime_checks = locked_runtime_release["ansible.builtin.assert"]["that"]
-assert "tai_service_release_version is match('^[0-9]+\\\\.[0-9]+\\\\.[0-9]+$')" in locked_runtime_checks
+import re
+version_check = next(check for check in locked_runtime_checks if check.startswith("tai_service_release_version"))
+version_pattern = version_check.split("'", 2)[1]
+assert re.fullmatch(version_pattern, "0.1.20.fix1")
+assert re.fullmatch(version_pattern, "1.2.3")
+assert not re.fullmatch(version_pattern, "1.2")
+assert not re.fullmatch(version_pattern, "release")
 assert "tai_service_source_commit is match('^[0-9a-f]{40}$')" in locked_runtime_checks
 assert any("tai-service@sha256" in check for check in locked_runtime_checks)
 assert "tai_service_release_lock | default(false) | bool" in locked_runtime_release["when"]
@@ -498,7 +505,7 @@ assert "BEGIN tsuie_deploy" in deploy_script
 assert "BEGIN tsuite_deploy" in deploy_script
 assert "backup_postgres_with_compatible_client" in deploy_script
 assert "SHOW server_version_num;" in deploy_script
-assert '"postgres:$server_major"' in deploy_script
+assert '"$DEFAULT_REGISTRY/library/postgres:$server_major"' in deploy_script
 assert 'backup_adopted_database_with_postgres_client "$backend_container"' in deploy_script
 assert 'bash -o pipefail -ceu' in deploy_script
 assert '--add-host "host.docker.internal:host-gateway"' in deploy_script
@@ -631,7 +638,7 @@ confirm() {
 }
 EXISTING_DEPLOYMENT=false
 collect_deployment_settings >/dev/null
-[[ "$IMAGE" == "ghcr.io/transinfosh/srm:0.1.8" ]]
+[[ "$IMAGE" == "registry.trinfo.net/transinfosh/srm:0.1.8" ]]
 [[ "${APP_LIST[*]}" == "srm" ]]
 [[ "$SITE_NAME" == "srm.dtaut.com" ]]
 [[ "$BIND_ADDRESS" == "0.0.0.0" ]]
@@ -698,3 +705,54 @@ prompt_secret() {
 login_and_pull_image >/dev/null
 [[ "$(cat "$fixture_dir/ghcr-received-token")" == "fixture-token" ]]
 unset -f docker prompt prompt_secret
+
+# 自建仓库必须只接收自己的凭据；不得误用旧 GHCR Token。
+# shellcheck disable=SC2317
+docker() {
+	case "$1" in
+		pull)
+			GHCR_MOCK_PULL_COUNT=$((GHCR_MOCK_PULL_COUNT + 1))
+			[[ "$GHCR_MOCK_PULL_COUNT" -ge 2 ]]
+			;;
+		login)
+			[[ "$2" == registry.trinfo.net ]]
+			read -r GHCR_MOCK_TOKEN
+			[[ "$GHCR_MOCK_TOKEN" == fixture-registry-password ]]
+			;;
+		*) return 1 ;;
+	esac
+}
+# shellcheck disable=SC2317
+prompt() { printf -v "$1" '%s' registry-pull; }
+# shellcheck disable=SC2317
+prompt_secret() { printf -v "$1" '%s' fixture-registry-password; }
+IMAGE_REPOSITORY=registry.trinfo.net/transinfosh/quality
+IMAGE_TAG=0.0.31
+GHCR_MOCK_PULL_COUNT=0
+login_and_pull_image >/dev/null
+[[ "$(stat -c '%a' "$fixture_dir/.registry-credentials")" == 600 ]]
+grep -qx 'REGISTRY_SERVER=registry.trinfo.net' "$fixture_dir/.registry-credentials"
+grep -qx 'REGISTRY_USERNAME=registry-pull' "$fixture_dir/.registry-credentials"
+# Existing GHCR credentials remain separate.
+grep -qx 'GHCR_TOKEN=fixture-token' "$fixture_dir/.ghcr-credentials"
+# shellcheck disable=SC2317
+prompt() { echo '不应再次询问已保存的仓库凭据' >&2; return 1; }
+# shellcheck disable=SC2317
+prompt_secret() { echo '不应再次询问已保存的仓库密码' >&2; return 1; }
+GHCR_MOCK_PULL_COUNT=0
+login_and_pull_image >/dev/null
+unset -f docker prompt prompt_secret
+
+# 在更换上游模板前读取既有依赖版本，不能把 PostgreSQL 16 换成新安装默认的 15。
+# shellcheck disable=SC2317
+docker() {
+	printf '%s\n' '{"services":{"db":{"image":"postgres:16.4"},"redis-cache":{"image":"redis:7.2-alpine"}}}'
+}
+mkdir -p "$fixture_dir/frappe_docker"
+touch "$fixture_dir/frappe_docker/compose.yaml"
+EXISTING_DEPLOYMENT=true
+export EXISTING_DB_MODE=container
+load_dependency_images
+[[ "$POSTGRES_IMAGE" == registry.trinfo.net/library/postgres:16.4 ]]
+[[ "$REDIS_IMAGE" == registry.trinfo.net/library/redis:7.2-alpine ]]
+unset -f docker

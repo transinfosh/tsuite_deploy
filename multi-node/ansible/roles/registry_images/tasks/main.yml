@@ -1,0 +1,24 @@
+---
+- name: 校验本次部署的镜像均来自选定仓库
+  ansible.builtin.assert:
+    that:
+      - item.startswith(deployment_registry ~ '/')
+      - "':' in item.rsplit('/', 1)[-1]"
+    fail_msg: "镜像必须使用 {{ deployment_registry }} 中已同步的固定版本：{{ item }}"
+  loop: "{{ deployment_required_images | unique }}"
+  when: image_delivery_mode == 'registry'
+
+- name: 在备份和重建服务前检查镜像可读取
+  ansible.builtin.command:
+    argv:
+      - docker
+      - manifest
+      - inspect
+      - "{{ item }}"
+  environment:
+    NO_PROXY: "{{ deployment_no_proxy | replace('\n', '') | replace(' ', '') }},{{ deployment_registry }}"
+    no_proxy: "{{ deployment_no_proxy | replace('\n', '') | replace(' ', '') }},{{ deployment_registry }}"
+  loop: "{{ deployment_required_images | unique }}"
+  changed_when: false
+  check_mode: false
+  when: image_delivery_mode == 'registry'
