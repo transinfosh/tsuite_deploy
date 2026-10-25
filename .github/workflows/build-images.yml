@@ -20,6 +20,10 @@ on:
       APP_SOURCE_TOKEN:
         description: Token with read access to the private source repositories
         required: true
+      REGISTRY_USERNAME:
+        required: true
+      REGISTRY_PASSWORD:
+        required: true
   workflow_dispatch:
     inputs:
       target:
@@ -224,3 +228,13 @@ jobs:
             echo "- source commit: \`$SOURCE_COMMIT\`"
             echo "- immutable image: \`${IMAGE}@${IMAGE_DIGEST}\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  mirror:
+    needs: build
+    uses: transinfosh/frappe_docker/.github/workflows/mirror-release-image.yml@8957f9148e1eff3e43dbf3e2ab2330a430086764
+    with:
+      image_name: ghcr.io/transinfosh/${{ inputs.target }}
+      image_tag: ${{ inputs.release_tag }}
+    secrets:
+      REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+      REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
