@@ -21,6 +21,8 @@
 2. GitHub 构建与后置同步均成功，目标 manifest 可读取，复制版本与源 digest 相同；
 3. 展开所有 Compose、环境变量与覆盖文件，检查本次全部镜像；缺少版本或发现其他仓库时先停止；
 4. 自建仓库域名加入 Docker daemon 和命令环境的 `NO_PROXY`，其余源码/包下载按需保留现有代理。
+   已运行的 daemon 需要在维护窗口重启后加载代理环境；用 `docker info --format '{{.NoProxy}}'`
+   核对实际生效值。只修改环境文件或执行 `systemctl daemon-reload` 不代表 Docker 已加载。
 
 对现场 Compose 可执行（命令中的 Compose 参数沿用现场）：
 
