@@ -16,6 +16,6 @@ sudo tsuite-deploy
 单机部署不读取 `shared/contracts/` 中的文件；这些文档只定义跨部署形态的约定，避免安装脚本在运行时依赖仓库目录布局。
 
 默认镜像来源为自建 Registry；旧 GHCR 地址在交互默认值中只替换域名，保留版本。
-首次使用时输入 `registry-pull` 只读密码。数据库和 Redis 从原 Compose 读取版本后换源；
+首次使用时输入 `registry-pull` 只读密码。数据库和 Redis 优先使用原运行镜像摘要，尚未运行时从原 Compose 读取版本后换源；
 新安装采用脚本默认版本。来源、缺失镜像处理及 AI 直接部署约定见
 [镜像来源契约](../shared/contracts/README.md#镜像来源)。

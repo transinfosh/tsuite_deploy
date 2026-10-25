@@ -424,6 +424,7 @@ preferred_image() {
 	case "$1" in
 		ghcr.io/transinfosh/*) printf '%s/%s' "$DEFAULT_REGISTRY" "${1#ghcr.io/}" ;;
 		postgres:* | postgres@* | redis:* | redis@* | alpine:* | alpine@*) printf '%s/library/%s' "$DEFAULT_REGISTRY" "$1" ;;
+		docker.m.daocloud.io/library/*) printf '%s/library/%s' "$DEFAULT_REGISTRY" "${1#docker.m.daocloud.io/library/}" ;;
 		docker.io/library/*) printf '%s/library/%s' "$DEFAULT_REGISTRY" "${1#docker.io/library/}" ;;
 		*) printf '%s' "$1" ;;
 	esac
@@ -434,7 +435,7 @@ load_dependency_images() {
 	[[ -f "$DEPLOY_DIR/frappe_docker/compose.yaml" ]] || return 0
 	STATE_DB_MODE="${EXISTING_DB_MODE:-container}"
 	compose_args_from_state "$DEPLOY_DIR"
-	local service dependency_image
+	local service dependency_image running_image pinned_dependency
 	local dependencies
 	dependencies="$(docker compose "${COMPOSE_ARGS[@]}" config --format json | python3 -c '
 import json,sys
@@ -444,6 +445,20 @@ for name in ("db", "redis-cache"):
         print(name, services[name]["image"])
 ')" || die "无法读取现有数据库和 Redis 镜像；保留现场配置并停止"
 	while read -r service dependency_image; do
+		running_image="$(docker compose "${COMPOSE_ARGS[@]}" images -q "$service")" ||
+			die "无法读取既有 $service 镜像，换源已停止"
+		if [[ -n "$running_image" ]]; then
+			pinned_dependency="$(docker image inspect "$running_image" --format '{{json .RepoDigests}}' | python3 -c '
+import json,sys
+references=json.load(sys.stdin) or []
+source=sys.argv[1].split("@",1)[0]
+if ":" in source.rsplit("/",1)[-1]:
+    source=source.rsplit(":",1)[0]
+if references:
+    print(source+"@"+references[0].rsplit("@",1)[1])
+' "$dependency_image")" || die "无法读取既有 $service 的固定摘要"
+			dependency_image="${pinned_dependency:-$dependency_image}"
+		fi
 		case "$service" in
 			db) POSTGRES_IMAGE="${TSUITE_POSTGRES_IMAGE:-$(preferred_image "$dependency_image")}" ;;
 			redis-cache) REDIS_IMAGE="${TSUITE_REDIS_IMAGE:-$(preferred_image "$dependency_image")}" ;;
@@ -1131,10 +1146,10 @@ backup_and_clone_adopted_site() {
 	fi
 	mapfile -t container_ids < <(docker ps -aq --filter "label=com.docker.compose.project=$ADOPT_SOURCE_PROJECT")
 	((${#container_ids[@]})) || die "找不到旧 Compose 项目 $ADOPT_SOURCE_PROJECT 的容器"
+	pull_image "$DEFAULT_REGISTRY/library/alpine:3.20"
 	docker stop "${container_ids[@]}"
 	ADOPT_SOURCE_STOPPED=true
 	docker volume create "$ADOPT_TARGET_VOLUME" >/dev/null
-	pull_image "$DEFAULT_REGISTRY/library/alpine:3.20"
 	docker run --rm \
 		-v "$ADOPT_SOURCE_VOLUME:/from:ro" \
 		-v "$ADOPT_TARGET_VOLUME:/to" \

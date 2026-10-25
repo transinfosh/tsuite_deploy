@@ -3,30 +3,32 @@ deployment_environment: internal-demo
 release_lock_state: locked
 allow_unlocked_revisions: false
 
-# 当前阶段可以使用可变标签；切换 production inventory 前必须改为 digest 或不可变标签。
+# 2026-10-25 按实际运行镜像锁定，换源不升级业务组件。
 image_delivery_mode: registry
 deployment_registry: registry.trinfo.net
 deployment_registry_username: "{{ vault_registry_username | default('registry-pull') }}"
 deployment_registry_token: "{{ vault_registry_password | default('') }}"
 deployment_image_tag: v0.1.0-internal-demo.2
-customer_image_tag: 0.0.21.post1
-customer_source_commit: 0f4b40e268496a25d7bf2cb83aefa984a7e806c8
-customer_frappe_image: "{{ deployment_registry }}/transinfosh/tai-customer@sha256:368768c7d0220de7ad481f15ed99fc4f741bc3945d7ebe570ab12ac6529eea92"
-control_image_tag: 0.0.18
-control_source_commit: e026daaee3044b77a001f1f84c9ac786fbf7973c
-control_frappe_image: "{{ deployment_registry }}/transinfosh/tai-control@sha256:38a0de14f09a0f45f935fa9aa002f39fb27d3fde878d6562a3b0cc3ca9843669"
+customer_image_tag: 0.0.59
+customer_source_commit: 6aafe1773124916eba19944448b56d050dd2c2a0
+customer_frappe_image: "{{ deployment_registry }}/transinfosh/tai-customer@sha256:0a6d93ed7eef91ec6d1a0e6ec49f391854a512c4819c347dc8180e178df1e0a7"
+control_image_tag: 0.0.31
+control_source_commit: 7a2d2903c6149e7a60e02f69cd97395e19010b02
+control_frappe_image: "{{ deployment_registry }}/transinfosh/tai-control@sha256:fad42b7418c8f062d94101dcda7852e50ee8f2458fa251a95fc54f97ae6f036e"
 # Runtime database migrations rely on SECURITY DEFINER ownership. Pin this
 # service independently so a later full deployment cannot roll it back.
 tai_service_release_lock: true
-tai_service_release_version: 0.1.20.fix1
-tai_service_source_commit: 8ff4dac7da6a5d75af0c6ef69c170e692420366c
-tai_service_image: "{{ deployment_registry }}/transinfosh/tai-service@sha256:07e63519c344f230967fd7def50802739e4a4badb93ea610a56c8cac18a860fd"
-tbi_engine_release_version: 0.1.5
-tbi_engine_source_commit: a99648b2dcc4baa7d25173f59837d776a96dbdd8
-tbi_engine_image: "{{ deployment_registry }}/transinfosh/tbi-engine@sha256:728ee0f3ec4518030a7e29c08990463a3da6a47408cc86598c99f945772ea3ad"
-tai_auth_image: "{{ deployment_registry }}/transinfosh/tai-auth:{{ deployment_image_tag }}"
+tai_service_release_version: 0.1.25
+tai_service_source_commit: 835a9b43cf5b138406c5a3cc756a062c047c4bf1
+tai_service_image: "{{ deployment_registry }}/transinfosh/tai-service@sha256:956284425283df604f21eed13d48863615bd5c24d6d21852a3ff5c65c06db088"
+tbi_engine_release_version: 0.1.16
+tbi_engine_source_commit: 8a6370e7d96028dfb7cd883fe9fc4a2829e1ef25
+tbi_engine_image: "{{ deployment_registry }}/transinfosh/tbi-engine@sha256:49e2ed7e1dec3f853e96fb2e266ab2a409ca4fdd5bb5497c6d4649c919ba177a"
+tai_auth_image: "{{ deployment_registry }}/transinfosh/tai-auth@sha256:3235de9262dc009598f2082a8bd9b25132e65b4b134dec09f2c0988c1a93d48b"
+customer_redis_image: "{{ deployment_registry }}/library/redis@sha256:75934ddb37bfaebe3b4082ba673cac39f66495244134f33dd0a502ce03cdcd36"
+frappe_redis_image: "{{ deployment_registry }}/library/redis@sha256:75934ddb37bfaebe3b4082ba673cac39f66495244134f33dd0a502ce03cdcd36"
 frappe_docker_repo: https://github.com/transinfosh/frappe_docker.git
-frappe_docker_ref: main
+frappe_docker_ref: 0f27c828db164695f5745fc6f6daaf992bdb8e92
 
 customer_site_name: tai.trinfo.net
 runtime_public_hostname: api.trinfo.net

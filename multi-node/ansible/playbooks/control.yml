@@ -11,7 +11,7 @@
     - role: registry_images
       vars:
         deployment_required_images: >-
-          {{ [control_frappe_image, tai_auth_image, deployment_registry ~ '/library/redis:8.6-alpine']
+          {{ [control_frappe_image, tai_auth_image, frappe_redis_image | default(deployment_registry ~ '/library/redis:8.6-alpine')]
              + ([deployment_registry ~ '/pgvector/pgvector:pg16']
                 if not (external_database_enabled | default(false) | bool) else [])
              + ([phoenix_image] if enable_phoenix | bool else [])

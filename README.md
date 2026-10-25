@@ -113,7 +113,8 @@ sudo tsuite-deploy
 
 已有部署的 GHCR 镜像会在交互默认值中改为自建仓库的同名、同版本地址；显式输入其他仓库仍然有效。
 镜像不存在时中止，先由运维补齐原版本，不会自动升级版本或回源 GHCR。
-数据库与 Redis 沿用已有 Compose 中的版本，仅变更可识别的镜像来源；新安装默认 PostgreSQL 15.17
+数据库与 Redis 优先固定到既有容器镜像的 RepoDigest；尚未运行时沿用 Compose 中的版本，
+仅变更可识别的镜像来源。新安装默认 PostgreSQL 15.17
 和 Redis 8.6-alpine。可通过 `TSUITE_IMAGE_REGISTRY`、`TSUITE_POSTGRES_IMAGE`、`TSUITE_REDIS_IMAGE`
 显式覆盖镜像来源。选择 GHCR 时保留旧 `.ghcr-credentials` 的读取和保存兼容性；GHCR 只读
 Token 和自建仓库密码相互独立。
@@ -370,7 +371,7 @@ allow_unlocked_revisions: true
 ```
 
 这表示内部演示暂时允许使用 Tag，而不强制锁定镜像 digest。默认的 `registry` 模式直接拉取
-同一个 `deployment_image_tag` 对应的五个自建 Registry 镜像；`local_bundle` 仅作为故障恢复路径，启用时
+inventory 中分别锁定的五个自建 Registry 镜像；`local_bundle` 仅作为故障恢复路径，启用时
 才需要运行 `multi-node/tools/create-source-bundle.sh` 生成带 SHA256 的统一源码快照。
 `production` inventory 会拒绝 `unlocked` 状态。
 

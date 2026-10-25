@@ -746,7 +746,9 @@ unset -f docker prompt prompt_secret
 # 在更换上游模板前读取既有依赖版本，不能把 PostgreSQL 16 换成新安装默认的 15。
 # shellcheck disable=SC2317
 docker() {
-	printf '%s\n' '{"services":{"db":{"image":"postgres:16.4"},"redis-cache":{"image":"redis:7.2-alpine"}}}'
+	if [[ "$*" == *'config --format json' ]]; then
+		printf '%s\n' '{"services":{"db":{"image":"postgres:16.4"},"redis-cache":{"image":"redis:7.2-alpine"}}}'
+	fi
 }
 mkdir -p "$fixture_dir/frappe_docker"
 touch "$fixture_dir/frappe_docker/compose.yaml"
@@ -755,4 +757,19 @@ export EXISTING_DB_MODE=container
 load_dependency_images
 [[ "$POSTGRES_IMAGE" == registry.trinfo.net/library/postgres:16.4 ]]
 [[ "$REDIS_IMAGE" == registry.trinfo.net/library/redis:7.2-alpine ]]
+unset -f docker
+
+# 可变标签已被重新发布时，现有依赖仍应固定在当前运行内容，不跟随另一个构建。
+# shellcheck disable=SC2317
+docker() {
+	case "$*" in
+		*'config --format json') printf '%s\n' '{"services":{"redis-cache":{"image":"redis:8.6-alpine"}}}' ;;
+		*'images -q redis-cache') printf '%s\n' current-image ;;
+		'image inspect current-image --format {{json .RepoDigests}}')
+			printf '%s\n' '["redis@sha256:bb2e2e3ac0c7295b6f3b1b7ee5438f7320c74483cba1cb195f3fd43dad38de67"]' ;;
+		*) return 1 ;;
+	esac
+}
+load_dependency_images
+[[ "$REDIS_IMAGE" == registry.trinfo.net/library/redis@sha256:bb2e2e3ac0c7295b6f3b1b7ee5438f7320c74483cba1cb195f3fd43dad38de67 ]]
 unset -f docker

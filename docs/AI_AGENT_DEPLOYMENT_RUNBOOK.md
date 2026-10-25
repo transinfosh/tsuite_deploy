@@ -82,6 +82,15 @@ OpenSSH 会因私钥权限过宽而拒绝加载。
 - 该节点升级沿用现场 Compose，先停止入口和后台写入，备份数据库、站点文件与 Compose，再更新应用镜像、迁移并验证。备份复制到控制机后校验 SHA-256。
 - 控制机通过其独立 identity `~/.ssh/tsuite_deploy_ed25519` 连接该内网节点，无需临时支持隧道。
 
+### 2026-10-25 镜像来源与版本复核
+
+- 2.50 实际运行 Project Management 0.0.25，数据库主版本 18；旧单机 state 继续仅供追溯。
+- 内网 Customer 为 0.0.59，Control 为 0.0.31，TAI Service 为 v0.1.25，Engine 为 v0.1.16，
+  tai-auth 为 v0.1.0-internal-demo.2。已按镜像标签与摘要核对 inventory 和发布锁；不能用较早的
+  0.0.21.post1、0.0.18 等记录回退现场。
+- 默认部署镜像来源为自建 Registry。现有 Compose 先准备同版本换源配置，保留运行容器；
+  是否已经重建、迁移和完成业务验收以该次部署记录为准。
+
 ### 内网 TAI/TBI 查询服务现场补充（2026-10-17）
 
 - `192.168.2.183` 的站点为 `tai.trinfo.net`，Compose project `frappe-customer`，配置目录

@@ -1,32 +1,31 @@
 ---
-# 2026-08-25 BI/AI 正式发布锁；目标 inventory 必须使用 reference@digest。
+# 2026-10-25 内部环境运行版本快照；仅换源，不升级业务镜像。
+# tai-auth 旧镜像的 revision 为 Tag，source_commit 已另行从不可变 Tag 核对。
 lock_state: locked
-resolved_at: "2026-08-25T03:00:00Z"
+resolved_at: '2026-10-25T06:20:09.728840Z'
 frappe_docker:
-  ref: main
-  resolved_sha: null
+  ref: 0f27c828db164695f5745fc6f6daaf992bdb8e92
+  resolved_sha: 0f27c828db164695f5745fc6f6daaf992bdb8e92
 images:
   customer_frappe:
-    reference: registry.trinfo.net/transinfosh/tai-customer:0.0.15
-    digest: sha256:fe51c1a3e7f9377b58ac975184d1f233fef3797ae2a1fae0760b38407e8710ea
-    source_commit: 621d29ad673a8cb954c4567886fdf970fcc92ff7
+    reference: registry.trinfo.net/transinfosh/tai-customer:0.0.59
+    digest: sha256:0a6d93ed7eef91ec6d1a0e6ec49f391854a512c4819c347dc8180e178df1e0a7
+    source_commit: 6aafe1773124916eba19944448b56d050dd2c2a0
   control_frappe:
-    reference: registry.trinfo.net/transinfosh/tai-control:0.0.15
-    digest: sha256:46fe330cf806d016b28b9d8efac8d4438229561bba04e54821057a27f9f4562f
-    source_commit: 2fb6737fdc9a89f4fee8bf056858b95cbd8055e9
+    reference: registry.trinfo.net/transinfosh/tai-control:0.0.31
+    digest: sha256:fad42b7418c8f062d94101dcda7852e50ee8f2458fa251a95fc54f97ae6f036e
+    source_commit: 7a2d2903c6149e7a60e02f69cd97395e19010b02
   tai_service:
-    reference: registry.trinfo.net/transinfosh/tai-service:v0.1.13
-    digest: sha256:57d0b04cc4edd0c44f3085836295d8208c4bfba7c21006e21d2f791cc2dd9d83
-    source_commit: 92cfdbef0a7b552293be7841d2e350c16d3af258
+    reference: registry.trinfo.net/transinfosh/tai-service:v0.1.25
+    digest: sha256:956284425283df604f21eed13d48863615bd5c24d6d21852a3ff5c65c06db088
+    source_commit: 835a9b43cf5b138406c5a3cc756a062c047c4bf1
   tbi_engine:
-    reference: registry.trinfo.net/transinfosh/tbi-engine:v0.1.5
-    digest: sha256:728ee0f3ec4518030a7e29c08990463a3da6a47408cc86598c99f945772ea3ad
-    source_commit: a99648b2dcc4baa7d25173f59837d776a96dbdd8
+    reference: registry.trinfo.net/transinfosh/tbi-engine:v0.1.16
+    digest: sha256:49e2ed7e1dec3f853e96fb2e266ab2a409ca4fdd5bb5497c6d4649c919ba177a
+    source_commit: 8a6370e7d96028dfb7cd883fe9fc4a2829e1ef25
   tai_auth:
-    reference: registry.trinfo.net/transinfosh/tai-auth:internal-demo
-    digest: null
-    source_commit: null
+    reference: registry.trinfo.net/transinfosh/tai-auth:v0.1.0-internal-demo.2
+    digest: sha256:3235de9262dc009598f2082a8bd9b25132e65b4b134dec09f2c0988c1a93d48b
+    source_commit: e36c9b1b1c089589f413f0d4d30a684e705ffa10
 source_bundle:
   sha256: null
-
-# 正式发布时应补齐：镜像 digest、源码 commit、OS/数据库/Redis/cloudflared 版本及构建时间。
