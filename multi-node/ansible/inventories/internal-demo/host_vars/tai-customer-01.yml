@@ -1,0 +1,7 @@
+---
+# 2026-10-30 按 2.183 实际部署保留 vendor 与第一方 Runtime 队列。
+# 其他节点继续使用 group_vars 中各自原有的 vendor 锁。
+frappe_docker_ref: 1400040089cef563d1307ad26202f683a381c4a8
+customer_queue_short_queues: short,default
+customer_queue_long_queues: long,default,short
+customer_enable_delivery_watcher_queue: false

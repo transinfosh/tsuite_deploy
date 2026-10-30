@@ -52,9 +52,9 @@
              if image_delivery_mode == 'local_bundle'
              else customer_frappe_image }}
         frappe_pull_policy: "{{ 'never' if image_delivery_mode == 'local_bundle' else 'always' }}"
-        frappe_queue_short_queues: "tai_delivery_short,short,default"
-        frappe_queue_long_queues: "tai_delivery_long,long,default,short"
-        frappe_enable_delivery_watcher_queue: true
+        frappe_queue_short_queues: "{{ customer_queue_short_queues | default('tai_delivery_short,short,default') }}"
+        frappe_queue_long_queues: "{{ customer_queue_long_queues | default('tai_delivery_long,long,default,short') }}"
+        frappe_enable_delivery_watcher_queue: "{{ customer_enable_delivery_watcher_queue | default(true) | bool }}"
         frappe_enable_tai_runtime_queue: true
         frappe_tai_runtime_queues: tai_runtime
         frappe_common_site_config:

@@ -70,6 +70,10 @@ sudo python3 /opt/tsuite-deploy/frappe-customer/tbi_query_config.py verify \
 不改变业务 API、数据库 schema 或权限。旧镜像缺少该能力会在启动前拒绝，不能通过关闭检查上线。
 回退旧业务版本需使用与该版本相配套的部署工具，并同时评估 Engine 的兼容性。
 
+客户现场可以通过 `customer_queue_short_queues`、`customer_queue_long_queues` 和
+`customer_enable_delivery_watcher_queue` 保留已核实的队列拓扑；未配置时沿用现有交付队列默认值。
+2.183 的 host_vars 保留 `short,default`、`long,default,short` 及独立 `tai_runtime`，不启用旧 delivery watcher。
+
 2026-10-17，2.183 因查询和桥接共用普通 Frappe 线程出现随机 `gateway_bridge_unavailable`。
 在不更换应用镜像、不迁移数据库的情况下补齐服务和 25 条精确路由；7 张图的仪表板连续 3 次加载
 共 21 个结果全部成功。部署前配置备份与修复过程保存在控制机
