@@ -117,7 +117,7 @@ OpenSSH 会因私钥权限过宽而拒绝加载。
 
 - 2.183 已实际升级至 Customer 0.0.62（TBI 0.0.22、frappe_ext 0.0.12、Frappe 16.53.0）和 Engine 0.1.18；正式镜像及 inventory 均使用自建 Registry digest。其余节点没有随此次任务升级。
 - host_vars 保留现场 vendor 提交及 short/long/tai_runtime 队列，不启用旧 delivery watcher。26 条查询路由、Engine backend 回调、公网登录、队列与仪表板并发验收通过。
-- 正式停写备份已复制到控制机并核对 SHA256，数据库在隔离 PG18 恢复成功。P1、102 保留原状；AHRD 因源库缺少历史字段 EnLicTradN，经用户确认恢复原发布范围。真实 AI 验收待具体发送范围授权。
+- 正式停写备份已复制到控制机并核对 SHA256，数据库在隔离 PG18 恢复成功。P1、102 保留原状；AHRD 因源库缺少历史字段 EnLicTradN，经用户确认恢复原发布范围。本地及 Gateway 共 48 个真实图表查询、用户授权的真实 DeepSeek 问答也已通过，验收会话已归档。
 - 固定版本、备份与验收证据见[本次部署记录](releases/tai-customer-20261030-v0062.md)，不以较早的 0.0.59/0.1.16 inventory 回退现场。
 
 ## 3. 不可违反的边界
