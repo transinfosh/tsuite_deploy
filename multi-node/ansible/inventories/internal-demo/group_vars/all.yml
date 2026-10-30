@@ -10,8 +10,8 @@ deployment_registry_username: "{{ vault_registry_username | default('registry-pu
 deployment_registry_token: "{{ vault_registry_password | default('') }}"
 deployment_image_tag: v0.1.0-internal-demo.2
 customer_image_tag: 0.0.62
-customer_source_commit: a54120833c0ef251d6668b7ca8c9548b63ed2d8b
-customer_frappe_image: "{{ deployment_registry }}/transinfosh/tai-customer@sha256:d70911633a203668a5d5145f9d0ce777bb88fec3a7b166fa5e33b39ddbac49ac"
+customer_source_commit: b1d17f23b75bbd6353a0f51fa8124f4f81fb2238
+customer_frappe_image: "{{ deployment_registry }}/transinfosh/tai-customer@sha256:7aff1b52479c46a6ca571b06194fb4c0ce686167a3ef10758f613e66a3b05433"
 control_image_tag: 0.0.31
 control_source_commit: 7a2d2903c6149e7a60e02f69cd97395e19010b02
 control_frappe_image: "{{ deployment_registry }}/transinfosh/tai-control@sha256:fad42b7418c8f062d94101dcda7852e50ee8f2458fa251a95fc54f97ae6f036e"
