@@ -25,6 +25,17 @@ def encoded(value):
     return base64.b64encode(value).decode()
 
 
+class ContainerSelectionTests(unittest.TestCase):
+    def test_query_service_is_part_of_the_application_patch_identity(self):
+        services = ["backend", "frontend", "websocket", "scheduler", "tbi-query", "queue-short", "queue-long", "queue-tai-runtime", "redis-cache"]
+        rows = [{"Id": service, "Image": "redis" if service == "redis-cache" else "application",
+                 "Config": {"Labels": {"com.docker.compose.service": service}},
+                 "State": {"Running": True, "Restarting": False}} for service in services]
+        with patch.object(remote, "run", return_value=b"fixture-container\n"), patch.object(remote, "inspect", return_value=rows):
+            selected = remote.containers("frappe-customer")
+        self.assertEqual({row["Id"] for row in selected}, set(services) - {"redis-cache"})
+
+
 class ScopeTests(unittest.TestCase):
     def test_scope(self):
         for path in ["tai/runtime/agents/data.py", "tai/prompts/chart.md"]:

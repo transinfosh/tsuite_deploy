@@ -5,3 +5,7 @@ frappe_docker_ref: 1400040089cef563d1307ad26202f683a381c4a8
 customer_queue_short_queues: short,default
 customer_queue_long_queues: long,default,short
 customer_enable_delivery_watcher_queue: false
+
+# 2026-11-03 Customer 0.0.66 / TBI 0.0.28，Engine 保持 0.1.18。
+customer_frappe_image: registry.trinfo.net/transinfosh/tai-customer@sha256:110fb18972c3b37e9d8c3453201a36e4483606996e857bc3afb23f454271c8e0
+customer_source_commit: 16650d3ffe1cf342ffd98b0e0e4355c5f0457cac

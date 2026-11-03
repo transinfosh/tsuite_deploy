@@ -12,7 +12,7 @@
 - 这些文件限制不能判定 Python 的行为语义：操作者仍需确认变更没有在普通 Python 文件中引入依赖、DDL、安装逻辑或迁移要求。
 - 同一 Compose 项目只允许一个活跃补丁；第二个修复应先撤回现有补丁，再以原基础 commit 生成包含两次修复的累计补丁。
 - 必须安排维护窗口，暂停新问答及其他任务入口。程序检查 RQ worker 是否 busy，但不提供全站请求排空或调度器互斥，检查后仍可能有新任务进入。
-- 项目中的 backend、frontend、websocket、scheduler 和 `queue-*` 容器必须运行同一镜像。容器源码必须逐文件与基础 commit 相同，否则拒绝覆盖。
+- 项目中的 backend、frontend、websocket、scheduler、独立 `tbi-query`（存在时）和 `queue-*` 容器必须运行同一镜像。容器源码必须逐文件与基础 commit 相同，否则拒绝覆盖。
 - 切换期间会停止上述应用容器；数据库、Redis 和外部引擎保持运行。使用 Docker stop/start，而非 Compose recreate，避免丢失容器可写层。
 
 ## 使用

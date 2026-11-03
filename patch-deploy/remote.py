@@ -72,7 +72,7 @@ def containers(project, require_running=True):
         r
         for r in rows
         if r["Config"]["Labels"].get("com.docker.compose.service")
-        in {"backend", "frontend", "websocket", "scheduler"}
+        in {"backend", "frontend", "websocket", "scheduler", "tbi-query"}
         or r["Config"]["Labels"]
         .get("com.docker.compose.service", "")
         .startswith("queue-")
