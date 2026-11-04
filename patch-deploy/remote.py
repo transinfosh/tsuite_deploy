@@ -260,11 +260,22 @@ def process(request, directory):
         ):
             raise ValueError("File outside patch scope")
     if any(
-        s["status"] in {"applied", "applying", "rolling_back", "rollback_failed"}
+        s["status"] in {"applying", "rolling_back", "rollback_failed"}
+        or (s["status"] == "applied" and s["app"] == app)
         for s in records
     ):
         raise ValueError("Resolve the existing active patch before deploying another")
     rows = containers(request["project"])
+    # Independent app patches share the same container generation. Refuse to
+    # stack on a drifted or recreated peer, even when this app is still pristine.
+    for peer in records:
+        if peer["status"] != "applied":
+            continue
+        if {r["Id"] for r in rows} != {r["Id"] for r in peer["containers"]} or any(
+            r["Image"] != peer["image_id"] for r in rows
+        ):
+            raise ValueError("Active peer patch belongs to different containers/image")
+        verify(peer["request"], rows, "after")
     original = verify(request, rows, "before")
     run("docker", "exec", backend(rows), PYTHON, "-c", IDLE, request["site"])
     if action == "check":

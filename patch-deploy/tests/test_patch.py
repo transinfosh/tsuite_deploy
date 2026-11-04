@@ -315,6 +315,42 @@ class TransactionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             remote.process({**self.request, "id": "fix-2"}, self.directory)
 
+    def test_independent_app_patch_preserves_peer_and_rolls_back_separately(self):
+        app_data = {app: dict(self.data) for app in ("tai", "tbi")}
+
+        def read(req, rows):
+            return {r["Id"]: [{"path": req["files"][0]["path"],
+                "data": encoded(app_data[req["app"]][r["Id"]]),
+                "mode": 0o644, "uid": 1000, "gid": 1000}] for r in rows}
+
+        def write(cid, app, files):
+            app_data[app][cid] = base64.b64decode(files[0]["data"])
+
+        with patch.object(remote, "read", read), patch.object(remote, "write", write):
+            self.process("prepare")
+            self.process("apply")
+            peer = {**self.request, "app": "tbi", "id": "fix-tbi",
+                "files": [{**self.request["files"][0], "path": "tbi/query.py"}]}
+            remote.process({**peer, "action": "prepare"}, self.directory)
+            remote.process({**peer, "action": "apply"}, self.directory)
+            self.assertEqual(set(app_data["tai"].values()), {b"value=2\n"})
+            self.assertEqual(set(app_data["tbi"].values()), {b"value=2\n"})
+            remote.process({**peer, "action": "rollback"}, self.directory)
+            self.assertEqual(set(app_data["tai"].values()), {b"value=2\n"})
+            self.assertEqual(set(app_data["tbi"].values()), {b"value=1\n"})
+            app_data["tai"]["worker"] = b"drifted"
+            with self.assertRaises(ValueError):
+                remote.process({**peer, "id": "fix-next", "action": "check"}, self.directory)
+
+    def test_incomplete_peer_patch_blocks_other_apps(self):
+        self.process("prepare")
+        state = json.loads((self.directory / "fix-1.json").read_text())
+        state["status"] = "rollback_failed"
+        (self.directory / "fix-1.json").write_text(json.dumps(state))
+        with self.assertRaises(ValueError):
+            remote.process({**self.request, "app": "tbi", "id": "other",
+                "files": [{**self.request["files"][0], "path": "tbi/query.py"}]}, self.directory)
+
     def test_recreated_container_rollback_rejected(self):
         self.process("prepare")
         self.process("apply")
