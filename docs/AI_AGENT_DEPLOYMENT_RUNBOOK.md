@@ -134,6 +134,10 @@ OpenSSH 会因私钥权限过宽而拒绝加载。
 - 控制机和183的GitHub取码出口不可用。本次vendor使用现场相同固定提交的本地Git镜像，完成后恢复原origin；应用镜像仍使用Registry固定digest。网络出口问题未修改，未来取码须先验证。
 - 版本、恢复点、镜像同步处理和验证证据见[本次发布记录](releases/tai-customer-20261103-v0066-interactions.md)。仅升级183，未升级其他节点或Engine。
 
+### 内网 TAI/TBI 仪表板专用图表与搜索发布（2026-11-04）
+
+2.183 当前为 Customer 0.0.67 / TBI 0.0.29，Engine 0.1.18 保持原容器。备份异地哈希与隔离恢复、migrate、8个应用容器、查询服务、48个真实图表查询、搜索分页和一次已归档真实问答验收通过。源码、固定摘要、镜像同步恢复及备份见[发布记录](releases/tai-customer-20261104-v0067-search.md)。
+
 ## 3. 不可违反的边界
 
 - 不在 Git、聊天、命令参数或普通日志中写入 OAuth Secret、FRP Token、Registry 密码、GHCR Token、Vault 密码、
