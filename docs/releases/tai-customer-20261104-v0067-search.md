@@ -60,3 +60,11 @@
 正式升级前已确认补丁台账只有 rolled_back 历史记录，没有活跃补丁。vendor 使用现场同一固定提交的只读本地 Git 镜像，升级后 origin 恢复 GitHub 地址；本次沿用已验证的本地 vendor 取码路径，没有调整生产网络。临时制品和缓存已清理，正式备份、旧镜像及受限证据保留。
 
 受限证据：`192.168.2.52:/srv/tsuite-deploy/files/releases/tai-customer-20261104-v0067-search/`。
+
+## 后续按用户授权批量设置仪表板专用（2026-11-04）
+
+用户在发布完成后明确要求，将2.183所有被仪表板引用的图表勾选为仪表板专用。核对62个仪表板的当前配置及生效发布版本，共175张现存图表被引用，无缺失引用，均原为0；另外25张未被引用。
+
+先保存200张图表的分类与修改/发布元数据，再复制至服务器 `/opt/tsuite-deploy/backups/20261104-dashboard-only/dashboard-only-before-20261104T013600805170Z.json` 和控制机 `/srv/tsuite-deploy/backups/tai-customer-01/20261104-dashboard-only/dashboard-only-before-20261104T013600805170Z.json`，均受限权限，SHA256同为 `de31b8c87aff09465f0515290acb764b02c8c4b995a2a4d1954c063751675cd8`。生产备份未传至开发机。
+
+事务内仅将175个目标的dashboard_only设为1，保留modified及modified_by，核对其余25张原值、已发布指针与标志、仪表板引用及对象身份；通过后提交并清理文档及站点缓存。新连接复查为175张已标记、待更新0张；不重新发布图表或仪表板，不更换镜像或迁移schema。审计脚本与结果保存在本次受限发布证据目录的 `mark-dashboard-only.py`、`apply-dashboard-only.py`、`dashboard-only-preparation.json` 和 `dashboard-only-result.json`。
