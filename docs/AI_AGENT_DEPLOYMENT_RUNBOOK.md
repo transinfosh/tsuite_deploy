@@ -138,11 +138,11 @@ OpenSSH 会因私钥权限过宽而拒绝加载。
 
 2.183 当前为 Customer 0.0.67 / TBI 0.0.29，Engine 0.1.18 保持原容器。备份异地哈希与隔离恢复、migrate、8个应用容器、查询服务、48个真实图表查询、搜索分页和一次已归档真实问答验收通过。源码、固定摘要、镜像同步恢复及备份见[发布记录](releases/tai-customer-20261104-v0067-search.md)。
 
-### 内网 TAI/TBI 独立测试环境（2026-11-14）
+### 内网 TAI/TBI 独立测试环境首次创建（2026-11-14）
 
 - 2.183 新增 `test.tai.trinfo.net` / Compose 项目 `frappe-test`，配置为
   `/opt/tsuite-deploy/frappe-test/compose.yml`，HTTP 仅绑定 `127.0.0.1:8083`。
-- 测试版本 Customer 0.0.68 / TBI 0.0.30 / frappe_ext 0.0.15 / Frappe 16.53.0-ts.14，
+- 首次创建版本 Customer 0.0.68 / TBI 0.0.30 / frappe_ext 0.0.15 / Frappe 16.53.0-ts.14，
   Engine 0.1.18 为独立实例；全部镜像使用 Registry 固定 digest。测试升级不修改演示镜像锁。
 - 演示数据复制至 2.185 的独立数据库 `tai_test`，owner `tai_test_app`；Redis、sites volume、
   Engine Token 与 Gateway 签名均隔离。测试 Gateway 连接 `XuzhouHDL`、`AmborTest` 按用户要求关闭，
@@ -154,6 +154,19 @@ OpenSSH 会因私钥权限过宽而拒绝加载。
   原站已有停用 Dataset 保持停用，测试验收没有自动修改业务 SQL。
 - 测试日常运维只使用专用 inventory 与 `frappe-test` Compose，不能直接复用写死
   `frappe-customer` 的原 customer playbook；首次复制脚本拒绝覆盖已有同名数据库。
+
+### 内网 TAI/TBI 测试环境性能版本升级（2026-11-14）
+
+- 测试站点当前为 Customer 0.0.69 / TBI 0.0.31 / Engine 0.1.19，包含前端异步加载与刷新保留结果、
+  Engine 实例池与连接复用改进；框架及共享组件版本沿用首次创建版本。仅升级 `frappe-test`，演示容器保持不变。
+- 应用与 Engine 经 GitHub Actions 构建并同步至自建 Registry，以 digest 锁定；测试库停写备份已异机校验，
+  在临时 PG18 数据库完成恢复核对后迁移。11 个服务、26 条查询路由、三类 RQ 队列、公网登录与查询通过。
+- Playwright 验证 28 次真实看板查询全部成功，刷新时保留已有图表；真实问答成功且会话已归档。
+  首次加载三次采样中位数由 3764 ms 到 4030 ms，线上首次加载仍约 4 秒，不能据此宣称稳定提速。
+- 测试资源上限保持 Engine 1 个 worker、2 个查询线程、8 个在途请求、默认池大小 2；
+  两个 Gateway 连接继续停用，邮件与计划任务继续暂停，原有停用 Dataset 未启用。
+- 当前镜像摘要、源码、备份、回退点、镜像同步恢复及验收证据见
+  [测试环境升级记录](releases/tai-test-20261114-v0069.md)。临时下载代理隧道已关闭。
 
 ## 3. 不可违反的边界
 
