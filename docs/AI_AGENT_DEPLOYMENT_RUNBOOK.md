@@ -138,6 +138,23 @@ OpenSSH 会因私钥权限过宽而拒绝加载。
 
 2.183 当前为 Customer 0.0.67 / TBI 0.0.29，Engine 0.1.18 保持原容器。备份异地哈希与隔离恢复、migrate、8个应用容器、查询服务、48个真实图表查询、搜索分页和一次已归档真实问答验收通过。源码、固定摘要、镜像同步恢复及备份见[发布记录](releases/tai-customer-20261104-v0067-search.md)。
 
+### 内网 TAI/TBI 独立测试环境（2026-11-14）
+
+- 2.183 新增 `test.tai.trinfo.net` / Compose 项目 `frappe-test`，配置为
+  `/opt/tsuite-deploy/frappe-test/compose.yml`，HTTP 仅绑定 `127.0.0.1:8083`。
+- 测试版本 Customer 0.0.68 / TBI 0.0.30 / frappe_ext 0.0.15 / Frappe 16.53.0-ts.14，
+  Engine 0.1.18 为独立实例；全部镜像使用 Registry 固定 digest。测试升级不修改演示镜像锁。
+- 演示数据复制至 2.185 的独立数据库 `tai_test`，owner `tai_test_app`；Redis、sites volume、
+  Engine Token 与 Gateway 签名均隔离。测试 Gateway 连接 `XuzhouHDL`、`AmborTest` 按用户要求关闭，
+  演示站点对应连接保持启用。测试站点 scheduler、邮件和企业微信等对外动作默认关闭。
+- DNS 使用用户配置的 `*.tai.trinfo.net`，FRP 和 Caddy 精确匹配测试域名，证书单独申请。
+  新隧道为 `tai-test-frpc.service`，演示隧道没有重启。
+- 备份、迁移、登录、资源、独立查询及 Engine、队列、原演示容器保持不变等证据见
+  [测试环境部署记录](releases/tai-test-20261114-v0068.md)。没有执行真实收费模型问答；
+  原站已有停用 Dataset 保持停用，测试验收没有自动修改业务 SQL。
+- 测试日常运维只使用专用 inventory 与 `frappe-test` Compose，不能直接复用写死
+  `frappe-customer` 的原 customer playbook；首次复制脚本拒绝覆盖已有同名数据库。
+
 ## 3. 不可违反的边界
 
 - 不在 Git、聊天、命令参数或普通日志中写入 OAuth Secret、FRP Token、Registry 密码、GHCR Token、Vault 密码、
