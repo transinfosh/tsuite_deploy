@@ -1,7 +1,9 @@
 import copy
 import importlib.util
+import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 path = Path(__file__).resolve().parents[1] / 'multi-node/ansible/roles/frappe_stack/files/tbi_query_config.py'
 spec = importlib.util.spec_from_file_location('tbi_query_config', path)
@@ -53,6 +55,17 @@ class QueryDeploymentTest(unittest.TestCase):
         one = self.prepare()
         two = module.configure(one['compose'], 'app@sha256:abc', '/stack', TEMPLATE, LOCATIONS)
         self.assertEqual(one, two)
+
+    def test_can_add_the_agno_route_without_changing_tbi_routes(self):
+        template = TEMPLATE.replace('server {', 'server {\nserver_name ${FRAPPE_SITE_NAME_HEADER};')
+        template = template.replace('location @webserver {', 'location @webserver { proxy_read_timeout ${PROXY_READ_TIMEOUT};')
+        with patch.object(sys, 'path', [str(path.parent), *sys.path]):
+            result = module.configure(self.original, 'app@sha256:abc', '/stack', template, LOCATIONS, agno_proxy=True)
+        nginx = result['nginx']
+        module.check_routes(nginx, PATHS)
+        self.assertIn('/sites/${FRAPPE_SITE_NAME_HEADER}$1 break;', nginx)
+        self.assertIn('proxy_set_header Cookie "";', nginx)
+        self.assertIn('proxy_buffering off;', nginx)
 
     def test_incident_topology_without_query_service_is_rejected(self):
         config = self.resolved()

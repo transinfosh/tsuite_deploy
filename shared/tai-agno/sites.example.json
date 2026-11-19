@@ -1,0 +1,26 @@
+{
+  "a.example.com": {
+    "FRAPPE_URL": "http://backend:8000",
+    "FRAPPE_PUBLIC_URL": "https://a.example.com",
+    "TAI_AGNO_DATABASE_URL": "postgresql+psycopg://agno_a:replace-me@db:5432/tai_agno",
+    "TAI_AGNO_DATABASE_SCHEMA": "agno_a",
+    "TAI_AGNO_SIGNING_KEY": "replace-with-the-existing-key-for-site-a",
+    "TAI_AGNO_WORKSPACE": "WORKSPACE-A",
+    "TAI_AGNO_MODEL_ADAPTER": "deepseek",
+    "TAI_AGNO_MODEL": "replace-with-model-id",
+    "TAI_AGNO_MODEL_BASE_URL": "https://api.deepseek.com/v1",
+    "TAI_AGNO_MODEL_API_KEY": "replace-me"
+  },
+  "b.example.com": {
+    "FRAPPE_URL": "http://backend:8000",
+    "FRAPPE_PUBLIC_URL": "https://b.example.com",
+    "TAI_AGNO_DATABASE_URL": "postgresql+psycopg://agno_b:replace-me@db:5432/tai_agno",
+    "TAI_AGNO_DATABASE_SCHEMA": "agno_b",
+    "TAI_AGNO_SIGNING_KEY": "replace-with-the-existing-key-for-site-b",
+    "TAI_AGNO_WORKSPACE": "WORKSPACE-B",
+    "TAI_AGNO_MODEL_ADAPTER": "deepseek",
+    "TAI_AGNO_MODEL": "replace-with-model-id",
+    "TAI_AGNO_MODEL_BASE_URL": "https://api.deepseek.com/v1",
+    "TAI_AGNO_MODEL_API_KEY": "replace-me"
+  }
+}

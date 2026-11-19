@@ -29,7 +29,7 @@ def query_paths(locations):
     return paths
 
 
-def configure(original, image, root, template, locations):
+def configure(original, image, root, template, locations, *, agno_proxy=False):
     paths = query_paths(locations)
     require(template.count('location /assets {') == 1, 'Unsupported image Nginx template')
     result = copy.deepcopy(original)
@@ -60,6 +60,10 @@ def configure(original, image, root, template, locations):
     volumes.append(f'{root}/nginx.tbi-query.template:{TEMPLATE}:ro')
     locations = locations.replace('X-Forwarded-Proto $scheme;', 'X-Forwarded-Proto $proxy_x_forwarded_proto;')
     nginx = template.replace('location /assets {', locations + '\n\tlocation /assets {') + '\n'
+    if agno_proxy:
+        from tai_agno_nginx import add_agno_route
+
+        nginx = add_agno_route(nginx)
     check_routes(nginx, paths)
     return {'compose': result, 'nginx': nginx}
 
@@ -154,7 +158,8 @@ def main():
         if args.action == 'prepare':
             import sys
             data = json.load(sys.stdin)
-            print(json.dumps(configure(data['compose'], args.image, args.root, data['template'], data['locations'])))
+            print(json.dumps(configure(data['compose'], args.image, args.root, data['template'], data['locations'],
+                                       agno_proxy=data.get('agno_proxy', False))))
         elif args.action == 'check':
             import sys
             data = json.load(sys.stdin)

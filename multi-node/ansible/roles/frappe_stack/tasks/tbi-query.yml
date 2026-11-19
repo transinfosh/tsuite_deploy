@@ -5,6 +5,13 @@
     dest: "{{ frappe_stack_root }}/tbi_query_config.py"
     mode: "0644"
 
+- name: 安装 Agno 入口模板工具
+  ansible.builtin.copy:
+    src: tai_agno_nginx.py
+    dest: "{{ frappe_stack_root }}/tai_agno_nginx.py"
+    mode: "0644"
+  when: frappe_enable_tai_agno_proxy | bool
+
 - name: 从目标镜像读取 Nginx 原始模板
   ansible.builtin.command:
     argv:
@@ -57,7 +64,7 @@
       - "{{ frappe_stack_root }}"
       - --image
       - "{{ frappe_image }}"
-    stdin: "{{ {'compose': tbi_compose_source.content | b64decode | from_yaml, 'template': tbi_nginx_template.stdout, 'locations': tbi_query_locations.stdout} | to_json }}"
+    stdin: "{{ {'compose': tbi_compose_source.content | b64decode | from_yaml, 'template': tbi_nginx_template.stdout, 'locations': tbi_query_locations.stdout, 'agno_proxy': frappe_enable_tai_agno_proxy | bool} | to_json }}"
   register: tbi_query_config
   changed_when: false
   no_log: true

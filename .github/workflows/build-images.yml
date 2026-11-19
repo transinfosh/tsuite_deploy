@@ -34,6 +34,7 @@ on:
           - tai-service
           - tbi-engine
           - tai-auth
+          - tai-agno
       release_tag:
         description: Immutable GHCR image tag
         required: true
@@ -68,7 +69,7 @@ jobs:
         run: |
           set -eu
           case "$TARGET" in
-            tai-service | tbi-engine | tai-auth) ;;
+            tai-service | tbi-engine | tai-auth | tai-agno) ;;
             *) echo "不支持的镜像目标: $TARGET" >&2; exit 1 ;;
           esac
           case "$RELEASE_TAG" in
@@ -94,11 +95,10 @@ jobs:
           path: .ci-deploy
 
       - name: Checkout Python service
-        if: inputs.target == 'tai-service' || inputs.target == 'tbi-engine' || inputs.target == 'tai-auth'
         uses: actions/checkout@v6
         with:
           repository: transinfosh/${{ inputs.target }}
-          ref: ${{ env.SOURCE_REF }}
+          ref: ${{ inputs.target == 'tai-agno' && format('refs/tags/{0}', inputs.release_tag) || env.SOURCE_REF }}
           token: ${{ env.SOURCE_TOKEN }}
           path: .ci-service
 
@@ -145,6 +145,13 @@ jobs:
                 exit 1
                 ;;
             esac
+          elif [ "$TARGET" = "tai-agno" ]; then
+            package_version="$(python3 -c 'import tomllib; print(tomllib.load(open(".ci-service/pyproject.toml", "rb"))["project"]["version"])')"
+            test "$RELEASE_TAG" = "v$package_version" && test "$SOURCE_REF" = "$RELEASE_TAG" || {
+              echo "TAI Agno releases require the immutable Git tag matching the package version" >&2
+              exit 1
+            }
+            release_channel=stable
           else
             release_channel=service
           fi
@@ -192,6 +199,10 @@ jobs:
               echo "file=.ci-deploy/build/python/Containerfile" >> "$GITHUB_OUTPUT"
               echo "build_args=" >> "$GITHUB_OUTPUT"
               ;;
+            tai-agno)
+              echo "context=.ci-service" >> "$GITHUB_OUTPUT"
+              echo "file=.ci-service/Dockerfile" >> "$GITHUB_OUTPUT"
+              ;;
           esac
 
       - name: Build and push image
@@ -205,7 +216,7 @@ jobs:
           build-args: ${{ steps.settings.outputs.build_args }}
           labels: |
             org.opencontainers.image.revision=${{ steps.source.outputs.commit }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ env.IMAGE_NAMESPACE }}/${{ inputs.target }}
             org.opencontainers.image.version=${{ inputs.release_tag }}
           cache-from: type=gha,scope=${{ inputs.target }}
           cache-to: type=gha,mode=max,scope=${{ inputs.target }}

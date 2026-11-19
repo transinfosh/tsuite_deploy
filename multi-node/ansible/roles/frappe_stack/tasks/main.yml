@@ -7,6 +7,7 @@
       - frappe_image | length > 0
       - frappe_db_password | length > 0
       - frappe_admin_password | length > 0
+      - not (frappe_enable_tai_agno_proxy | bool) or ('tbi' in frappe_apps and 'tai' in frappe_apps)
   no_log: true
 
 - name: 创建 Frappe Stack 目录

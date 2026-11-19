@@ -831,6 +831,9 @@ compose_args_from_state() {
 	if [[ -f "$root/compose.proxy.yaml" ]]; then
 		COMPOSE_ARGS+=(-f "$root/compose.proxy.yaml")
 	fi
+	if [[ -f "$root/compose.tai-agno.yaml" ]]; then
+		COMPOSE_ARGS+=(-f "$root/compose.tai-agno.yaml")
+	fi
 }
 
 backup_existing_site() {

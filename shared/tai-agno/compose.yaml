@@ -1,0 +1,23 @@
+services:
+  tai-agno:
+    image: ${TAI_AGNO_IMAGE:?Set a versioned image from registry.trinfo.net}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: bind
+        source: ${TAI_AGNO_SITES_CONFIG:?Set the absolute sites.json path}
+        target: /etc/tai-agno/sites.json
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - frappe
+
+networks:
+  frappe:
+    external: true
+    name: ${TAI_AGNO_FRAPPE_NETWORK:?Set the existing Frappe Docker network}

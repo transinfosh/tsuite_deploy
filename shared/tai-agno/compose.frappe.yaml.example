@@ -1,0 +1,4 @@
+services:
+  frontend:
+    volumes:
+      - /opt/tsuite-deploy/tai-agno/nginx.tai-agno.template:/templates/nginx/frappe.conf.template:ro
