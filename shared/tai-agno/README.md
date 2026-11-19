@@ -8,7 +8,7 @@ Agno 按站点选择应用、签名校验、PG 连接和模型配置。Frappe �
 
 ## 镜像
 
-`transinfosh/tai-agno` 的同名 Git Tag `v<version>` 对应服务 `pyproject.toml` 的版本。使用 `tsuite_deploy` 的 **Build one GHCR image** 工作流选择 `tai-agno`，并复用现有 GHCR 到 Registry 的同步。按[镜像来源契约](../contracts/README.md#镜像来源)验证已发布镜像的摘要，部署时使用固定版本或摘要。Frappe 镜像需包含 tAI Agno bridge 和使用该 bridge 的聊天前端。
+`transinfosh/tai-agno` 的 Git Tag `v<version>` 对应服务 `pyproject.toml` 的版本。推送 Tag 触发 Agno 仓库的 **Publish tai-agno image** 工作流，从该 Tag 构建并复用现有 GHCR 到 Registry 的同步。按[镜像来源契约](../contracts/README.md#镜像来源)验证已发布镜像的摘要，部署时使用固定版本或摘要。Frappe 镜像需包含 tAI Agno bridge 和使用该 bridge 的聊天前端。
 
 ## PostgreSQL 与站点配置
 
