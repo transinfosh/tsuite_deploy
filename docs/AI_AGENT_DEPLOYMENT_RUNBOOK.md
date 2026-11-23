@@ -20,7 +20,7 @@ Agent 应自行完成状态盘点、版本包含关系验证、构建跟踪、�
 2. 确认待发布代码已经提交并推送，目标 Tag 确实包含该提交；
 3. 确认共享组件使用最新的已发布不可变 Tag，不能使用分支、裸 SHA 或 `latest`；
 4. GitHub Actions 构建和推送镜像成功，并记录源码 commit、镜像 Tag 和 digest；
-5. 客户端升级前备份成功，且备份可从服务器之外恢复；
+5. 升级前在客户服务器本机生成并校验数据库、站点配置与附件备份。
 6. 目标镜像已经在客户服务器实际运行，必要的 `bench migrate` 已成功执行；
 7. HTTP、容器、队列、调度器和关键业务功能验证通过；
 8. 记录部署结果并关闭临时支持会话。
@@ -79,7 +79,7 @@ OpenSSH 会因私钥权限过宽而拒绝加载。
 
 - `adam@192.168.2.50` 的实际运行站点为 `portal.trinfo.net`，Compose project 为 `frappe`，配置位于 `/home/adam/gitops/frappe-compose.yml`，sites volume 为 `frappe_docker_sites`。
 - 盘点时应用镜像为 `ghcr.io/transinfosh/project_management:0.0.19`；`/opt/tsuie-deploy/deployment.state` 仍记录旧站点 `office.trinfo.net` 和 0.0.3，不能作为该节点的升级输入，也不要在此次升级中接管或重建部署。
-- 该节点升级沿用现场 Compose，先停止入口和后台写入，备份数据库、站点文件与 Compose，再更新应用镜像、迁移并验证。备份复制到控制机后校验 SHA-256。
+- 该节点升级沿用现场 Compose，先停止入口和后台写入，在本机备份数据库、站点文件与 Compose 并校验 SHA-256，再更新应用镜像、迁移并验证。
 - 控制机通过其独立 identity `~/.ssh/tsuite_deploy_ed25519` 连接该内网节点，无需临时支持隧道。
 
 ### 2026-10-25 镜像来源与版本复核
@@ -374,8 +374,9 @@ ip -4 route show
 
 ### 8.2 备份与部署工具
 
-先确认站点文件、数据库备份目录和异地复制目标空间足够。自动备份留在 sites volume 内，不等于异地备份。
-至少将本次升级备份复制到控制机 `/srv/tsuite-deploy/backups/<客户>/<UTC时间>/`，记录 SHA-256。
+先确认客户服务器本机有足够空间。常规升级的数据库、站点配置、公私有附件和 Compose 配置备份只保存在客户服务器的持久存储中，例如现有 sites volume 或部署目录下的 `rollback/<UTC时间>/`。
+迁移前在本机确认备份文件可读并校验 SHA-256。控制机仅在部署记录中保存备份的本机路径、时间和摘要。
+定期异机灾备按独立计划执行。高风险迁移需要额外的异机副本时，按该次变更的备份安排执行。
 
 更新部署工具不会自动升级应用：
 
@@ -447,7 +448,7 @@ sudo docker compose -f compose.generated.yaml exec -T backend \
 镜像 digest：
 tsuite_deploy commit/ref：
 数据库模式与版本：
-备份位置与 SHA-256：
+客户服务器上的备份路径、时间与 SHA-256：
 migrate 结果：
 健康检查结果：
 回退点：
